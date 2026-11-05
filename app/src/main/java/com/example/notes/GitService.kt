@@ -98,10 +98,20 @@ object GitService {
     fun ensureLfsAttributes(dir: File) {
         try {
             val attributes = File(dir, ".gitattributes")
-            val line = LFS_ATTRIBUTE
+            // **Line by line, because [LFS_ATTRIBUTE] is several lines.** Comparing the whole block
+            // against one line of the file never matches, so the first version appended the block
+            // again on every call — a `.gitattributes` that grew by six lines each time the app
+            // looked at the project, and a "1 changed" that was the app's own doing.
+            val wanted = LFS_ATTRIBUTE.lines().filter { it.isNotBlank() }
             val was = if (attributes.isFile) attributes.readText() else ""
-            if (was.lineSequence().any { it.trim() == line.trim() }) return
-            val now = if (was.isEmpty() || was.endsWith("\n")) was + line else was + "\n" + line
+            val have = was.lines().map { it.trim() }.toSet()
+            val missing = wanted.filter { it.trim() !in have }
+            if (missing.isEmpty()) return
+            val now = if (was.isEmpty() || was.endsWith("\n")) {
+                was + missing.joinToString("") { it + "\n" }
+            } else {
+                was + "\n" + missing.joinToString("") { it + "\n" }
+            }
             attributes.writeText(now)
         } catch (t: Throwable) {
             // A project that could not be told still commits; its pictures are stored whole, which is
@@ -1502,6 +1512,35 @@ object GitService {
 
     /** Pushes the current branch to the remote. */
     fun push(repo: Repository, token: String?, force: Boolean = false): RemoteResult {
+        // **The filter is switched off around the push, and this is not an optimisation.**
+        //
+        // JGit's LFS pre-push hook runs on every push once the filter is enabled, and it asks for an
+        // LFS connection *before* it knows whether it has anything to send. On a repository with no
+        // SSH session factory configured — every Android app — that call dies inside
+        // `SshSupport.runSshCommand` with a `NullPointerException` about `SshSessionFactory.getInstance()`
+        // being null, and **the whole push fails**: a project of text files cannot be synced at all.
+        // Measured: identical push succeeds without the registration and throws with it.
+        //
+        // The hook short-circuits on an empty pointer set (`findObjectsToPush().isEmpty()`), so with
+        // no pictures in this push it never reaches the network — and with pictures it would send no
+        // `Authorization` header anyway, which is why `LfsSync` uploads them itself. So the filter is
+        // turned off for the duration and put back afterwards, whatever happens.
+        val wasEnabled = repo.config.getBoolean("filter", "lfs", "useJGitBuiltin", false)
+        if (wasEnabled) {
+            repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", false)
+            repo.config.save()
+        }
+        try {
+            return pushNow(repo, token, force)
+        } finally {
+            if (wasEnabled) {
+                repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
+                repo.config.save()
+            }
+        }
+    }
+
+    private fun pushNow(repo: Repository, token: String?, force: Boolean): RemoteResult {
         return try {
             val local = currentBranch(repo)
             // **Push to the branch GitHub calls this project.** Sending
@@ -1569,6 +1608,31 @@ object GitService {
         message: String,
     ): RemoteResult {
         if (omit.isEmpty()) return pushForce(repo, token)
+        // **The filter is switched off around this push too**, for the reason spelled out in `push`:
+        // JGit's LFS pre-push hook asks for a connection before it knows it has anything to send, and
+        // on a phone that request dies inside `SshSupport` and takes the whole push with it.
+        val wasEnabled = repo.config.getBoolean("filter", "lfs", "useJGitBuiltin", false)
+        if (wasEnabled) {
+            repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", false)
+            repo.config.save()
+        }
+        try {
+            return pushDerived(repo, token, omit, author, message)
+        } finally {
+            if (wasEnabled) {
+                repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
+                repo.config.save()
+            }
+        }
+    }
+
+    private fun pushDerived(
+        repo: Repository,
+        token: String?,
+        omit: List<String>,
+        author: GitAuthor,
+        message: String,
+    ): RemoteResult {
         return try {
             val local = currentBranch(repo)
             val onto = remoteBranch(repo, local) ?: local

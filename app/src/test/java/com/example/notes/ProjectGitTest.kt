@@ -46,6 +46,38 @@ class ProjectGitTest {
             .close()
     }
 
+    @Test
+    fun `a project of text files can be pushed while the LFS filter is on`() {
+        // **The bug that made every sync fail, and it had nothing to do with pictures.**
+        //
+        // Once `filter.lfs.useJGitBuiltin` is enabled, JGit's LFS pre-push hook runs on *every* push
+        // and asks `LfsConnectionFactory` for a connection before it has checked whether it has
+        // anything to upload. That call reaches `SshSupport.runSshCommand`, which dereferences
+        // `SshSessionFactory.getInstance()` — null on Android, since nothing configures one — and
+        // throws a `NullPointerException` that takes the whole push with it. Measured both ways: the
+        // identical push succeeds with the registration absent and fails with it present.
+        //
+        // So `push` turns the filter off for its own duration. This test is the one that fails if
+        // that guard is ever removed: a project with no pictures at all must still be able to sync.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        workspace.write(File(workspace.projectDir("Shopping"), "milk.txt"), "two litres\n")
+        git.commit("Shopping", "Edited milk.txt")
+
+        val result = git.sync("Shopping")
+
+        assertTrue("the sync succeeded: ${result.message}", result.success)
+        // **And the filter is left as it was**, so the next picture is still a pointer.
+        git.open("Shopping")!!.use {
+            assertTrue(
+                "the filter is back on afterwards",
+                it.config.getBoolean("filter", "lfs", "useJGitBuiltin", false),
+            )
+        }
+    }
+
     // ---- a picture has one version, so it cannot be put back ----------------
 
     @Test
