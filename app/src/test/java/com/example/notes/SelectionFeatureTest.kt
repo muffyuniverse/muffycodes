@@ -291,7 +291,14 @@ class SelectionFeatureTest : FeatureTest() {
         // **`Hold.NONE`, not null.** `hold` answers an enum and never null, so `== null` is a
         // comparison the compiler folds away — the warning said "Condition is always 'false'" and
         // it was right: this assertion could not have passed whatever the code did.
-        assertTrue("unlocked", ws.hold(file, ws.locked()) == Workspace.Hold.NONE)
+        assertTrue(
+            // **The message carries the evidence**, because this failed once with only the word
+            // "unlocked" and there was no way to tell whether the lock was still there, the path
+            // was wrong, or the toggle never ran.
+            "unlocked — path=${ws.relative(file)}, locked=${ws.locked()}, " +
+                "hold=${ws.hold(file, ws.locked())}",
+            ws.hold(file, ws.locked()) == Workspace.Hold.NONE,
+        )
         scene.viewModel.toggleLocked(file)
 
         assertTrue("locked again", ws.hold(file, ws.locked()) == Workspace.Hold.USER)

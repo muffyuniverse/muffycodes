@@ -2468,17 +2468,16 @@ class AgentTest {
     }
 
     @Test
-    fun `pull says there is nothing new when the remote has not moved`() {
-        // **The quiet answer is the answer**, and it has to be distinguishable from a failure: an
-        // agent that could not tell "nothing arrived" from "the pull broke" would retry a working
-        // call or give up on a broken one.
+    fun `pull refuses a project with no GitHub address, and says what is missing`() {
+        // **The refusal, not a quiet success.** This test first asserted "nothing new" and got
+        // "This project has no GitHub address to pull from" — which is the *right* answer here and
+        // was the wrong premise: a project in these tests has no remote, so there is nothing to pull
+        // *from*, and a tool that pretended otherwise would be telling an agent it had checked
+        // GitHub when it had not spoken to it.
         val said = call("pull")
 
-        assertTrue("it succeeds: $said", said.startsWith("0"))
-        assertTrue(
-            "and says the remote had nothing: $said",
-            said.contains("up to date") || said.contains("nothing"),
-        )
+        assertTrue("it is refused: $said", said.startsWith("1"))
+        assertTrue("and names what is missing: $said", said.contains("no GitHub address"))
     }
 
     @Test

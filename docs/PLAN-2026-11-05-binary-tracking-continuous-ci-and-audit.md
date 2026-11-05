@@ -421,7 +421,43 @@ The list to walk:
 8. `push` tool · 9. creation defaults (operator/agent) · 10. Sync button removed (row + menu) ·
 11. `SyncDialog` deleted · 12. prompt corrected · 13. `cleanName` removed · 14. `nameProblem` added
 
-### 4.2 Steps
+### 4.2 The table, filled in
+
+Every row was checked by grep against the repository, not from memory. **Wired** means something in
+the app calls it; **tested** counts test references; **traced** means the log records the act.
+
+| # | Feature | Implemented | Wired | Tested | Traced | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | `ignoreInGit` two-way toggle | yes | yes (1) | yes (7) | yes — `ignore`/`track` via a ternary, which the checker's TERNARY rule does read | **done** |
+| 2 | `GitService.track` | yes | yes (4) | yes | via #1 | **done** |
+| 3 | `GitService.isIgnored` | yes | yes (1) | yes | n/a (a question, not an act) | **done** |
+| 4 | `ignoredPaths` + row state | yes | yes (2) | yes | n/a | **done** |
+| 5 | unsync machinery deleted | yes | — | — | — | **done** (`cleanName` residue is one comment in a test) |
+| 6 | `state` tool | yes | yes | yes | **deliberately not** — a question is not an act; the comment says so | **done** |
+| 7 | `pull` tool | yes | yes | **was 0 → now 1** | yes (`Trace.note`) | **gap found and fixed** |
+| 8 | `push` tool | yes | yes | yes (3) | yes (`Trace.note`) | **done** |
+| 9 | creation defaults | yes | **was 0 → now 4 doors** | yes (door tests) | via #1 | **gap found and fixed** |
+| 10 | Sync removed (row + menu) | yes | — | yes (absence asserted) | n/a | **done** |
+| 11 | `SyncDialog` deleted | yes | — | n/a | n/a | **done** |
+| 12 | prompt corrected | yes | yes | yes | n/a | **done** |
+| 13 | `cleanName` removed | yes | — | yes | n/a | **done** |
+| 14 | `nameProblem` added | yes | yes (9) | yes (19) | n/a | **done** |
+
+**Three real gaps were found, and all three were invisible to the tests that existed:**
+
+1. **`createdByOperator` had no caller.** The rule was written, documented, and tested in isolation,
+   and nothing in the app invoked it. Fixed: four doors now call it (`createFile`, `createFolder`,
+   `createImage`, `importFile(s)`, `importFolder`).
+2. **`pull` had no test at all.** Fixed: two tests, one for the quiet answer and one for the ignored
+   count in `state`.
+3. **An assertion that could never pass.** `hold(...) == null` compares an enum to null; the
+   compiler folded it away and the test proved nothing. Fixed to `Hold.NONE`.
+
+**One gap that cannot be closed here:** `push`/`pull` have never run against a real GitHub remote —
+the offline suite is all that exists, and the fine-grained token is write-refused on the one repo
+that was available for probing. It is recorded as **unproven**, not as done.
+
+### 4.3 Steps
 
 | # | Step |
 |---|---|
