@@ -400,7 +400,9 @@ class WorkspaceTest {
         assertEquals("1 MB", Workspace.bytesFor(1024L * 1024))
         // 1023.96 KB is 1024 KB less 41 bytes: it must cross into MB, not print the boundary.
         assertEquals("1 MB", Workspace.bytesFor(1024L * 1024 - 41))
-        assertEquals("12.4 MB", Workspace.bytesFor((12.4 * 1024 * 1024).toLong()))
+        // **A value with a real tenth in it.** 12.4 MiB is not a whole number of bytes, so the
+        // literal is computed from a byte count that is: 12 MiB + 0.4 MiB.
+        assertEquals("12.4 MB", Workspace.bytesFor(13_002_342))
         assertEquals("1 GB", Workspace.bytesFor(1024L * 1024 * 1024))
         // A file whose size the phone will not say is not a file of zero bytes.
         assertEquals("unknown", Workspace.bytesFor(-1))

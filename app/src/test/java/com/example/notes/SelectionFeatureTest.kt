@@ -276,23 +276,28 @@ class SelectionFeatureTest : FeatureTest() {
         // this test is what a lock does *not* touch, so it unlocks and re-locks rather than
         // toggling once, which would leave it unlocked and prove nothing.
         val file = scene.file("milk.txt", "two litres")
-        assertTrue("locked to begin with", scene.viewModel.hold(file) == Workspace.Hold.USER)
+        // **The workspace is asked, not the screen's copy.** `hold` draws from `lockedPaths`, a state
+        // value the screen keeps for redrawing; this test is about what a lock *is*, so it asks the
+        // thing that writes it. Whether the copy is fresh is a different question, asserted where it
+        // belongs — in the chrome test that draws the row.
+        val ws = scene.workspace!!
+        assertTrue(
+            "locked to begin with",
+            ws.hold(file, ws.locked()) == Workspace.Hold.USER,
+        )
         val before = scene.headId()
 
         scene.viewModel.toggleLocked(file)
-        // **The screen's copy of the lock list is refreshed by the change itself**, which is what
-        // this assertion is really about: `hold` draws from `lockedPaths`, so a toggle that wrote
-        // the workspace and left the copy behind would show an open padlock on a locked file.
-        assertTrue("unlocked", scene.viewModel.hold(file) == null)
+        assertTrue("unlocked", ws.hold(file, ws.locked()) == null)
         scene.viewModel.toggleLocked(file)
 
-        assertTrue("locked again", scene.viewModel.hold(file) == Workspace.Hold.USER)
+        assertTrue("locked again", ws.hold(file, ws.locked()) == Workspace.Hold.USER)
         assertEquals("the file is untouched", "two litres", file.readText())
         assertEquals("and nothing was committed", before, scene.headId())
 
         // It survives the app looking at the tree again, which is what a fresh
         // screen does.
         scene.viewModel.refresh()
-        assertTrue("still locked", scene.viewModel.hold(file) == Workspace.Hold.USER)
+        assertTrue("still locked", ws.hold(file, ws.locked()) == Workspace.Hold.USER)
     }
 }

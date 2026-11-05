@@ -222,6 +222,31 @@ by **B**, and B has a property A does not: **it cannot silently stop.** A dead c
 loop (A) both stop producing artifacts with no signal; a cron that fails is visible in the Actions
 list.
 
+### 3.3b Measured — two facts that change the design
+
+**1. A `workflow_dispatch` on the same ref CANCELS the in-progress push run.**
+
+The workflow has `concurrency: group: ${{ github.workflow }}-${{ github.ref }}` with
+`cancel-in-progress: true`. The group keys on **workflow + ref**, not on the event — so dispatching a
+run on `development` while a push run is going on `development` **kills the push run**. Measured
+today: dispatch `42116224461` cancelled `42116103750`, which was the run for my own commit.
+
+**This is the single biggest hazard in the whole watcher design.** A watcher that dispatches a build
+on every tick would cancel the real build on every tick, and the two would starve each other. Any
+watcher must either:
+
+- run under its **own concurrency group** (`concurrency: group: watcher-${{ github.ref }}` on the
+  watcher workflow, which is separate from the build workflow's group), and *call* the build through
+  `workflow_call` — a called workflow does not create its own concurrency group — or
+- pass a distinct `ref` (a tag, or a `refs/heads/watch` branch) so the groups differ.
+
+**2. An unchanged run is not free, and it is not cheap either.** A dispatched run with no code change
+still ran Deep checks, both test shards and the release build — about 4 minutes of wall clock across
+6 jobs — before failing on a compile error that had nothing to do with the dispatch. So a polling
+design that "runs the workflow and lets it decide" costs a full pipeline per tick. **The
+newest-commit check must happen before the build jobs exist**, which is what §3.4's `newest` job is
+for: a tick with nothing new must cost one API call and one short job, not a pipeline.
+
 ### 3.4 What to build
 
 **Phase 1 — measure the baseline (no workflow change).**

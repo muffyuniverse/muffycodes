@@ -1782,13 +1782,17 @@ class Workspace(val accountDir: File) {
             val units = listOf("KB", "MB", "GB", "TB")
             var value = bytes.toDouble() / 1024
             var unit = 0
-            while (value >= 1024 && unit < units.lastIndex) {
+            // **The unit is chosen from the ROUNDED value, not the raw one.** `1024 KB less 41 bytes`
+            // is 1023.96 KB, which the `%.0f` below turns into `1024 KB` — the boundary it was
+            // supposed to have crossed, printed as a number the reader has to interpret. Rounding
+            // first and then asking "is this 1024 or more?" makes `1024 KB` become `1 MB`, which is
+            // what the person would have said. Measured by the test, not reasoned about.
+            fun rounded(at: Double) = if (at < 100) String.format("%.1f", at) else String.format("%.0f", at)
+            while (rounded(value).toDouble() >= 1024 && unit < units.lastIndex) {
                 value /= 1024
                 unit++
             }
-            // **Rounded after the choice of unit, not before.** `1023.96 KB` rounds to `1024.0 KB`,
-            // and a formatter that stopped there would print the boundary it was meant to cross.
-            val shown = if (value < 100) String.format("%.1f", value) else String.format("%.0f", value)
+            val shown = rounded(value)
             return if (shown.endsWith(".0")) {
                 "${shown.dropLast(2)} ${units[unit]}"
             } else {

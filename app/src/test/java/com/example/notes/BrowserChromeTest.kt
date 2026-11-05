@@ -647,7 +647,14 @@ class BrowserChromeTest {
         browser()
 
         compose.waitUntil(20_000) { there("notes/") }
-        assertFalse("no row is labelled local", there("local"))
+        // **Exact, not a substring.** The row's caption now carries the file's absolute path, and
+        // a path on this machine can contain the word "local" — so `there("local")` with
+        // `substring = true` would fail on a folder name rather than on a label. The rule being
+        // asserted is that no row *says* "local", which is a whole word in a row of its own.
+        assertFalse(
+            "no row is labelled local",
+            compose.onAllNodesWithText("local").fetchSemanticsNodes().isNotEmpty(),
+        )
     }
 
     @Test
@@ -692,10 +699,14 @@ class BrowserChromeTest {
 
         compose.waitForIdle()
         assertTrue("it says where the project is going", there("Put groceries on GitHub"))
-        // The licence's own NAME, not its key: the window says "Licence: GNU General Public
-        // License v3.0", and a test that looked for "gpl-3.0" would be asserting the wire format
-        // rather than the sentence a person reads.
-        assertTrue("and which licence it will publish under", there("Licence: GNU General Public"))
+        // **Private is the default now, and that is the change this asserts.** The window used to
+        // open on GPL-3.0, which publishes the first save of a project whose owner has not decided
+        // anything yet. A licence is a public statement; "nobody can see this" is the safe answer
+        // before one has been chosen.
+        //
+        // The licence's own NAME, not its key: a test that looked for "private" would be asserting
+        // the wire format rather than the sentence a person reads.
+        assertTrue("and which licence it will publish under", there("Licence: Private (no licence)"))
         assertFalse("and it is not the keep-local window", there("only on this phone"))
     }
 

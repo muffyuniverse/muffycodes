@@ -147,14 +147,18 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a private project is made private and carries no licence file`() {
+    fun `a private project carries no licence file`() {
         // **"Private" is a choice, not a licence**, so it must reach the API as two facts:
         // `private: true`, and no `license_template` at all. Sending `license_template: "private"`
         // would be refused by GitHub, and the refusal would read as a bug in the app rather than as
         // the thing the person asked for.
-        scene.viewModel.createProject("secrets", PRIVATE_LICENCE)
+        //
+        // **Through the harness, which waits for the worker.** A project is made off the main
+        // thread, so a test that read the folder immediately would find nothing — and would pass on
+        // any machine where the clone happened to finish first.
+        scene.project("secrets", licence = PRIVATE_LICENCE)
 
-        assertTrue("it was made: ${scene.viewModel.message}", "secrets" in scene.viewModel.projectNames)
+        assertTrue("it was made", "secrets" in scene.viewModel.projectNames)
         val dir = scene.workspace!!.projectDir("secrets")
         val licenceFiles = dir.listFiles()?.filter {
             it.name.startsWith("LICENSE") || it.name.startsWith("COPYING")
