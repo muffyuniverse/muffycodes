@@ -205,7 +205,7 @@ class ProjectGit(
                             // **A marker, not a collection.** `gc` and the LFS sweep are proportional
                             // to the whole repository; running them inside a save would make the save
                             // wait for them. The unreachable objects are harmless until then.
-                            Maintenance.mark(repoDir(project))
+                            Maintenance.mark(repoDir(project), "a picture was saved")
                         }
                     }
                     // **Every change the app makes is one commit, so this is the single signal that
