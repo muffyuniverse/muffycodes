@@ -315,6 +315,65 @@ class MaintenanceTest {
         }
     }
 
+    @Test
+    fun `a saved picture is a pointer in the tree and bytes in the store`() {
+        // **The local half of LFS, and the fact everything else rests on.** The blob git stores for a
+        // picture is not the picture: it is three lines of text naming the bytes by SHA-256. The bytes
+        // are beside the repository, in the store `gc` never looks at.
+        //
+        // If the filter were not registered this test would find the raw PNG in the tree — which is
+        // exactly what "LFS silently does nothing" looks like, and what the registration call exists
+        // to prevent.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        File(ws.projectDir("shopping"), "page.png").writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
+
+        git.open("shopping")!!.use { repo ->
+            val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use {
+                it.parseCommit(repo.resolve("HEAD"))
+            }
+            val blob = org.eclipse.jgit.treewalk.TreeWalk
+                .forPath(repo, "page.png", commit.tree)?.getObjectId(0)
+            assertTrue("the path is in the tree", blob != null)
+            val stored = repo.open(blob).bytes
+            val text = String(stored)
+            assertTrue(
+                "the tree holds a pointer, not the picture: ${text.take(40)}",
+                text.startsWith("version https://git-lfs"),
+            )
+            // **And it names the bytes by their SHA-256**, which is what makes the store reachable
+            // from the tree without reading the picture itself.
+            val oid = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(PNG_A)
+                .joinToString("") { "%02x".format(it) }
+            assertTrue("the pointer names the picture: $text", text.contains(oid))
+            // **The bytes are in the store**, under the layout `objects/ab/cd/<oid>`.
+            val file = File(repo.directory, "lfs/objects/${oid.take(2)}/${oid.substring(2, 4)}/$oid")
+            assertTrue("the bytes are stored beside the repository", file.isFile)
+            assertTrue("and they are the picture", file.readBytes().contentEquals(PNG_A))
+        }
+    }
+
+    @Test
+    fun `the attribute is written once, and only for the kinds the app shows`() {
+        // **The line in the person's repository**, which is what makes a clone elsewhere treat the
+        // file as a pointer. Written once: a second call must not append a duplicate, which was the
+        // bug when the check compared the whole block against one line.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        git.init("shopping").getOrThrow()
+        val dir = ws.projectDir("shopping")
+        GitService.ensureLfsAttributes(dir)
+        GitService.ensureLfsAttributes(dir)
+
+        val lines = File(dir, ".gitattributes").readText().lines().filter { it.isNotBlank() }
+        assertEquals("no duplicate lines", lines.size, lines.distinct().size)
+        assertTrue("a png is a pointer", lines.any { it.startsWith("*.png ") })
+        assertTrue("and it is the LFS filter", lines.any { it.contains("filter=lfs") })
+        assertTrue("with -text, so line endings are not converted", lines.any { it.endsWith("-text") })
+    }
+
     /** Every file under `.git/lfs/objects`, which is the store `gc` never looks at. */
     private fun storedObjects(repo: org.eclipse.jgit.lib.Repository): List<File> {
         val root = LfsStore.dirOf(repo)

@@ -356,24 +356,42 @@ dependencies {
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
 
-    // **No `org.eclipse.jgit.lfs`, and the reason is measured rather than preferred.**
+    // **LFS is in the build, and JGit's own client is only half of it.**
     //
-    // LFS was going to hold a binary's one version outside the object database. It is not needed, and
-    // it does not work:
+    // A picture has to live on GitHub with the rest of the project, and a version of it must not be
+    // kept for ever by the commit that held it. LFS is the only mechanism that does both without
+    // rewriting history — and JGit's implementation of it cannot authenticate over HTTPS:
+    // `LfsConnectionFactory` builds its batch request with `Accept`, `Content-Type` and
+    // `Accept-Encoding` and **no `Authorization` header**; the only auth path it has is SSH. Against a
+    // private repository the download does not merely fail, it **succeeds silently and leaves the
+    // pointer in the working tree** — measured, 127 bytes on disk and zero objects fetched, no
+    // exception. Against a public one the same clone downloads correctly, which is what proves the
+    // code path works and the credential is the missing part.
     //
-    //   * **It does not work.** `LfsPrePushHook` -> `LfsConnectionFactory` builds its batch request
-    //     with `Accept`, `Content-Type` and `Accept-Encoding` and **no `Authorization` header at all**
-    //     — the only auth path it has is SSH. Against a real repository with a real token the push
-    //     fails `rc=401`, with or without a `CredentialsProvider`, and with the token embedded in
-    //     `lfs.url`. GitHub accepts the same token by curl (Basic -> 200, Bearer -> 200), so the
-    //     server is fine; JGit never sends it.
-    //   * **It is not needed.** A plain blob plus the tree rewrite in `HistoryPrune.keepLatest` gives
-    //     the same guarantee: after rewriting six commits so every tree names the newest blob, then
-    //     expiring the reflog and collecting with `expire = 0`, the old 400 KB blob is **gone**, the
-    //     new one survives, all six commits remain, and all six text versions remain readable.
+    // So the local half is JGit's and the network half is ours: `LfsClient` speaks the batch API with
+    // the app's own token, and `LfsSync` orders the two so that objects reach GitHub before the ref
+    // that names them does.
     //
-    // So the app stores a picture whole and rewrites the trees, which needs no filter, no attribute
-    // line in the person's repository, and no push protocol.
+    // Upstream: eclipse-jgit/jgit#11 is open with no fix version, and reports the same `rc=401`.
+
+    // **Large files, in Java, with no `git-lfs` binary.** The official client is a Go program and
+    // there is no android-arm64 build of it — but JGit's own implementation is pure Java and this is
+    // the same version as the JGit above, which matters: the LFS classes are registered into JGit
+    // through an SPI, and a mismatched pair would fail at run time rather than at build time.
+    //
+    // **JGit's client is used for the local half only** — the pointer format, the clean filter that
+    // moves bytes into `.git/lfs/objects`, and the blob loader that reads them back. Its network half
+    // cannot authenticate over HTTPS (`LfsConnectionFactory` sets no `Authorization` header), so the
+    // batch API is spoken by `LfsClient` instead. Gson is here because `Protocol.gson()` is what
+    // parses the batch response, and writing a second parser for a documented JSON shape would be a
+    // second thing to keep correct.
+    //
+    // **Checked, not assumed:** every class in this artifact was scanned for `ProcessBuilder` and
+    // `Runtime.exec`, and the only one that spawns anything is `InstallBuiltinLfsCommand`, which this
+    // app never calls.
+    //
+    implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:6.10.1.202505221210-r")
+    implementation("com.google.code.gson:gson:2.11.0")
 
     // **GitHub's secret API needs libsodium's sealed box**, and there is no way around it: the
     // endpoint takes an `encrypted_value` produced by crypto_box_seal (X25519 + HSalsa20 +
