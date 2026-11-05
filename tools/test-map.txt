@@ -49,7 +49,7 @@ BrowserChromeTest app/src/main/java/com/example/notes/BrowserScreen.kt app/src/m
 AccountsFeatureTest app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
 ProjectsFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
 SyncFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
-HistoryFeatureTest app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
+HistoryFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
 ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
 MarkdownTest app/src/main/java/com/example/notes/Markdown.kt
 SelectionFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt
@@ -97,8 +97,9 @@ FetchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/co
 ChunkerTest app/src/main/java/com/example/notes/Chunker.kt
 SearchIndexTest app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
 SemanticSearchTest app/src/main/java/com/example/notes/SemanticSearch.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt app/src/main/java/com/example/notes/GitService.kt
-MaintenanceTest app/src/main/java/com/example/notes/Maintenance.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/LfsStore.kt
+MaintenanceTest app/src/main/java/com/example/notes/Maintenance.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/LfsStore.kt
 LfsClientTest app/src/main/java/com/example/notes/LfsClient.kt
+LfsSyncTest app/src/main/java/com/example/notes/LfsSync.kt
 IndexQueueTest app/src/main/java/com/example/notes/IndexQueue.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/SemanticSearch.kt
 McpTest app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
 McpTestTools app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt

@@ -1108,9 +1108,9 @@ object GitService {
      * ## The pairs, not the commits
      *
      * The caller is the vector index, and the index is keyed by **content**: the same text saved twice
-     * is one blob and one set of vectors. So what this yields is the blob id, which is what makes a
-     * version survive a prune ([HistoryPrune] rewrites every commit and no blob), and what makes two
-     * identical saves cost one embedding rather than two.
+     * is one blob and one set of vectors. So what this yields is the blob id — which survives a
+     * force-push that rewrites local commits, because a blob is content and content does not move —
+     * and that is also what makes two identical saves cost one embedding rather than two.
      *
      * A blob id names content, not a place: the same text can appear at two paths, and this reports
      * both, because the *path* is what a search answer has to say.

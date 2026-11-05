@@ -175,35 +175,23 @@ class ProjectGit(
                 // fails with the project refusing every save for ever.
                 val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
                 if (outcome.written) {
-                    // **A binary has one version, and this is where that is made true.**
+                    // **A picture is a pointer, and its bytes are beside the repository.**
                     //
-                    // The commit just written holds the newest bytes; every earlier commit that held
-                    // this path is rewritten to hold the same blob, which is what makes the old blob
-                    // unreachable — and a blob nothing reaches is a blob `gc` may delete. Done here
-                    // because this is the only moment the app knows both facts at once: which paths
-                    // this commit touched, and that a commit just happened. `Maintenance` then
-                    // reclaims the bytes at the next app start.
+                    // There is nothing to rewrite here, and that is the design: a commit that holds
+                    // a picture holds 130 bytes naming its bytes by SHA-256, so a version of a
+                    // picture costs the tree almost nothing and the *store* holds exactly one copy
+                    // of the content. When a picture is deleted the pointer leaves the tree and
+                    // `LfsStore.sweep` reclaims the bytes nothing names any more — no commit is
+                    // rebuilt, and no id changes.
                     //
-                    // **Only non-text paths, and only when a commit was written.** A text file's
-                    // history is the product, so collapsing it would destroy the feature; and a commit
-                    // that wrote nothing touched nothing.
+                    // **A marker, so the sweep happens at the next start.** It is proportional to
+                    // what is stored rather than to the whole repository, but it is still work that
+                    // has nothing to do with this save, so the save does not wait for it.
                     val touched = outcome.id?.let { id ->
                         GitService.changedPaths(it, ObjectId.fromString(id))
                     }.orEmpty()
-                    val binaries = touched.filter { Workspace.kindOfPath(it) != EntryKind.TEXT }
-                    if (binaries.isNotEmpty()) {
-                        // **Held already**, so this is inside the same lock the commit was written
-                        // under: a rewrite that ran beside another writer's commit would move the ref
-                        // out from under it.
-                        var collapsed = 0
-                        for (path in binaries) collapsed += HistoryPrune.keepLatest(it, path)
-                        if (collapsed > 0) {
-                            // **A marker, not a collection.** `gc` is proportional to the whole
-                            // repository — it repacks every object — so running it inside a save would
-                            // make the save wait for work that is not about this save. The unreachable
-                            // blob is harmless until then: it costs its own size and nothing else.
-                            Maintenance.mark(repoDir(project), "a picture was saved")
-                        }
+                    if (touched.any { Workspace.kindOfPath(it) != EntryKind.TEXT }) {
+                        Maintenance.mark(repoDir(project), "a picture was saved")
                     }
                     // **Every change the app makes is one commit, so this is the single signal that
                     // the project's text changed** — the editor, the agent's `write`, a delete, a
@@ -296,6 +284,23 @@ class ProjectGit(
                             (if (omitted.size > 12) " +${omitted.size - 12} more" else ""),
                     )
                 }
+                // **The pictures first, and this order is not a preference.** A pointer names its
+                // bytes by SHA-256, and GitHub refuses a push whose tree references an object it
+                // does not hold (`GH008`). So the bytes have to be there before the ref that names
+                // them moves — uploading after the push is not a slower path, it is a rejected
+                // push. The filter is off around the push itself (see `GitService.push`), which is
+                // why JGit's own hook never runs and this is the only uploader.
+                val pictures = LfsSync.push(it, tokenProvider(), remoteUrlOf(it))
+                if (!pictures.ok) {
+                    // **Nothing is pushed over a picture that did not arrive.** The tree would name
+                    // an object GitHub does not have, and the sync would report a failure the person
+                    // cannot act on. Saying which picture is the actionable half.
+                    return@hold GitService.RemoteResult(
+                        "Nothing was sent, because a picture could not be uploaded: " +
+                            (pictures.why ?: "${pictures.failed} of them failed"),
+                        false,
+                    )
+                }
                 // A push that fails leaves the row saying there is work to send, which is the
                 // truth, and is what makes the button something a person can press again — nothing
                 // has to be recorded either way, because the count is asked of the repository
@@ -312,6 +317,10 @@ class ProjectGit(
             }
         }
     }
+
+    /** The GitHub address this project sends to, or null when it has none. */
+    private fun remoteUrlOf(repo: org.eclipse.jgit.lib.Repository): String? =
+        repo.config.getString("remote", "origin", "url")
 
     /** How much of one file a preview will read. Half a megabyte is a long file and a short read. */
     private val PREVIEW_LIMIT = 512L * 1024
@@ -378,7 +387,21 @@ class ProjectGit(
         )
         // The files are now GitHub's, and nothing has to be noted down: the row's count is a diff
         // against that same remote-tracking ref.
-        val result = repo.use { GitService.resetToRemote(it, tokenProvider()) }
+        //
+        // **The pictures are fetched before the checkout, not after.** JGit's smudge reads
+        // `.git/lfs/objects` and asks the network for what is missing — but over HTTPS on a private
+        // repository it cannot authenticate, so it asks, is refused, and **leaves the pointer in the
+        // working tree without an error**. Downloading first means the smudge finds the bytes already
+        // there and never needs the connection it cannot make.
+        val remote = repo.config.getString("remote", "origin", "url")
+        val fetched = LfsSync.pull(repo, tokenProvider(), remote)
+        val result = GitService.resetToRemote(repo, tokenProvider())
+        // **And whatever is still a pointer is said out loud.** A picture that did not arrive must
+        // never be shown as one that did.
+        val stillPointers = if (result.success) LfsSync.missing(repo) else emptyList()
+        // **Closed once, here, and never by `use`** — the three calls above share one repository and
+        // the last of them is what the answer is built from.
+        repo.close()
         // **A pull is a change with no commit**, which is the second case the commit hook cannot
         // see — the working tree is replaced by the remote's and no local version is written. Left to
         // the search guard it would be indexed when somebody next searched, which is to say the one
@@ -391,7 +414,14 @@ class ProjectGit(
             // place that can notice is here, where the reset happened.
             Maintenance.mark(repoDir(project), "the remote replaced the history")
         }
-        return result
+        return if (stillPointers.isEmpty()) result else result.copy(
+            message = result.message +
+                "; ${stillPointers.size} picture(s) did not arrive: " +
+                stillPointers.take(5).joinToString(", ") +
+                (if (stillPointers.size > 5) " and ${stillPointers.size - 5} more" else "") +
+                (fetched.why?.let { " ($it)" } ?: ""),
+            success = false,
+        )
     }
 
     /**

@@ -16,9 +16,10 @@ import java.io.File
  * version of every picture that had ever been saved (200 KB → 400 KB → 600 KB → 800 KB, one per save,
  * none collected).
  *
- * So a picture with one version needs **two** collections, not one: the tree rewrite in
- * [HistoryPrune.keepLatest] makes the old pointers unreachable, and this deletes the bytes those
- * pointers named. Without the second, the rewrite reclaims the commits and leaves the megabytes.
+ * So a picture needs **two** deletions, not one: the pointer leaves the tree when the picture is
+ * deleted, and this reclaims the bytes nothing names any more. There is no rewrite involved — no
+ * commit is rebuilt and no id changes — which is why a picture can be deleted without the history
+ * being touched at all.
  *
  * **Reachability is over pointer oids, not over paths.** A pointer names its bytes by SHA-256, and
  * that name is what the store is keyed by — so the question "is this object still used" is answered by

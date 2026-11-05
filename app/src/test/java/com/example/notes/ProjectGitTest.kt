@@ -82,11 +82,9 @@ class ProjectGitTest {
 
     @Test
     fun `restoring a picture is refused by name, and changes nothing`() {
-        // **A picture has one version, so there is nothing to restore *from*.** The rewrite in
-        // `HistoryPrune.keepLatest` makes every commit name the newest bytes, and the collection then
-        // deletes the older ones — so a "version" of a picture is a commit that holds the same bytes
-        // as every other commit. Handing one back would be a restore that changes nothing, presented
-        // as a restore that changes something.
+        // **A picture is a pointer, and history holds no version of its bytes.** Every commit names
+        // the same SHA-256, so "going back" would hand a person the same picture they are looking at,
+        // presented as a restore that changes something. The refusal says so by name instead.
         //
         // **The folders first.** `init` makes the repository but not the project folder, and the
         // first version of this test wrote into a directory that did not exist yet.

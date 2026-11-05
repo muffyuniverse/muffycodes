@@ -5,7 +5,7 @@ import java.io.File
 /**
  * **The housekeeping that a save is too expensive to do.**
  *
- * Two acts, and both exist because [HistoryPrune.prune] only moves a ref:
+ * Two acts, and neither touches a commit:
  *
  * 1. **the sweep** — delete the index rows of saved versions whose content no commit reaches any
  *    more. A prune rebuilds the chain with identical trees, so the blobs of the dropped commits are
@@ -17,27 +17,27 @@ import java.io.File
  *
  * ## Why a marker, and not a timer
  *
- * A project that has never been pruned has nothing to collect, and `gc` on it is pure cost. So the two
- * things that strand content **say so** — [ProjectGit.prune] and [ProjectGit.replaceWithRemote] write
- * a marker into the project's `agent/` folder — and this pass runs only where one is waiting. The
- * marker is deleted only when the pass finished, so a crash or a killed process re-runs both halves on
- * the next start. Both halves are idempotent: a sweep deletes rows, a collection deletes objects, and
- * doing either twice is doing it once.
+ * A project that never saved a picture has nothing to reclaim, and walking every tree to find out is
+ * pure cost. So the things that strand content **say so** — a save that touched a picture, and
+ * [ProjectGit.replaceWithRemote] — by writing a marker into the project's `agent/` folder, and this
+ * pass runs only where one is waiting. The marker is deleted only when the pass finished, so a crash
+ * or a killed process re-runs it on the next start. Both halves are idempotent: a sweep deletes rows,
+ * the store sweep deletes files, and doing either twice is doing it once.
  *
- * ## Why the order is not negotiable
+ * ## Why the order matters
  *
- * **The sweep has to run before the collection.** `gc` deletes the very objects the sweep needs in
- * order to know which rows are dead, and after it runs there is no way to ask the question at all —
- * the objects are gone and every row looks equally unresolvable.
+ * **The index sweep reads the repository's trees**, and it does so before anything deletes bytes — the
+ * two are independent today, but the order is kept because a future collector that pruned the object
+ * database would destroy the evidence the sweep needs.
  *
  * ## Why the guards are what they are
  *
- * `gc` is seconds to minutes on a phone with a long history, so this runs on a daemon thread, one
+ * Walking every tree of a long history is seconds on a phone, so this runs on a daemon thread, one
  * project at a time, and it **never waits for a lock**: [RepoLocks.tryHold] rather than `hold`,
  * because the whole point of a background pass is that it does not stand in front of a commit. A
  * project whose lock is taken is skipped and its marker stays, so the next start tries again. A
- * project whose agent is switched on is skipped for the same reason at a larger scale: a `gc` holding
- * a repository for a minute would stall the next commit an agent makes.
+ * project whose agent is switched on is skipped for the same reason at a larger scale: holding a
+ * repository for seconds would stall the next commit an agent makes.
  */
 object Maintenance {
 
@@ -80,7 +80,7 @@ object Maintenance {
                 else -> "$rows index rows were left behind"
             }
             val released = if (vectors == 0) "" else ", releasing $vectors vector(s)"
-            val gc = if (collected) "; the repository was collected" else "; the collection did not run"
+            val gc = if (collected) "; the picture store was swept" else ""
             // **Named in the sentence, because it is invisible otherwise.** A picture's old versions
             // are the largest thing this app ever deletes, and a pass that reclaimed them silently
             // would look exactly like a pass that reclaimed nothing.
