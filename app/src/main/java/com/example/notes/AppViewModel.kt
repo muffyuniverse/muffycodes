@@ -3566,7 +3566,16 @@ class AppViewModel @JvmOverloads constructor(
 
         busy = true
         onWorker {
-            val created = api.createRepo(token, clean, licence)
+            // **The sentinel becomes two things, and neither is a licence.** `PRIVATE_LICENCE` is
+            // the window's word for "no licence, and nobody can see it" — so the template is left
+            // empty rather than sent, because GitHub would refuse `license_template: "private"`.
+            val isPrivate = licence == PRIVATE_LICENCE
+            val created = api.createRepo(
+                token,
+                clean,
+                if (isPrivate) "" else licence,
+                private = isPrivate,
+            )
             if (created.error != null) {
                 main.post {
                     busy = false
@@ -3776,7 +3785,18 @@ class AppViewModel @JvmOverloads constructor(
             // **Seeded with the licence, which is the whole point of asking.** GitHub writes the
             // file as part of creating the repository; the first sync then carries the project's
             // own history on top of it.
-            val created = api.createRepo(token, project, licence)
+            //
+            // **Except when the answer was "private".** That is not a licence: it is the choice of
+            // no licence and no visibility, so the template is left empty rather than sent — and
+            // GitHub would refuse `license_template: "private"` anyway, which would read as a bug
+            // in the app rather than as the choice it is.
+            val isPrivate = licence == PRIVATE_LICENCE
+            val created = api.createRepo(
+                token,
+                project,
+                if (isPrivate) "" else licence,
+                private = isPrivate,
+            )
             if (created.error != null) {
                 main.post {
                     busy = false

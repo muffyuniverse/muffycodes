@@ -482,7 +482,12 @@ fun PublishProjectDialog(
     onDismiss: () -> Unit,
     onPublish: (licence: String) -> Unit,
 ) {
-    var licence by remember { mutableStateOf("gpl-3.0") }
+    // **Private first, and chosen by default.** The safe answer to "who may read this" is
+    // "nobody yet", and a person who has just made a project on their phone has not decided
+    // otherwise. Choosing GPL-3.0 here would publish their first save to the world before they
+    // have written it.
+    val choices = remember(licences) { licenceChoices(licences) }
+    var licence by remember { mutableStateOf(PRIVATE_LICENCE) }
     var showLicences by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -495,18 +500,33 @@ fun PublishProjectDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // **Said, because it is the default and the consequence is not obvious.** A private
+                // repository is invisible to everyone else; a licensed one is world-readable the
+                // moment it exists. A person choosing between them needs that sentence, not the
+                // word "Private".
+                Text(
+                    if (licence == PRIVATE_LICENCE) {
+                        "Private: nobody else can see this repository, and no licence file is " +
+                            "written. You can make it public later."
+                    } else {
+                        "A licence is a public statement about what others may do with this " +
+                            "code, so the repository will be public."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showLicences = !showLicences },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Licence: ${licences.firstOrNull { it.key == licence }?.name ?: licence}")
+                    Text("Licence: ${choices.firstOrNull { it.key == licence }?.name ?: licence}")
                 }
-                if (showLicences && licences.isNotEmpty()) {
+                if (showLicences && choices.isNotEmpty()) {
                     Column(modifier = Modifier.heightIn(max = 200.dp)) {
                         LazyColumn {
-                            items(licences) { item ->
+                            items(choices) { item ->
                                 Text(
                                     text = item.name,
                                     style = MaterialTheme.typography.bodyMedium,

@@ -147,6 +147,39 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a private project is made private and carries no licence file`() {
+        // **"Private" is a choice, not a licence**, so it must reach the API as two facts:
+        // `private: true`, and no `license_template` at all. Sending `license_template: "private"`
+        // would be refused by GitHub, and the refusal would read as a bug in the app rather than as
+        // the thing the person asked for.
+        scene.viewModel.createProject("secrets", PRIVATE_LICENCE)
+
+        assertTrue("it was made: ${scene.viewModel.message}", "secrets" in scene.viewModel.projectNames)
+        val dir = scene.workspace!!.projectDir("secrets")
+        val licenceFiles = dir.listFiles()?.filter {
+            it.name.startsWith("LICENSE") || it.name.startsWith("COPYING")
+        }.orEmpty()
+        assertEquals("and no licence file was seeded", emptyList<File>(), licenceFiles)
+    }
+
+    @Test
+    fun `the licence window offers private first, because it is the safe answer`() {
+        // **The default matters more than the list.** A person who has just made a project on their
+        // phone has not decided who may read it, and a default of GPL-3.0 publishes their first save
+        // to the world before they have written it.
+        val fromGitHub = listOf(
+            Licence("mit", "MIT License"),
+            Licence("gpl-3.0", "GNU General Public License v3.0"),
+        )
+
+        val offered = licenceChoices(fromGitHub)
+
+        assertEquals("private is the first entry", PRIVATE_LICENCE, offered.first().key)
+        assertTrue("and it says what it is", offered.first().name.contains("Private"))
+        assertEquals("GitHub's own list follows, unchanged", fromGitHub, offered.drop(1))
+    }
+
+    @Test
     fun `renaming a project renames the folder and the repository together`() {
         scene.project("Shopping")
 

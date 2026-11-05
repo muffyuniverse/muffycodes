@@ -52,6 +52,25 @@ data class Repo(
 data class Licence(val key: String, val name: String)
 
 /**
+ * The choice that is not a licence: a repository nobody else can see.
+ *
+ * **Its own key, and it is not a licence value GitHub would accept.** `createRepo` sends
+ * `license_template` only when the key is non-blank and is not this one, so the sentinel can never
+ * reach the API as a licence name — a request carrying `license_template: "private"` would be
+ * refused by GitHub and read as a bug in the app rather than as a choice.
+ *
+ * It exists because the two questions are one question. A licence says what other people may do
+ * with the code; a repository nobody can see makes that sentence meaningless. Asking them
+ * separately is how a person ends up with a private repository under GPL-3.0 and a licence file
+ * telling strangers what they may do with something they cannot read.
+ */
+const val PRIVATE_LICENCE = "private"
+
+/** What the licence window offers before GitHub's own list: private first, because it is the safe one. */
+fun licenceChoices(fromGitHub: List<Licence>): List<Licence> =
+    listOf(Licence(PRIVATE_LICENCE, "Private (no licence)")) + fromGitHub
+
+/**
  * One workflow run, as GitHub describes it.
  *
  * **`conclusion` is null while the run is still going**, and that is a real state rather than an
@@ -201,6 +220,15 @@ interface GitHub {
         name: String,
         licence: String = "",
         description: String = "",
+        /**
+         * Whether the repository is private.
+         *
+         * **A parameter rather than a constant, because the licence decides it.** A licence is a
+         * statement about what other people may do with the code, and it is meaningless for a
+         * repository nobody can see — so "no licence" and "private" are the same choice, made once
+         * in the window rather than in two switches a person has to keep in agreement.
+         */
+        private: Boolean = false,
     ): GitHubResult<Repo>
 
     /** Renames a repository, so the project and its repository keep one name. */
@@ -451,10 +479,11 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         name: String,
         licence: String,
         description: String,
+        private: Boolean,
     ): GitHubResult<Repo> {
         val body = JSONObject().apply {
             put("name", name)
-            put("private", false)
+            put("private", private)
             put("auto_init", true)
             if (licence.isNotBlank()) put("license_template", licence)
             if (description.isNotBlank()) put("description", description)
@@ -1229,6 +1258,7 @@ class DiskGitHub(
         name: String,
         licence: String,
         description: String,
+        private: Boolean,
     ): GitHubResult<Repo> {
         if (name.isBlank()) return GitHubResult(error = "A repository needs a name")
         val dir = repoDir(name)
@@ -1241,7 +1271,10 @@ class DiskGitHub(
                 value = Repo(
                     name = name,
                     fullName = "$owner/$name",
-                    private = false,
+                    // **The answer the caller asked for**, not a constant: this fake is what the
+                    // tests run against, and a fake that always says "public" could not tell a test
+                    // that asked for private from one that forgot to.
+                    private = private,
                     cloneUrl = cloneUrlFor(owner, name),
                 )
             )

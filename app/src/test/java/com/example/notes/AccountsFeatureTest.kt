@@ -634,8 +634,13 @@ private class RefusingGitHub : GitHub {
     override fun licences(token: String): GitHubResult<List<Licence>> =
         GitHubResult(error = "Bad credentials", status = 401)
 
-    override fun createRepo(token: String, name: String, licence: String, description: String):
-        GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
+    override fun createRepo(
+        token: String,
+        name: String,
+        licence: String,
+        description: String,
+        private: Boolean,
+    ): GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
 
     override fun renameRepo(token: String, owner: String, name: String, newName: String):
         GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
