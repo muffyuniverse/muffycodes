@@ -488,6 +488,14 @@ class AgentTools(
             // changed — and a server going down would do it for every conversation that mentioned it. The
             // server's catalogue is something the agent reads on demand instead, with `server` alone.
             "mcp" to setOf("server", "tool", "args"),
+            // **The three tools that deliver work.** They exist because the operator removed the
+            // person's push button: "we can remove this functionality and transfer it to agent so
+            // that it can determine when to push and to which branches (but still within their
+            // project)". `state` is the reading half — an agent cannot decide *when* without knowing
+            // whether there is anything to send.
+            "state" to setOf(),
+            "pull" to setOf(),
+            "push" to setOf(),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -855,6 +863,43 @@ class AgentTools(
                     "result arrives in a file.",
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
+            spec(
+                "state",
+                "What this project's git has to say: how many tracked paths differ from what GitHub " +
+                    "was given, how many commits are ahead of and behind `origin/main`, and whether a " +
+                    "merge is in progress. " +
+                    "**Read this before deciding to push.** It answers the local half without a " +
+                    "network call, so it costs nothing to ask. " +
+                    "\"ahead 0, behind 0\" means the remote has everything; \"behind 2\" means " +
+                    "somebody else pushed and you must `pull` before your push can land.",
+                "{}",
+            ),
+            spec(
+                "pull",
+                "Fetches `origin` and **merges** `origin/main` into this project's `main`. " +
+                    "**Merge, never rebase** — a rebase would rewrite commits, and nothing in this " +
+                    "app rewrites history. " +
+                    "A clean merge answers the paths that came in. A conflict answers the " +
+                    "**conflicted paths** and stops: read one with `read` to see the `<<<<<<<` " +
+                    "markers, choose what the file should say, and `write` the answer. Then `push`. " +
+                    "There is nothing else to learn — resolution is ordinary editing.",
+                "{}",
+            ),
+            spec(
+                "push",
+                "Sends this project's `main` to GitHub. **Fast-forward only and never forced**, " +
+                    "because a force-push can discard a commit somebody else made. " +
+                    "Pictures are uploaded first, before the branch that names them, because GitHub " +
+                    "rejects a tree referencing bytes it does not hold. " +
+                    "A push that GitHub refuses because the remote moved answers as a **conflict, " +
+                    "not a failure**: `pull`, resolve if needed, then `push` again. " +
+                    "It refuses outright when the working tree has uncommitted changes — commit " +
+                    "first, so that what is sent is a thing you can point at. " +
+                    "**`main` is the only branch**, and there is no parameter to name another: this " +
+                    "project is its own repository, so a second branch would let one writer diverge " +
+                    "from itself.",
+                "{}",
+            ),
         ).filter { fetchAllowed || it.name != "fetch" }
 
         /**
@@ -1010,6 +1055,9 @@ class AgentTools(
                 )
             }
             "mcp" -> mcp(args, deadline)
+            "state" -> state()
+            "pull" -> pull()
+            "push" -> push()
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
@@ -4056,6 +4104,118 @@ class AgentTools(
             if (failed.isNotEmpty()) append(". Not attached: ").append(failed.joinToString("; "))
         }
         return success(body)
+    }
+
+    // ---- delivering the work ------------------------------------------------
+
+    /**
+     * What this project's git has to say — the reading half of deciding whether to push.
+     *
+     * **The local half needs no network**, so an agent can ask on every turn for nothing. The
+     * ahead/behind numbers need the tracking ref, which a project that has never been pushed does
+     * not have; that answers "unknown" rather than a zero, because "0 ahead" about a branch that was
+     * never sent is the one answer that would make a push look unnecessary when it is the whole job.
+     */
+    private fun state(): String {
+        val repo = git.open(project)
+            ?: return refusal("This project has no repository yet")
+        return repo.use {
+            try {
+                val changes = GitService.status(it)
+                val unsent = GitService.unsentPaths(it).size
+                val tracks = GitService.aheadBehind(it)
+                val lines = mutableListOf<String>()
+                lines += "project: $project"
+                lines += "branch: ${it.branch ?: "?"}"
+                lines += "unsent paths: $unsent"
+                lines += if (tracks == null) {
+                    "ahead/behind: unknown — GitHub has no copy of this branch yet"
+                } else {
+                    "ahead ${tracks.first}, behind ${tracks.second}"
+                }
+                // **The working tree, separately.** A push refuses when it is dirty, so an agent that
+                // has just written a file needs to see that the write is not yet a commit.
+                lines += "uncommitted: ${changes.staged + changes.unstaged} staged or changed, " +
+                    "${changes.untracked} untracked"
+                // A merge left half-finished is the one state where a push would carry markers.
+                val merging = File(it.directory, "MERGE_HEAD").isFile
+                if (merging) lines += "**a merge is in progress and has not been committed**"
+                val said = when {
+                    merging -> "Finish the merge first."
+                    unsent == 0 && (tracks == null || tracks.first == 0) -> "Nothing to send."
+                    tracks != null && tracks.second > 0 ->
+                        "GitHub has moved: pull before a push can land."
+                    else -> "There is work to send."
+                }
+                success(lines.joinToString("\n") + "\n\n$said")
+            } catch (e: Throwable) {
+                refusal(Secrets.describe(e))
+            }
+        }
+    }
+
+    /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */
+    private fun pull(): String {
+        val result = git.pull(project)
+        if (result.conflicted.isNotEmpty()) {
+            return refusal(
+                result.said.ifBlank {
+                    "The merge conflicts in " + result.conflicted.joinToString(", ") + "."
+                } + "\n\nConflicted paths: " + result.conflicted.joinToString(", ") +
+                    "\nRead one to see the `<<<<<<<` markers, choose what the file should say, " +
+                    "and write it. Then push.",
+            )
+        }
+        if (!result.ok) return refusal(result.said.ifBlank { "The pull did not finish" })
+        val body = if (result.arrived.isEmpty()) {
+            result.said.ifBlank { "Already up to date" }
+        } else {
+            "Brought in ${result.arrived.size} path(s):\n" +
+                result.arrived.take(40).joinToString("\n") +
+                (if (result.arrived.size > 40) "\n+${result.arrived.size - 40} more" else "")
+        }
+        return success(body)
+    }
+
+    /**
+     * Sends the project to GitHub.
+     *
+     * **A refusal from GitHub because the remote moved is a conflict, not a failure.** The difference
+     * matters to the model's next move: a failure invites a retry, and retrying a rejected push
+     * fails the same way forever. Naming it a conflict points at `pull`.
+     */
+    private fun push(): String {
+        val repo = git.open(project)
+            ?: return refusal("This project has no repository yet")
+        // **Committed first, so what is sent is a thing you can point at.** A push carrying
+        // uncommitted work would send something the model never chose, and the app's own rule is
+        // that every change is a version.
+        val dirty = repo.use {
+            try {
+                val status = GitService.status(it)
+                status.staged + status.unstaged
+            } catch (e: Throwable) {
+                -1
+            }
+        }
+        if (dirty > 0) {
+            return refusal(
+                "There are $dirty uncommitted change(s). A push sends commits, not files — " +
+                    "write what you changed first (a write commits itself), or the change you " +
+                    "meant to send will not be in it.",
+            )
+        }
+        if (dirty < 0) return refusal("This project's repository could not be read")
+
+        val result = git.push(project)
+        if (result.success) return success(result.message.ifBlank { "Pushed" })
+        // **Rejected means the remote moved.** `RemoteResult` carries the server's own words, so the
+        // answer passes them on rather than guessing — but it says what they mean.
+        return refusal(
+            "${result.message.ifBlank { "Nothing was pushed" }}\n\n" +
+                "If GitHub refused because it has commits this phone does not, that is a conflict " +
+                "and not an error: call `pull`, resolve anything it names, then `push` again.",
+        )
     }
 
     // ---- the promises -------------------------------------------------------

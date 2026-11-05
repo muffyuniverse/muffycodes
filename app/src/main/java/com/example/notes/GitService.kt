@@ -469,6 +469,150 @@ object GitService {
      * by the app would be a second answer that can disagree with the one that decides what is sent.
      */
     /**
+     * Fetches `origin`, leaving the working tree alone.
+     *
+     * Separate from [resetToRemote] because the two questions differ: that one replaces this phone's
+     * files with GitHub's, this one only learns what GitHub has. A pull needs the second — deciding
+     * what to do with the answer is the merge's job, not the fetch's.
+     */
+    fun fetch(repo: Repository, token: String?) {
+        Git(repo).use { git ->
+            val fetch = git.fetch().setRemote("origin")
+            credentials(token)?.let { fetch.setCredentialsProvider(it) }
+            fetch.call()
+        }
+    }
+
+    /**
+     * True when [ancestor] is reachable from [descendant] — the question "can this be a
+     * fast-forward".
+     */
+    fun isAncestor(repo: Repository, ancestor: AnyObjectId, descendant: AnyObjectId): Boolean =
+        try {
+            RevWalk(repo).use { walk ->
+                walk.isMergedInto(walk.parseCommit(ancestor), walk.parseCommit(descendant))
+            }
+        } catch (e: Throwable) {
+            false
+        }
+
+    /** What a merge did. */
+    data class Merged(
+        val ok: Boolean,
+        val paths: List<String> = emptyList(),
+        val conflicted: List<String> = emptyList(),
+        val said: String = "",
+    )
+
+    /**
+     * Merges [their] into the current branch, committing the result.
+     *
+     * **A merge commit, not a rebase.** A rebase would give every one of this phone's commits a new
+     * id; this app does not rewrite history, and an agent doing it to somebody's work is the worst
+     * way for that rule to break. A merge commit is visible and says what happened.
+     *
+     * **A conflict is answered, not thrown.** The conflicted paths are the answer the caller needs:
+     * resolution is ordinary editing — read the markers, write the file — so a tool for it would be
+     * a second way to edit. Nothing is committed on a conflict, so the tree stays exactly as git left
+     * it with the markers in place, which is what `read` will show.
+     */
+    fun merge(repo: Repository, their: AnyObjectId, author: GitAuthor): Merged =
+        try {
+            Git(repo).use { git ->
+                val result = git.merge()
+                    .include(their)
+                    .setCommit(true)
+                    .setMessage("Merge what GitHub had")
+                    .setAuthor(author.ident())
+                    .setCommitter(author.ident())
+                    .call()
+                val status = result.mergeStatus
+                if (status == org.eclipse.jgit.api.MergeResult.MergeStatus.CONFLICTING) {
+                    Merged(
+                        ok = false,
+                        conflicted = result.conflicts.keys.toList(),
+                        said = "The merge conflicts in " +
+                            result.conflicts.keys.joinToString(", ") +
+                            ". Read the file, choose what it should say, write it, then push.",
+                    )
+                } else if (result.mergeStatus.isSuccessful) {
+                    Merged(
+                        ok = true,
+                        paths = result.mergedCommits.flatMap { commit ->
+                            changedPathsAgainstParent(repo, commit)
+                        }.distinct(),
+                        said = "Merged",
+                    )
+                } else {
+                    Merged(false, said = "The merge did not finish: $status")
+                }
+            }
+        } catch (e: Throwable) {
+            Merged(false, said = Secrets.describe(e))
+        }
+
+    /** The paths one commit changed against its first parent, or none for a root commit. */
+    private fun changedPathsAgainstParent(repo: Repository, commit: RevCommit): List<String> =
+        try {
+            RevWalk(repo).use { walk ->
+                val parsed = walk.parseCommit(commit)
+                val parent = parsed.parents.firstOrNull()
+                val old: AbstractTreeIterator = parent?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
+                val out = mutableListOf<String>()
+                DiffFormatter(DISCARD).use { diff ->
+                    diff.setRepository(repo)
+                    for (entry in diff.scan(old, treeOf(repo, parsed) ?: return emptyList())) {
+                        out += entry.newPath ?: entry.oldPath ?: continue
+                    }
+                }
+                out
+            }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+
+    /**
+     * How far this phone is ahead of and behind `origin/<branch>`, in commits.
+     *
+     * **Ahead is not the same question as [unsentPaths].** Unsent counts *paths* that differ from what
+     * was pushed; this counts *commits* the remote has never seen, and the two disagree in the ordinary
+     * case of one commit changing three files. Both are answered because an agent deciding whether to
+     * push needs to know "is there anything" and "how much history", and the second is what tells it
+     * the remote has moved.
+     *
+     * Answers `null` when there is no remote or the tracking ref does not exist — a project that has
+     * never been pushed is not "1 ahead", it is unknown, and inventing a number there would make a
+     * push look necessary when the truth is that the branch has never been sent.
+     */
+    fun aheadBehind(repo: Repository): Pair<Int, Int>? {
+        val branch = repo.branch ?: return null
+        if (repo.config.getString("remote", "origin", "url").isNullOrBlank()) return null
+        val head = repo.resolve("HEAD") ?: return null
+        val remote = repo.resolve(ORIGIN + branch) ?: return null
+        return try {
+            RevWalk(repo).use { walk ->
+                walk.revFilter = org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE
+                walk.markStart(walk.parseCommit(head))
+                walk.markStart(walk.parseCommit(remote))
+                val base = walk.next() ?: return 0 to 0
+                val ahead = countBetween(repo, base, walk.parseCommit(head))
+                val behind = countBetween(repo, base, walk.parseCommit(remote))
+                ahead to behind
+            }
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /** Commits reachable from [tip] and not from [base]. */
+    private fun countBetween(repo: Repository, base: RevCommit, tip: RevCommit): Int =
+        RevWalk(repo).use { walk ->
+            walk.markStart(walk.parseCommit(tip))
+            walk.markUninteresting(walk.parseCommit(base))
+            walk.count()
+        }
+
+    /**
      * Every path git ignores, as repository-relative paths.
      *
      * **One status call for the whole project**, because the row asks about every entry on screen and

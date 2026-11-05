@@ -201,14 +201,6 @@ class AppViewModel @JvmOverloads constructor(
         private set
 
     /**
-     * The paths kept off GitHub, as paths from the account root.
-     *
-     * Held in state for the same reason [lockedPaths] is: the row's icon has to redraw when it
-     * changes, and asking `.muffy/unsync.json` on every call gave Compose no reason to.
-     */
-        private set
-
-    /**
      * The agent sessions this phone is running, read from `.muffy/agents.json`.
      *
      * **Declared here, with the other state, and not with the methods below.** `refresh()` writes

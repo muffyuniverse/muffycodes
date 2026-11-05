@@ -315,6 +315,92 @@ class ProjectGit(
         }
     }
 
+    /**
+     * Sends the project's `main` to GitHub — **fast-forward only, never forced.**
+     *
+     * **Why not forced.** The operator's own sync used to force, because it pushed a *derived* commit
+     * that was on no local branch and GitHub had to be told to accept it. That mechanism is gone, so
+     * an ordinary push is a fast-forward and a rejection means the remote genuinely moved. Forcing
+     * would discard whatever arrived there, and the agent is the one actor that must never be able
+     * to do that — it would be a silent loss with the app's own authority behind it.
+     *
+     * **Pictures first.** `LfsSync.push` uploads before the ref moves, because GitHub rejects a tree
+     * naming bytes it does not hold. Uploading after would be a rejected push, not a slower one.
+     *
+     * Answers the same shape as [sync], because the callers say the same kind of sentence.
+     */
+    fun push(project: String): GitService.RemoteResult =
+        RepoLocks.hold(repoDir(project), "push") {
+            val repo = open(project) ?: return@hold GitService.RemoteResult(
+                "This project has no repository yet", false
+            )
+            repo.use {
+                try {
+                    val pictures = LfsSync.push(it, tokenProvider(), remoteUrlOf(it))
+                    if (!pictures.ok) {
+                        return@use GitService.RemoteResult(
+                            "Nothing was sent, because a picture could not be uploaded: " +
+                                (pictures.why ?: "${pictures.failed} of them failed"),
+                            false,
+                        )
+                    }
+                    GitService.push(it, tokenProvider())
+                } catch (e: Throwable) {
+                    GitService.RemoteResult(Secrets.describe(e), false)
+                }
+            }
+        }
+
+    /** What [pull] found: the paths that came in, or the ones that conflict. */
+    data class Pulled(
+        val ok: Boolean,
+        val arrived: List<String> = emptyList(),
+        val conflicted: List<String> = emptyList(),
+        val said: String = "",
+    )
+
+    /**
+     * Fetches `origin` and **merges** `origin/main` into this project's branch.
+     *
+     * **Merge, never rebase.** A rebase rewrites commits and gives them new ids; nothing in this app
+     * rewrites history, and an agent doing it silently to somebody's work is the worst version of
+     * that rule being broken. A merge commit is visible, dated, and says what happened.
+     *
+     * **A conflict is an answer, not a failure.** The conflicted paths are returned so the agent can
+     * read the markers and write the resolution — resolution is ordinary editing, and a tool for it
+     * would be a second way to edit a file.
+     */
+    fun pull(project: String): Pulled =
+        RepoLocks.hold(repoDir(project), "pull") {
+            val repo = open(project) ?: return@hold Pulled(false, said = "This project has no repository yet")
+            repo.use {
+                try {
+                    val remote = remoteUrlOf(it)
+                    if (remote.isNullOrBlank()) {
+                        return@use Pulled(false, said = "This project has no GitHub address to pull from")
+                    }
+                    GitService.fetch(it, tokenProvider())
+                    val branch = it.branch ?: "main"
+                    val upstream = it.resolve("refs/remotes/origin/$branch")
+                        ?: return@use Pulled(true, said = "Nothing to pull: GitHub has no $branch yet")
+                    val head = it.resolve("HEAD")
+                        ?: return@use Pulled(false, said = "This project has no commits yet")
+                    if (GitService.isAncestor(it, upstream, head)) {
+                        return@use Pulled(true, said = "Already up to date")
+                    }
+                    val result = GitService.merge(it, upstream, authorProvider())
+                    Pulled(
+                        ok = result.ok,
+                        arrived = result.paths,
+                        conflicted = result.conflicted,
+                        said = result.said,
+                    )
+                } catch (e: Throwable) {
+                    Pulled(false, said = Secrets.describe(e))
+                }
+            }
+        }
+
     /** The GitHub address this project sends to, or null when it has none. */
     private fun remoteUrlOf(repo: org.eclipse.jgit.lib.Repository): String? =
         repo.config.getString("remote", "origin", "url")
