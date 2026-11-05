@@ -93,15 +93,19 @@ class ProjectGitTest {
         git.commit("shopping", "removed it")
 
         val repo = git.open("shopping")!!
-        val reported = mutableListOf<Pair<String, String>>()
-        repo.use { GitService.walkChanges(it) { _, changes -> changes.forEach { c -> reported += c.path to c.blob } } }
+        // **The deletion commit's own changes**, not the whole walk: the *first* commit legitimately
+        // reports `milk.txt`, because it is diffed against nothing and holds the file. The question
+        // is what the commit that removed it says.
+        val newest = mutableListOf<Pair<String, String>>()
+        repo.use {
+            GitService.walkChanges(it, limit = 1) { _, changes ->
+                changes.forEach { c -> newest += c.path to c.blob }
+            }
+        }
 
-        // **Absent, not present-with-a-zero-id.** `walkChanges` skips deletions outright, so there is
+        // **Absent, not present with a zero id.** `walkChanges` skips deletions outright, so there is
         // no row for the index to key by a blob that does not exist.
-        assertTrue(
-            "the deletion is not in the walk: $reported",
-            reported.none { it.first == "milk.txt" },
-        )
+        assertTrue("the deletion is not in the walk: $newest", newest.none { it.first == "milk.txt" })
     }
 
     @Test

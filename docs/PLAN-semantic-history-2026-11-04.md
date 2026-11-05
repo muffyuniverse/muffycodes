@@ -194,9 +194,44 @@ an `appNote("maintenance", …)` row and, when it reclaimed anything, the notifi
 
 ---
 
-## 7. The work, in order
+## 7. The work, in order — **all seven delivered**
 
-Each item lands with the test that fails if it breaks.
+Each item lands with the test that fails if it breaks. **What shipped, and where:**
+
+| # | item | landed | its test |
+|---|---|---|---|
+| 1 | `GitService.walkChanges` | `818682c` | `ProjectGitTest`: newest-first, the root commit lists everything, a deletion is absent |
+| 2 | `SearchIndex` version writes + `sweep` | `818682c` | `SearchIndexTest`: a version survives a rewrite of the current file, a sweep keeps the current row and drops the rest |
+| 3 | index the history, bounded and deduped | `818682c` | `SemanticSearchTest`: a deleted line is found, one edited paragraph does not re-embed the file, a second pass embeds nothing |
+| 4 | resolve blob → commit, drop what nothing reaches | `818682c` | `ProjectGitTest`: the newest commit wins, an unreachable blob resolves to nothing. `SemanticSearchTest`: a dead row is left out and counted |
+| 5 | un-refuse `history` + `semantic` | `818682c` | `SearchTest`: the refusal is gone and the missing-setting refusal is what remains |
+| 6 | the marker, and `collect` wired at app start | `818682c`, `1b1a285`, `5c862f0` | `MaintenanceTest` (9), `IndexQueueTest`: a pull asks for a pass and leaves a marker |
+| 7 | docs and the ledger | this file, `REPORTS-LEDGER.md` row 24 | — |
+
+**Three things the build corrected in the plan, kept here because they were wrong and the reasons are not
+obvious:**
+
+1. **`bytesAt` cannot read a blob.** It takes a *revision* and walks a tree to find the file in it, and a blob id
+   is not a tree — so every saved version read as `null` and was skipped without a word. `bytesOf` opens the
+   object by its own id (`51eddbd`).
+2. **`Maintenance` asked `projectNames()`, which means "folders that are repositories".** A folder with a marker
+   and no `.git` was therefore never looked at and its marker would sit there for ever (`51eddbd`).
+3. **The housekeeping pass is not a thing a test should start.** It was spawned by every `AppViewModel`
+   construction, so a shard built hundreds of threads that walked temp folders and ran `gc` — correct once per
+   launch, wrong hundreds of times in a shard. It is a constructor seam now (`fb53ddf`).
+
+**And one defect the plan created and the suite caught:** the index queue writes a bookkeeping row into the
+project's own log, and `AgentChat.bursts` starts a burst at whatever row is first — so that row became a turn
+nobody had, and the chat box counted one more than there was (`d624fd6`).
+
+### What is still open, and it is not a gap in this plan
+
+- **`search {history}` indexes the newest `VERSIONS_PER_PATH` (40) commits of the whole project, not 40 per
+  file.** That is the bound the text-mode history already uses, so the two modes agree; a file untouched for
+  longer than the window has no indexed version, and the answer says what it searched rather than pretending.
+- **The history half runs on every pass**, including the ones a commit and a clone ask for, not only when a
+  search asks for versions. It is idempotent and cheap after the first pass (hash dedupe), but the first pass
+  over a long history is the slow one — bounded by the queue's 15-minute stop, which says what is left.
 
 1. **`GitService.walkChanges(repo, deadline) { commit, changes -> }`** — one newest-first walk yielding
    `(CommitInfo, List<Change(path, blobId, kind)>)` via `DiffFormatter` against the parent. Tested against a

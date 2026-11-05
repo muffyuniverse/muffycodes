@@ -21,7 +21,7 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 |---|---|---|
 | 22 | "1 session" row is still visible — remove it | **OPEN** · not a tool report; belongs to the project-screen batch |
 | 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
-| 24 | search regex or text? if reranked why regex? | **CLOSED** step 5 · one `search` with `mode: regex|semantic`; semantic is **per project** (operator, 2026-11-04), reranks the top 30, and has **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
+| 24 | search regex or text? if reranked why regex? | **CLOSED** step 5 · one `search` with `mode: regex|semantic`; semantic is **per project** (operator, 2026-11-04), reranks the top 30, and has **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline`. **`history` works in both modes** since `87c6497`: the index holds saved versions keyed by **blob**, and an answer resolves the blob to a commit at read time (never stored — a prune rewrites every commit, which is why the key is the content) |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
 | 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · then **superseded**: `tree` is gone; `scope` as a path pattern *is* the name filter |
 | 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped; `tree` itself replaced by `search {scope, depth}` |
