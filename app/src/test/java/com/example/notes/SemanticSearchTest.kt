@@ -173,7 +173,11 @@ class SemanticSearchTest {
         // "somewhere in the last forty saves" - and the operator's answer was that history is
         // unbounded: the app is for medium projects, and squashing a bigger one is git's job.
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
-        write("shopping", "milk.txt", "the milk went sour\n")
+        // **The oldest version says something the others do not**, so the search has one candidate
+        // rather than forty-two equal ones. The first attempt asked for "milk", which every version
+        // holds — so the answer was the top ten of a tie, and the oldest was correctly absent from it.
+        // A test that cannot tell "not indexed" from "ranked eleventh" proves nothing.
+        write("shopping", "milk.txt", "the milk went sour and it cost money\n")
         git.init("shopping").getOrThrow()
         // **Read now, not after the saves.** `log()` answers newest-first with its own limit, so
         // asking it at the end for "the last one" gives the oldest *of the window it returned* rather
@@ -188,8 +192,10 @@ class SemanticSearchTest {
             requireNotNull(git.commit("shopping", "save $i"))
         }
 
+        // **Only the oldest version mentions money**, so this answer is a fact about the index rather
+        // than about a ranking among equals.
         val answer = engine()
-            .answer(null, "milk", paths = 10, depth = 8, Deadline.none(), history = true)
+            .answer(null, "money", paths = 10, depth = 8, Deadline.none(), history = true)
             .getOrThrow()
 
         assertTrue(

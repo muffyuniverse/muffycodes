@@ -98,10 +98,20 @@ object GitService {
     fun ensureLfsAttributes(dir: File) {
         try {
             val attributes = File(dir, ".gitattributes")
-            val line = LFS_ATTRIBUTE
+            // **Line by line, because [LFS_ATTRIBUTE] is several lines.** Comparing the whole block
+            // against one line of the file never matches, so the first version appended the block
+            // again on every call — a `.gitattributes` that grew by six lines each time the app
+            // looked at the project, and a "1 changed" that was the app's own doing.
+            val wanted = LFS_ATTRIBUTE.lines().filter { it.isNotBlank() }
             val was = if (attributes.isFile) attributes.readText() else ""
-            if (was.lineSequence().any { it.trim() == line.trim() }) return
-            val now = if (was.isEmpty() || was.endsWith("\n")) was + line else was + "\n" + line
+            val have = was.lines().map { it.trim() }.toSet()
+            val missing = wanted.filter { it.trim() !in have }
+            if (missing.isEmpty()) return
+            val now = if (was.isEmpty() || was.endsWith("\n")) {
+                was + missing.joinToString("") { it + "\n" }
+            } else {
+                was + "\n" + missing.joinToString("") { it + "\n" }
+            }
             attributes.writeText(now)
         } catch (t: Throwable) {
             // A project that could not be told still commits; its pictures are stored whole, which is

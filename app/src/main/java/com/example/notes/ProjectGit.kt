@@ -317,6 +317,13 @@ class ProjectGit(
                     IllegalStateException("This project is not on a branch")
                 )
                 val sent = GitService.ORIGIN + branch
+                // **The kind first, because a pointer reads as text.** Under LFS a picture's blob is
+                // a short UTF-8 line, so `looksBinary` on the bytes would answer "this is text" and
+                // the window would show a hash and a size as though they were the picture. The name
+                // is the fact; the bytes are a guess that LFS defeats.
+                if (Workspace.kindOfPath(path) != EntryKind.TEXT) {
+                    return Result.failure(IllegalStateException("not text, so there is no preview"))
+                }
                 // **Said before it is read**, because reading it is the thing to avoid: a preview of a
                 // 40 MB file would be a page of text the person cannot use and a second of a stalled
                 // screen.
