@@ -50,11 +50,11 @@ class ProjectGitTest {
 
     @Test
     fun `restoring a picture is refused by name, and changes nothing`() {
-        // **The data-corruption case.** Under LFS the tree holds a 130-byte pointer and the bytes
-        // live in a store that is pruned to what the newest commits reference, so the version this
-        // call would be given may already be gone - and writing the pointer over the picture would
-        // replace an image with JSON that happens to be valid UTF-8. The operation is refused rather
-        // than repaired: a file with one version has nothing to restore *from*.
+        // **A picture has one version, so there is nothing to restore *from*.** The rewrite in
+        // `HistoryPrune.keepLatest` makes every commit name the newest bytes, and the collection then
+        // deletes the older ones — so a "version" of a picture is a commit that holds the same bytes
+        // as every other commit. Handing one back would be a restore that changes nothing, presented
+        // as a restore that changes something.
         //
         // **The folders first.** `init` makes the repository but not the project folder, and the
         // first version of this test wrote into a directory that did not exist yet.
@@ -227,8 +227,7 @@ class ProjectGitTest {
         git.init("Shopping").getOrThrow()
         git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
         // **The first version is sent before the counting starts.** A project's first version now
-        // carries `.gitattributes` — committed content, which is what makes a clone elsewhere
-        // understand LFS pointers — and the remote did not exist when it was made. Pushing it here
+        // carries `.gitattributes`, and the remote did not exist when it was made. Pushing it here
         // leaves the project genuinely clean, so the numbers below are about the edits and nothing
         // else. Lowering the expected counts instead would have kept the test passing while it
         // stopped asking its question.
@@ -805,9 +804,8 @@ class ProjectGitTest {
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
         // **Sent first, so the question is about being clean.** The first version carries
-        // `.gitattributes` — committed content, which is what makes a clone elsewhere understand LFS
-        // pointers — and the remote was set after it was made. Sending it leaves the project with
-        // nothing waiting, which is what this test is named for.
+        // `.gitattributes`, and the remote was set after it was made. Sending it leaves the project
+        // with nothing waiting, which is what this test is named for.
         assertTrue("the first version is sent", git.sync("Shopping").success)
         assertEquals(0, git.changes("Shopping").total)
     }

@@ -97,7 +97,7 @@ FetchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/co
 ChunkerTest app/src/main/java/com/example/notes/Chunker.kt
 SearchIndexTest app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
 SemanticSearchTest app/src/main/java/com/example/notes/SemanticSearch.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt app/src/main/java/com/example/notes/GitService.kt
-MaintenanceTest app/src/main/java/com/example/notes/Maintenance.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/LfsStore.kt
+MaintenanceTest app/src/main/java/com/example/notes/Maintenance.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt
 IndexQueueTest app/src/main/java/com/example/notes/IndexQueue.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/SemanticSearch.kt
 McpTest app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
 McpTestTools app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt

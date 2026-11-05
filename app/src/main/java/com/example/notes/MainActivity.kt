@@ -67,12 +67,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // **Before anything opens a repository.** JGit finds the LFS filter through an SPI, and an
-        // unregistered filter is a silent no-op: the commit stores the picture's raw bytes and the
-        // attribute is ignored, with nothing in any log to say why. Registered here as well as in
-        // `ProjectGit.init`, because this is the one place every launch goes through and the call is
-        // idempotent.
-        GitService.registerLfs()
         enableEdgeToEdge()
 
         setContent {

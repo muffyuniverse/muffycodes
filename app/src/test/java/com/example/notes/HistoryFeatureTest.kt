@@ -631,9 +631,9 @@ class HistoryFeatureTest : FeatureTest() {
     fun `a deleted picture cannot be brought back, and the refusal says why`() {
         // **This test used to assert the opposite**, and the change is the point: it proved a
         // picture came back byte for byte, which was right while a picture had versions. A binary now
-        // keeps one version — the newest — and the LFS store keeps only what the newest commits
-        // reference, so the bytes at an old revision may already be gone. Offering it back would be
-        // offering something that may not exist.
+        // keeps one version — the newest — and the older bytes are released at the next collection, so
+        // "the version at that revision" may already be gone. Offering it back would be offering
+        // something that may not exist.
         //
         // The operator's rule: *"no restore for binaries - warn that they will not be tracked by
         // history and removal is irrevercible"*.

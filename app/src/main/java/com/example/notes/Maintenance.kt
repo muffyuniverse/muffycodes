@@ -58,10 +58,10 @@ object Maintenance {
         /**
          * Bytes of stored picture data the sweep reclaimed.
          *
-         * **Separate from [collected], because it is a different store.** `gc` collects the object
-         * database and has never looked inside `.git/lfs/objects` — so a pass that collected the
-         * repository and left every old picture in place would have done the smaller half of the work
-         * and reported success.
+         * **Separate from [collected], because "it ran" is not "it released".** A collection on a
+         * repository with nothing unreachable succeeds and frees almost nothing, and a pass that
+         * reported the first as though it were the second would look identical to one that did
+         * nothing. `-1` means the collection failed.
          */
         val freed: Long = 0L,
         /** Null when the work finished; the reason it did not, otherwise. */
@@ -220,18 +220,13 @@ object Maintenance {
                     val (swept, released) = index.sweep(reachable)
                     rows = swept
                     vectors = released
-                    // **Now, and only now.** `gc` deletes the objects the sweep just proved dead.
-                    collected = HistoryPrune.collect(it)
+                    // **Now, and only now.** `gc` deletes the objects the sweep just proved dead —
+                    // and it is also what releases a rewritten picture's old bytes, which is why it
+                    // expires the reflog first. `-1` means the collection failed rather than that it
+                    // released nothing.
+                    freed = HistoryPrune.collect(it)
+                    collected = freed >= 0L
                     if (!collected) stopped = "the repository could not be collected"
-                    // **And the picture store, which `gc` does not touch.** The tree rewrite made the
-                    // old pointers unreachable; this deletes the bytes they named. Ordered after the
-                    // collection because `gc` is the thing that could fail, and a store swept before a
-                    // failed collection would have deleted bytes whose pointers a later recovery might
-                    // still reach.
-                    //
-                    // **Not fatal.** A store that could not be swept keeps its bytes, which is a few
-                    // megabytes rather than a lost picture.
-                    freed = LfsStore.sweep(it)
                 }
             } finally {
                 index.close()

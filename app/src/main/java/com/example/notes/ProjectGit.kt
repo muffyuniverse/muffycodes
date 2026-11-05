@@ -66,26 +66,9 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
-        // **Registered before any repository is touched.** JGit reaches the LFS filter through an
-        // SPI, and until it is set every LFS operation silently does nothing — a commit stores raw
-        // bytes, the attribute is ignored, and there is no error anywhere to say so. Registering
-        // here rather than only at app start means a test and a fresh process both get it, and the
-        // call is idempotent.
-        GitService.registerLfs()
-        // **The attribute goes in BEFORE the first commit.** `initOrOpen` commits whatever is on
-        // disk as the initial version, so writing the file afterwards leaves it untracked — and then
-        // the next save commits it as a change the person did not make, which is both a lie in the
-        // history and a "1 changed" on a project nobody has touched.
-        GitService.ensureLfsAttributes(dir)
         RepoLocks.hold(dir, "init") {
             val repo = GitService.initOrOpen(dir, authorProvider())
-            try {
-                // **Before anything is committed**, so the very first picture a person saves is a
-                // pointer rather than a 400 KB blob in the object store.
-                GitService.enableLfs(repo)
-            } finally {
-                repo.close()
-            }
+            repo.close()
         }
         // After the repository, because the lines live in `.git/info/exclude` — they are the app's
         // own local rule, not a file in the person's repository.
@@ -182,10 +165,11 @@ class ProjectGit(
                     // **A binary has one version, and this is where that is made true.**
                     //
                     // The commit just written holds the newest bytes; every earlier commit that held
-                    // this path is rewritten to hold the same blob, which is what makes the old LFS
-                    // objects unreachable. Done here because this is the only moment the app knows
-                    // both facts at once: which paths this commit touched, and that a commit just
-                    // happened. `Maintenance` then reclaims the bytes at the next app start.
+                    // this path is rewritten to hold the same blob, which is what makes the old blob
+                    // unreachable — and a blob nothing reaches is a blob `gc` may delete. Done here
+                    // because this is the only moment the app knows both facts at once: which paths
+                    // this commit touched, and that a commit just happened. `Maintenance` then
+                    // reclaims the bytes at the next app start.
                     //
                     // **Only non-text paths, and only when a commit was written.** A text file's
                     // history is the product, so collapsing it would destroy the feature; and a commit
@@ -201,9 +185,10 @@ class ProjectGit(
                         var collapsed = 0
                         for (path in binaries) collapsed += HistoryPrune.keepLatest(it, path)
                         if (collapsed > 0) {
-                            // **A marker, not a collection.** `gc` and the LFS sweep are proportional
-                            // to the whole repository; running them inside a save would make the save
-                            // wait for them. The unreachable objects are harmless until then.
+                            // **A marker, not a collection.** `gc` is proportional to the whole
+                            // repository — it repacks every object — so running it inside a save would
+                            // make the save wait for work that is not about this save. The unreachable
+                            // blob is harmless until then: it costs its own size and nothing else.
                             Maintenance.mark(repoDir(project), "a picture was saved")
                         }
                     }
@@ -345,10 +330,10 @@ class ProjectGit(
                     IllegalStateException("This project is not on a branch")
                 )
                 val sent = GitService.ORIGIN + branch
-                // **The kind first, because a pointer reads as text.** Under LFS a picture's blob is
-                // a short UTF-8 line, so `looksBinary` on the bytes would answer "this is text" and
-                // the window would show a hash and a size as though they were the picture. The name
-                // is the fact; the bytes are a guess that LFS defeats.
+                // **The kind first, before anything is read.** A preview of a picture is a page of
+                // replacement characters, and `looksBinary` is a guess about bytes where the name is
+                // a fact. Saying so before the read is also what keeps a 40 MB file from being
+                // loaded to answer a question the name already answered.
                 if (Workspace.kindOfPath(path) != EntryKind.TEXT) {
                     return Result.failure(IllegalStateException("not text, so there is no preview"))
                 }
@@ -420,21 +405,9 @@ class ProjectGit(
             deadline,
         )
         if (result.success) {
-            open(project)?.use { repo ->
-                GitService.scrubRemoteUrls(repo)
-                // **A cloned project arrives with the attribute already committed** — that is what
-                // makes LFS portable — but the *filter* is per-repository configuration, and a
-                // clone does not carry it. Without this the pointers would be checked out as
-                // pointers: a project of 130-byte files that look like corruption.
-                GitService.enableLfs(repo)
-            }
+            open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
-            // **Not `ensureLfsAttributes` here.** A cloned project carries the attribute *committed*,
-            // because that is what makes LFS portable — writing it again would either be a no-op or,
-            // on a repository that predates it, a change the person did not make appearing in their
-            // "1 changed". A project without the line keeps its pictures stored whole, which is what
-            // every build before this one did.
             // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
             // hundreds of files at once and commits none of them, so the commit hook above never
             // fires for it — and a project that arrived from GitHub is exactly the case where the
