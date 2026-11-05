@@ -268,18 +268,14 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `sync cannot be pressed when nothing has changed`() {
-        scene.signedIn()
-        scene.project("groceries")
-        scene.open("groceries")
-        browser()
-
-        awaitText("up to date")
-        compose.onNodeWithText("Sync").assertIsNotEnabled()
-    }
-
-    @Test
-    fun `sync is a pressable button when something has changed, and it carries no number`() {
+    fun `there is no Sync button, in the row or anywhere else`() {
+        // **The operator moved the decision to the agent.** "we can remove this functionality and
+        // transfer it to agent so that it can determine when to push" — so a person pressing Sync
+        // would be a second writer deciding the same question, and the two could disagree about
+        // which commit is being sent.
+        //
+        // **Asserted as an absence, which is the only way to keep a removed button removed.** A
+        // test that only checked the count would pass with the button quietly restored.
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -290,13 +286,9 @@ class BrowserChromeTest {
         }
         browser()
 
-        // **One thing, and it is a button.** There used to be a caption reading "1 to send" and a
-        // button reading "See changes" beside it — the same fact twice, and the half a person would
-        // want to press was the one without the number. Report 30 asked for them to be one:
-        // "see <n> changes" *is* the button, and there is no separate caption any more.
+        // The count stays: it is how a person learns work exists that GitHub does not have.
         awaitText("See 1 change")
-        compose.onNodeWithText("Sync").assertIsEnabled()
-        compose.onNodeWithText("Sync").performClick()
+        compose.onAllNodesWithText("Sync").assertCountEquals(0)
     }
 
     @Test
