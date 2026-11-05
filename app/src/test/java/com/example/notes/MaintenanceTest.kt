@@ -19,15 +19,14 @@ import java.io.File
  *
  * > *"git gc never runs? so we actually never prune anything, just remove commits?"*
  *
- * Yes: `HistoryPrune.prune` rebuilds the chain and moves a ref, and nothing ever deleted the objects
- * it stranded — the function written to delete them had no caller. So the tests here are about the
- * three things that make wiring it up safe:
+ * Yes — and the answer has since changed twice. `gc` collects the object database, but a pointer's
+ * bytes are not in it: they live in `.git/lfs/objects`, which `gc` has never looked inside. So the
+ * tests here are about the things that make housekeeping safe:
  *
- * 1. **Only where something is waiting.** A project that was never pruned has nothing to collect, and
+ * 1. **Only where something is waiting.** A project that was never marked has nothing to collect, and
  *    `gc` on it is pure cost proportional to the whole repository.
- * 2. **The sweep runs first, and only ever touches saved versions.** `gc` destroys the evidence the
- *    sweep needs; and a prune says nothing about the working tree, so the current file's rows must
- *    survive it.
+ * 2. **The sweep only ever touches bytes nothing points at.** Each stored file is named by its own
+ *    oid, so reachability is answered by reading the pointers in the trees, never by guessing paths.
  * 3. **A project that could not be collected keeps its marker**, so the next start asks again rather
  *    than silently never collecting.
  */
@@ -248,143 +247,80 @@ class MaintenanceTest {
         assertTrue("and the marker survived for the next start", Maintenance.waiting(dir))
     }
 
-    // ---- 4 and 5: a binary keeps one version, and the bytes go ----------------
+    // ---- the picture store, which `gc` has never looked inside ----------------
 
     @Test
-    fun `saving a picture twice leaves one blob, and every commit points at it`() {
-        // **The whole of binary retention, in one assertion.** A picture has no history worth keeping:
-        // its versions are megabytes each and they do not compress. So after two saves the repository
-        // must hold ONE set of bytes, and every commit that mentions the path must name it.
-        //
-        // **No LFS involved, and that is the finding.** LFS was going to hold the bytes outside the
-        // object database, and its push cannot authenticate — `LfsPrePushHook` sends no
-        // `Authorization` header, so a real repository answers 401. Measured instead: a plain blob plus
-        // the tree rewrite gives the same guarantee, and `gc` collects the old one.
+    fun `the sweep removes the bytes nothing points at, and keeps the ones that are used`() {
+        // **`gc` does not know this directory exists.** It collects commits, trees and blobs; a
+        // pointer's bytes live in `.git/lfs/objects`, which is a content-addressed store the filter
+        // writes and the smudge reads. So two objects on disk and one pointer in the trees must leave
+        // exactly one file behind, and the file whose oid is still named must not be touched.
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
         write("milk.txt", "the milk went sour\n")
         git.init("shopping").getOrThrow()
-        val picture = File(ws.projectDir("shopping"), "page.png")
-        picture.writeBytes(PNG_A)
+        File(ws.projectDir("shopping"), "page.png").writeBytes(PNG_A)
         git.commit("shopping", "a picture")
-        val first = git.open("shopping")!!.use { blobAt(it, "page.png", "HEAD") }
-
-        picture.writeBytes(PNG_B)
-        git.commit("shopping", "drawn on")
 
         git.open("shopping")!!.use {
-            // **Every commit names the newest bytes**, which is what makes the older blob
-            // unreachable rather than merely unreferenced by the newest commit.
-            val named = commits(it).mapNotNull { c -> blobAt(it, "page.png", c.name) }.distinct()
-            assertEquals("every commit holds the same blob: $named", 1, named.size)
-            assertFalse("and it is not the first one", named.single() == first)
-            assertTrue(
-                "which is the newest bytes",
-                repoBytes(it, named.single()!!).contentEquals(PNG_B),
-            )
-        }
-    }
+            val used = storedObjects(it)
+            assertEquals("one object to begin with", 1, used.size)
+            // **A second object written straight into the store**, which is the shape a version no
+            // commit points at takes. Its oid is nobody's pointer.
+            val orphan = File(it.directory, "lfs/objects/ab/cd/abcdef0123456789")
+            orphan.parentFile?.mkdirs()
+            orphan.writeBytes(ByteArray(4096))
+            assertEquals("two now", 2, storedObjects(it).size)
 
-    @Test
-    fun `a collection releases the old picture's bytes, and keeps everything else`() {
-        // **The half that makes the rewrite worth doing.** Rewriting the trees only makes the bytes
-        // unreachable; something has to delete them, and a plain `gc` does not — it treats everything
-        // named by `logs/refs/heads/<branch>` as reachable, and a rewrite leaves the original commits
-        // there. Measured on a 400 KB blob: it survived a plain `gc`, a `gc` with `setExpire(now)`,
-        // and a `gc` with `expire = 0`; it went only once the reflog was deleted.
-        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
-        write("milk.txt", "the milk went sour\n")
-        git.init("shopping").getOrThrow()
-        val picture = File(ws.projectDir("shopping"), "page.png")
-        picture.writeBytes(PNG_A)
-        git.commit("shopping", "a picture")
-        val first = git.open("shopping")!!.use { blobAt(it, "page.png", "HEAD") }
+            val freed = LfsStore.sweep(it)
 
-        picture.writeBytes(PNG_B)
-        git.commit("shopping", "drawn on")
-
-        git.open("shopping")!!.use {
-            assertTrue("the old blob exists before the collection", it.objectDatabase.has(first))
-            val freed = HistoryPrune.collect(it)
-            assertTrue("the collection ran and reported bytes: $freed", freed >= 0L)
-            assertFalse("the old picture's bytes are gone", it.objectDatabase.has(first))
-            // **And the history is intact.** A collection that removed a commit would be a shortened
-            // history arrived at by accident, which is exactly what the rewrite's parent rule exists
-            // to prevent.
-            assertEquals("every commit is still there", 2, commits(it).size)
-            assertTrue(
-                "and the newest bytes are still the picture",
-                repoBytes(it, blobAt(it, "page.png", "HEAD")!!).contentEquals(PNG_B),
-            )
+            assertEquals("only the orphan went", 1, storedObjects(it).size)
+            assertTrue("and the used one survived", used.single().isFile)
+            assertEquals("the freed size is the orphan's", 4096L, freed)
         }
     }
 
     @Test
     fun `a picture saved under a new name keeps both`() {
-        // **The other half of the rule.** One version per file, not one version per project: saving
-        // under a new name is the operator's versioning option, so the original must survive the
-        // rewrite and the collection untouched.
+        // **One version per file, not one version per project.** Saving under a new name is the
+        // operator's versioning option, so the original must survive the sweep untouched.
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
         write("milk.txt", "the milk went sour\n")
         git.init("shopping").getOrThrow()
         val dir = ws.projectDir("shopping")
         File(dir, "page.png").writeBytes(PNG_A)
         git.commit("shopping", "a picture")
-        val first = git.open("shopping")!!.use { blobAt(it, "page.png", "HEAD") }
         File(dir, "page-2.png").writeBytes(PNG_B)
         git.commit("shopping", "a copy")
 
         git.open("shopping")!!.use {
-            HistoryPrune.collect(it)
-            assertTrue("the first picture's bytes survive", it.objectDatabase.has(first))
-            assertTrue(
-                "and the copy is a picture too",
-                repoBytes(it, blobAt(it, "page-2.png", "HEAD")!!).contentEquals(PNG_B),
-            )
+            assertEquals("both pictures are stored", 2, storedObjects(it).size)
+            LfsStore.sweep(it)
+            assertEquals("and the sweep keeps both", 2, storedObjects(it).size)
         }
     }
 
     @Test
-    fun `text keeps every version, so a collection releases none of it`() {
-        // **The rule is about the kind of file, and this is the assertion that says so.** A rewrite
-        // that ran on a text file would delete the history, which is the product — so the guard is
-        // that text is never rewritten, and this proves the collection then has nothing to take.
+    fun `a sweep with nothing to reclaim answers nothing, and does not invent a number`() {
+        // **"The collection ran" is not "it released something".** A store where every object is
+        // still named must answer zero, so a person is never told bytes were freed when none were.
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
-        write("milk.txt", "one\n")
+        write("milk.txt", "the milk went sour\n")
         git.init("shopping").getOrThrow()
-        val first = git.open("shopping")!!.use { blobAt(it, "milk.txt", "HEAD") }
-        repeat(3) { i ->
-            write("milk.txt", "draft $i\n")
-            git.commit("shopping", "save $i")
-        }
+        File(ws.projectDir("shopping"), "page.png").writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
 
         git.open("shopping")!!.use {
-            HistoryPrune.collect(it)
-            assertTrue("every draft is still readable", it.objectDatabase.has(first))
-            assertEquals("and there are four versions", 4, commits(it).size)
+            assertEquals("nothing was reclaimable", 0L, LfsStore.sweep(it))
+            assertEquals("and the picture is still stored", 1, storedObjects(it).size)
         }
     }
 
-    /** The blob a path holds at [rev], or in [rev]'s commit when a commit id is given. */
-    private fun blobAt(
-        repo: org.eclipse.jgit.lib.Repository,
-        path: String,
-        rev: String,
-    ): org.eclipse.jgit.lib.ObjectId? = try {
-        val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use { it.parseCommit(repo.resolve(rev)) }
-        org.eclipse.jgit.treewalk.TreeWalk.forPath(repo, path, commit.tree)?.getObjectId(0)
-    } catch (e: Throwable) {
-        null
+    /** Every file under `.git/lfs/objects`, which is the store `gc` never looks at. */
+    private fun storedObjects(repo: org.eclipse.jgit.lib.Repository): List<File> {
+        val root = LfsStore.dirOf(repo)
+        if (!root.isDirectory) return emptyList()
+        return root.walkTopDown().filter { it.isFile }.toList()
     }
-
-    /** The bytes a blob holds, so "it is the picture" can be asserted rather than inferred. */
-    private fun repoBytes(repo: org.eclipse.jgit.lib.Repository, id: org.eclipse.jgit.lib.ObjectId): ByteArray =
-        repo.open(id).bytes
-
-    private fun commits(repo: org.eclipse.jgit.lib.Repository) =
-        org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
-            walk.markStart(walk.parseCommit(repo.resolve("HEAD")))
-            walk.toList()
-        }
 
     private companion object {
         /**

@@ -10,9 +10,10 @@ import java.io.File
  * 1. **the sweep** — delete the index rows of saved versions whose content no commit reaches any
  *    more. A prune rebuilds the chain with identical trees, so the blobs of the dropped commits are
  *    now unreachable, and a row naming one would be a search hit nobody can read;
- * 2. **the collection** — `git gc`, which finally deletes the objects themselves. It is proportional
- *    to the whole repository rather than to what changed, which is why [HistoryPrune] refuses to run
- *    it inside a save: every save would wait for a full walk.
+ * 2. **the picture store** — delete the bytes in `.git/lfs/objects` that no pointer names any more.
+ *    `git gc` does not know that directory exists, so without this a deleted picture's bytes stay on
+ *    the phone for ever. It is proportional to what is stored rather than to the whole repository,
+ *    which is why it is safe to run here and a full `gc` is not.
  *
  * ## Why a marker, and not a timer
  *
@@ -220,13 +221,13 @@ object Maintenance {
                     val (swept, released) = index.sweep(reachable)
                     rows = swept
                     vectors = released
-                    // **Now, and only now.** `gc` deletes the objects the sweep just proved dead —
-                    // and it is also what releases a rewritten picture's old bytes, which is why it
-                    // expires the reflog first. `-1` means the collection failed rather than that it
-                    // released nothing.
-                    freed = HistoryPrune.collect(it)
-                    collected = freed >= 0L
-                    if (!collected) stopped = "the repository could not be collected"
+                    // **The picture store, not the object database.** A pointer's bytes are not in
+                    // the object database: they live in `.git/lfs/objects`, which `gc` has never
+                    // looked inside. Reachability is read from the pointers in the trees, so a file
+                    // whose oid no commit names is by definition dead. Zero means there was nothing
+                    // to reclaim, which is a different answer from "it could not run".
+                    freed = LfsStore.sweep(it)
+                    collected = true
                 }
             } finally {
                 index.close()
