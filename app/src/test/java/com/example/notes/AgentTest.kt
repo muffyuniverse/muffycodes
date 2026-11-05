@@ -2446,6 +2446,42 @@ class AgentTest {
     }
 
     @Test
+    fun `state names the paths a push would leave behind`() {
+        // **The number that stops a lie.** An ignored file is not a change and not unsent — it is on
+        // the phone and will never be on GitHub until somebody says so. Without this a project
+        // holding a video and one note answered "Nothing to send", which is true of the note and a
+        // lie about the project: the agent would tell the person their work was on GitHub when half
+        // of it was not.
+        // **`createdByOperator`, because a binary is exactly what it holds back.** A `.mp4` is
+        // UNKNOWN, so the person's default ignores it — and git then reports it as ignored, which is
+        // the state this test is about. No test-only back door needed.
+        val ignored = File(ws.repoOf("shopping"), "holiday.mp4")
+        ignored.writeBytes(ByteArray(4096))
+        ws.createdByOperator(ignored)
+
+        val said = call("state")
+
+        assertTrue("it answers: $said", said.startsWith("0"))
+        assertTrue("and names the ignored path: $said", said.contains("ignored"))
+        assertTrue("with its size: $said", said.contains("4 KB"))
+        assertTrue("and does not claim the project is fully sent: $said", !said.contains("Nothing to send"))
+    }
+
+    @Test
+    fun `pull says there is nothing new when the remote has not moved`() {
+        // **The quiet answer is the answer**, and it has to be distinguishable from a failure: an
+        // agent that could not tell "nothing arrived" from "the pull broke" would retry a working
+        // call or give up on a broken one.
+        val said = call("pull")
+
+        assertTrue("it succeeds: $said", said.startsWith("0"))
+        assertTrue(
+            "and says the remote had nothing: $said",
+            said.contains("up to date") || said.contains("nothing"),
+        )
+    }
+
+    @Test
     fun `push refuses while there is an uncommitted change`() {
         // **A push sends commits, not files.** If a write had not committed, pushing would deliver
         // something the agent never chose — and the agent would believe its change had gone.

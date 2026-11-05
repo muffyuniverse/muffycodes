@@ -288,7 +288,10 @@ class SelectionFeatureTest : FeatureTest() {
         val before = scene.headId()
 
         scene.viewModel.toggleLocked(file)
-        assertTrue("unlocked", ws.hold(file, ws.locked()) == null)
+        // **`Hold.NONE`, not null.** `hold` answers an enum and never null, so `== null` is a
+        // comparison the compiler folds away — the warning said "Condition is always 'false'" and
+        // it was right: this assertion could not have passed whatever the code did.
+        assertTrue("unlocked", ws.hold(file, ws.locked()) == Workspace.Hold.NONE)
         scene.viewModel.toggleLocked(file)
 
         assertTrue("locked again", ws.hold(file, ws.locked()) == Workspace.Hold.USER)
