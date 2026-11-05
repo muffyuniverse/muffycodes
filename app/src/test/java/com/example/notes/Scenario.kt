@@ -241,7 +241,11 @@ class Scenario(
                 val digest = java.security.MessageDigest.getInstance("SHA-256")
                     .digest(onDisk)
                     .joinToString("") { "%02x".format(it) }
-                inTree.contains(digest)
+                // **Either shape is "recorded".** With the LFS filter registered the tree holds a
+                // pointer naming the digest; a scenario that never registered it holds the picture
+                // whole, which is what every build before LFS did. The question here is whether the
+                // newest version is *this* picture, and both answers say yes.
+                inTree.contains(digest) || inTree == String(onDisk, Charsets.UTF_8)
             } else {
                 inTree == file.readText()
             }

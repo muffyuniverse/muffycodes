@@ -114,11 +114,10 @@ class LfsSyncTest {
         // **A failure has to say what happened.** A project that stays on the phone has no endpoint,
         // and the answer names that rather than reporting a network error that never occurred.
         //
-        // **The bytes are deleted first, so there is genuinely something to send.** A project whose
-        // store already holds everything answers "nothing to do" before it looks for an address —
-        // which is right, and is a different case from this one.
+        // **The store holds the bytes, which is what gives the push something to send.** An empty
+        // store answers "nothing to do" before it looks for an address, which is right and is a
+        // different case — see the test below.
         commitPicture("page.png", PNG)
-        LfsSync.fileOf(repo, sha256(PNG))!!.delete()
 
         val sent = LfsSync.push(repo, "a-token", remoteUrl = null)
         assertFalse("it did not succeed", sent.ok)
@@ -142,7 +141,6 @@ class LfsSyncTest {
         // **Anonymous is a 401 dressed up as a network problem.** The real cause is that nobody is
         // signed in, so that is what the sentence says.
         commitPicture("page.png", PNG)
-        LfsSync.fileOf(repo, sha256(PNG))!!.delete()
 
         val sent = LfsSync.push(repo, null, "https://github.com/owner/repo.git")
 
@@ -151,11 +149,12 @@ class LfsSyncTest {
     }
 
     @Test
-    fun `a project whose pictures are all present has nothing to send and nothing to fetch`() {
+    fun `a project with no pictures needs neither an address nor a token`() {
         // **The case that made every text project fail its sync.** Nothing to move means no address
         // and no token are needed, so the answer is success — not a sentence about pictures the
         // project does not have to send.
-        commitPicture("page.png", PNG)
+        write("milk.txt", "the milk went sour\n")
+        commit("a note")
 
         val sent = LfsSync.push(repo, null, remoteUrl = null)
         assertTrue("nothing to send is not a failure: ${sent.why}", sent.ok)
