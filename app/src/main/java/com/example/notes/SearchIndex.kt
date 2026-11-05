@@ -513,6 +513,12 @@ class SearchIndex private constructor(
         }
 
         private fun create(db: SQLiteDatabase) {
+            // **A column added to a table that already exists is not added by `CREATE TABLE IF NOT
+            // EXISTS`.** That statement is a no-op on an existing table, so a phone that indexed
+            // before `size` existed keeps a `files` table without it - and then every `note()`, which
+            // names the column, throws. The pass would fail on the one device that has been used.
+            // This is the whole of the migration: there is nothing to compute, because a row with no
+            // size is a row that must be re-read once, and `-1` says exactly that.
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS chunks(
@@ -570,6 +576,24 @@ class SearchIndex private constructor(
                 )
                 """.trimIndent(),
             )
+            addColumn(db, "files", "size", "INTEGER NOT NULL DEFAULT -1")
+        }
+
+        /**
+         * Adds [column] to [table] if it is not already there.
+         *
+         * **`ALTER TABLE ... ADD COLUMN` has no `IF NOT EXISTS`**, so the question is asked of
+         * `PRAGMA table_info` first. `NOT NULL DEFAULT` is allowed on an added column precisely
+         * because the default is not null: the rows that were there before get the default, which is
+         * what makes this a migration with nothing to compute.
+         */
+        private fun addColumn(db: SQLiteDatabase, table: String, column: String, type: String) {
+            db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                while (c.moveToNext()) {
+                    if (c.getString(1) == column) return
+                }
+            }
+            db.execSQL("ALTER TABLE $table ADD COLUMN $column $type")
         }
 
         /**

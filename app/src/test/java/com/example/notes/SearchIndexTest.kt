@@ -57,8 +57,58 @@ class SearchIndexTest {
         index.clear()
     }
 
+    @Test
+    fun `an index made before the size column existed gains it, and keeps its rows`() {
+        // **The phone that has been used is the one this breaks.** `CREATE TABLE IF NOT EXISTS` is a
+        // no-op on a table that already exists, so the `files` table written by an earlier build has
+        // no `size` column - and every `note()` names it, so every indexing pass on that phone would
+        // throw. The migration is asked for on open, and a row that was there before must survive it
+        // rather than be dropped: dropping it would re-embed every file in the project.
+        //
+        // **Its own folder**, so no open handle is left pointing at a deleted file: this test writes
+        // a database with the *old* schema by hand, because the point is one this code did not make.
+        val old = File(temp.root, "already-used")
+        val file = File(File(old, AgentLog.DIR), SearchIndex.FILE)
+        file.parentFile?.mkdirs()
+        val db = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            db.execSQL(
+                "CREATE TABLE files(path TEXT PRIMARY KEY, mtime INTEGER NOT NULL, " +
+                    "state INTEGER NOT NULL, error TEXT)",
+            )
+            db.execSQL(
+                "CREATE TABLE chunks(path TEXT NOT NULL, version TEXT NOT NULL DEFAULT '', " +
+                    "hash TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, " +
+                    "PRIMARY KEY(path, version, start))",
+            )
+            db.execSQL("CREATE TABLE vectors(hash TEXT PRIMARY KEY, vector BLOB NOT NULL)")
+            db.execSQL(
+                "CREATE TABLE meta(id INTEGER PRIMARY KEY, model TEXT NOT NULL, " +
+                    "dims INTEGER NOT NULL)",
+            )
+            db.execSQL("INSERT INTO files(path, mtime, state) VALUES('milk.txt', 7, 0)")
+        } finally {
+            db.close()
+        }
+
+        // Opening it is the migration, and the row from before is still there with the default size.
+        val reopened = SearchIndex.open(old)
+        try {
+            assertEquals(
+                "the old row survived, with its size unknown rather than zero",
+                7L to -1L,
+                reopened.seen("milk.txt"),
+            )
+            // **And the insert that used to throw now works**, which is the actual failure.
+            reopened.note("bread.txt", 9L, SearchIndex.INDEXED, size = 12L)
+            assertEquals("the new row", 9L to 12L, reopened.seen("bread.txt"))
+        } finally {
+            reopened.clear()
+        }
+    }
+
     /**
-     * A vector of [size] where every component is [value] — **so a query can be made to land near a
+     ** A vector of [size] where every component is [value] — **so a query can be made to land near a
      * known chunk** without pretending to be an embedding model.
      */
     private fun vector(size: Int, value: Float) = FloatArray(size) { value }
