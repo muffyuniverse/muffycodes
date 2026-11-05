@@ -334,7 +334,20 @@ object AgentChat {
                 AgentLog.USAGE -> Unit
                 AgentLog.TURN -> out.add(mutableListOf())
                 else -> {
-                    if (out.isEmpty()) out.add(mutableListOf())
+                    // **A turn has to begin with something the turn machinery wrote.** Rows before
+                    // any boundary are a record written before the app marked its requests — one
+                    // turn, drawn as one — *except* the app's own bookkeeping, which is not a turn
+                    // at all.
+                    //
+                    // The index queue writes one such row per pass, and it lands whenever the pass
+                    // finishes: before the first thing a person says, if the project was cloned or
+                    // indexed first. That row was becoming a turn of its own, so the box counted one
+                    // more turn than there was — and a test waiting for "one turn" waited for ever
+                    // while the record held exactly one.
+                    if (out.isEmpty()) {
+                        if (row.ctx == AgentLog.APP) continue
+                        out.add(mutableListOf())
+                    }
                     out.last().add(row)
                 }
             }

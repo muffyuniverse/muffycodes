@@ -382,7 +382,16 @@ class AgentLog private constructor(
         fun bursts(rows: List<Row>): List<List<Row>> {
             val out = mutableListOf<MutableList<Row>>()
             for (row in rows) {
-                if (row.startsBurst || out.isEmpty()) out.add(mutableListOf())
+                if (out.isEmpty()) {
+                    // **The app's own rows before anything else are not a conversation.** The index
+                    // queue writes one bookkeeping row per pass, and it lands before the first thing
+                    // a person says whenever a project was indexed or cloned first. Counting it as a
+                    // burst made the box draw a turn that nobody had — and made "one turn" mean two.
+                    if (row.ctx == APP) continue
+                    out.add(mutableListOf())
+                } else if (row.startsBurst) {
+                    out.add(mutableListOf())
+                }
                 out.last().add(row)
             }
             return out.filter { it.isNotEmpty() }.map { it.toList() }

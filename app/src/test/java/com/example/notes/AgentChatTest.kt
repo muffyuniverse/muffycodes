@@ -92,6 +92,42 @@ class AgentChatTest {
     }
 
     @Test
+    fun `a bookkeeping row before the conversation is not a turn of its own`() {
+        // **The index queue writes one row per pass, into the same file.** It lands whenever the
+        // pass finishes — before the first thing a person says, if the project was cloned or indexed
+        // first — and counting it as a turn made the box draw a turn nobody had, so "one turn" meant
+        // two and a test waiting for one waited for ever while the record held exactly one.
+        val box = AgentChat.box(
+            listOf(
+                row(AgentLog.NOTE, "index", "the project was added: nothing had changed", ctx = AgentLog.APP),
+                told("what is in the project"),
+                turn(),
+                row(AgentLog.NOTE, "agent", "There is one file."),
+            ),
+        )
+
+        assertEquals("one turn, and it is the one the person had", 1, box!!.turns.size)
+        assertEquals("the person's words", "what is in the project", box.told)
+    }
+
+    @Test
+    fun `a bookkeeping row after the conversation is not a turn either`() {
+        // **The other half, and the one that would bite on the next save.** A pass that finishes
+        // while the person is reading appends its row to the end of the record; the box has already
+        // drawn its turns and must not grow a new one for it.
+        val box = AgentChat.box(
+            listOf(
+                told("what is in the project"),
+                turn(),
+                row(AgentLog.NOTE, "agent", "There is one file."),
+                row(AgentLog.NOTE, "index", "a change was saved", ctx = AgentLog.APP),
+            ),
+        )
+
+        assertEquals("still one turn", 1, box!!.turns.size)
+    }
+
+    @Test
     fun `an empty record has nothing to show`() {
         assertNull(AgentChat.box(emptyList()))
         assertNull("a record that starts mid-conversation is not a conversation", AgentChat.box(listOf(call("search"))))
