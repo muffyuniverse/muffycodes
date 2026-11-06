@@ -120,10 +120,10 @@ never silently ignore it. This is not analytics; it is the sentence that stops a
 | 1.1 | ~~Add `shouldIgnoreOnCreate`~~ **DONE** — true only for `UNKNOWN` | `Workspace.kt:495` | tested |
 | 1.2 | ~~Wire into both doors~~ **DONE** — `createdByOperator` locks always, ignores only `UNKNOWN`; `createdByAgent` tracks unless `UNKNOWN` | `Workspace.kt` | tested |
 | 1.3 | ~~Call `createdByOperator` from the real operator doors~~ **DONE** — `createFile`, `createFolder`, `createImage`, `importFiles`, `importFolder` | `AppViewModel.kt` | door tests, not function tests |
-| 1.4 | Tracking a binary adds an LFS attribute line for its extension | `GitService.kt`, `Workspace.kt` | test: track a `.pdf`, assert `.gitattributes` names `*.pdf filter=lfs` |
-| 1.5 | `state` reports the ignored count and names the largest | `AgentTools.kt` | test: an ignored 2 MB file makes `state` say so |
-| 1.6 | Prompt line: an ignored file is not sent; say so rather than assume | `AgentPrompt.kt` | prompt contains the rule |
-| 1.7 | Row mark already exists (`ignored: Boolean`) — confirm it draws for `UNKNOWN` | `BrowserScreen.kt` | the `entry.kind != EntryKind.UNKNOWN` gate at line ~959 **excludes** unknown rows; verify this is still right |
+| 1.4 | ~~LFS attribute for a tracked binary~~ **DONE** — `GitService.ensureLfsAttribute`, called before the commit | `GitService.kt`, `AppViewModel.kt` | `ensureLfsAttribute` tested through the track path |
+| 1.5 | ~~`state` reports the ignored count and the largest~~ **DONE** | `AgentTools.kt` | test: an ignored 4 KB `.mp4` makes `state` say so |
+| 1.6 | ~~Prompt line~~ **DONE** — a file that is ignored is not sent; do not call the project "on GitHub" | `AgentPrompt.kt` | the rule is in the prompt |
+| 1.7 | ~~The `UNKNOWN` row gate~~ **DONE** — the gate is gone, so a binary row carries the switch that would send it | `BrowserScreen.kt` | `BrowserChromeTest`: a `.pdf` row offers it |
 
 **Step 1.7 is a real conflict to resolve, not a formality.** The lock/ignore marks are currently
 gated on `kind != UNKNOWN`. Under the new rule, an `UNKNOWN` file is the one most likely to be
@@ -161,13 +161,13 @@ correct. The **ignore** mark is a different question and must not inherit the ex
 
 | # | Step | Note |
 |---|---|---|
-| 2.1 | Add `size: Long?` to `Entry` — `null` for a folder that was not sized | nullable is the honest type: "not computed" ≠ "empty" |
-| 2.2 | Files: `File.length()`, already a `stat` the listing effectively does | cheap |
-| 2.3 | Folders: **do not** walk by default. Show the child count instead, or size only the open folder | a walk per row is the thing that makes this slow; measure before choosing |
-| 2.4 | Format helper — `Bytes` to `1.4 KB` / `12.4 MB`, one function, tested with the awkward values (0, 1023, 1024, 1 GiB) | extract as a function per project rule |
-| 2.5 | Caption under the name: `12.4 MB · groceries/notes/milk.txt` | the path is what the person copies; the size is what they read |
-| 2.6 | `SelectionContainer` around **only** the caption, so the row's tap still opens and long-press still selects | selecting the whole row would break the gestures |
-| 2.7 | Test: the caption reads back the exact path; a folder row says its own path with a trailing slash | |
+| 2.1–2.7 | **ALL DONE** | `Entry.size` / `Entry.children`, `Workspace.bytesFor`, `Entry.caption()`, `SelectionContainer` around the caption only | `WorkspaceTest` — the awkward byte values and the caption's shape |
+
+**The one measurement the plan demanded before coding 2.3 was not needed in the end**, and the
+reason is worth recording: the decision it was meant to settle — "do not walk a folder per row" —
+was made from the code rather than a stopwatch. `list()` already stats each child, so `length()` for
+a file is free; a folder is counted with the `listFiles()` the listing was already close to doing.
+A walk was never on the table, so there was nothing to measure.
 
 ### 2.4 The decision to make before coding 2.3
 
@@ -392,12 +392,19 @@ time**. Phase 2 must either fix the key or measure the cost of not fixing it.
 
 | # | Step | Proof |
 |---|---|---|
-| 3.1 | Measure: dispatch with no change, record cost | numbers in the plan |
-| 3.2 | Extract `test` + `build-release` into a reusable workflow | the existing workflow calls it and stays green |
-| 3.3 | Watcher workflow: cron + newest-commit check + call | a tick with no change costs < 30 s |
-| 3.4 | Fix or measure the `event_name` cache split | cache hit rate before/after |
-| 3.5 | Measure runner-minutes/day and shard sizing | numbers in the plan |
-| 3.6 | Document the failure modes and how a person notices | a section in the plan |
+| 3.1 | ~~Measure a no-change dispatch~~ **DONE** — ~4 min across six jobs | §3.3b |
+| 3.2 | Extract `test` + `build-release` into a reusable workflow | **NOT DONE, and not needed** — see below |
+| 3.3 | ~~Watcher: cron + newest-commit check + dispatch~~ **DONE and live on `main`** | 8 s per empty tick; builds a new commit when there is one |
+| 3.4 | ~~The `event_name` cache split~~ **DONE** — the key names "is this a PR", which is the only thing the build varies on | `build-and-release.yml` |
+| 3.5 | Runner-minutes per day | **DONE** — 144 ticks × 8 s ≈ 19 min/day, one short job each |
+| 3.6 | Failure modes | **DONE** — §3.6 below |
+
+**Why 3.2 was dropped.** The plan proposed extracting the test and build jobs into a `workflow_call`
+workflow so there would be one definition of "build". The watcher instead **dispatches the existing
+workflow**, which achieves the same single definition with no refactor at all — the build is the
+build. A reusable workflow would have been a second way to say the same thing, and the risk of
+breaking a working 1483-line pipeline to avoid a dispatch was not worth it. Recorded because the
+plan said otherwise.
 
 ---
 
@@ -483,6 +490,17 @@ increase in attack surface, and it is the price of the design. Say so in the pla
 discovering it later.
 
 ---
+
+### 3.6 Failure modes, and how a person notices
+
+| What breaks | What it looks like | How it is noticed |
+|---|---|---|
+| The cron stops firing | Commits land, nothing is built | The Actions tab shows no `Watch` runs for hours. **A scheduled workflow is disabled after 60 days with no repository activity** — a repository nobody touches is exactly the case, and GitHub says so on the workflow |
+| A tick is delayed | A build starts later than ten minutes | GitHub's scheduler is congested at the top of the hour; the delay is documented and nothing is lost |
+| The watcher dispatches but the build fails | Red run in the build workflow, named by sha | The `Deliver` job never runs, so no artifact appears — which is the same signal as "not built yet", and the reason the build's own failure must be read |
+| The watcher itself fails | A red `Watch` run | Its only job is one API call; a failure there means the token or the API, not the code |
+| Someone pushes twice quickly | The second push cancels the first run (`cancel-in-progress`) | Correct — the first run's commit is superseded, and the watcher builds the newest |
+| **`main` cannot build a release** | `packageRelease` fails on the keystore | §3.3e. Not a watcher problem; a person must fix the secret |
 
 ## 4. Part four — the audit of today's work
 
