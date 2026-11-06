@@ -6,6 +6,7 @@ import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.Status
 import org.eclipse.jgit.diff.DiffEntry
 import org.eclipse.jgit.diff.DiffFormatter
+import org.eclipse.jgit.util.io.NullOutputStream
 import org.eclipse.jgit.lib.AnyObjectId
 import org.eclipse.jgit.lib.FileMode
 import org.eclipse.jgit.lib.ObjectId
@@ -208,6 +209,15 @@ object GitService {
      * came to look unshortened.
      */
     const val READ_ALL = 10_000
+
+    /**
+     * How many changed files one `diff` answers with.
+     *
+     * **A bound on the answer, not on the walk.** A commit that touched a thousand files — an
+     * unpack, a vendor drop — would otherwise fill a conversation with one call. Forty is enough to
+     * see the shape of a change, and the answer says when there were more.
+     */
+    const val DIFF_FILES = 40
 
     /** A commit in the history. */
     data class CommitInfo(
@@ -1147,18 +1157,6 @@ object GitService {
     }
 
     /**
-     * Pushes the current branch, replacing what the remote holds.
-     *
-     * Local wins every conflict, which is the point: it cannot fail on one, and
-     * the phone and GitHub end up holding the same thing.
-     */
-    fun pushForce(repo: Repository, token: String?): RemoteResult = push(repo, token, force = true)
-
-    /**
-     * Makes the working tree match the remote branch exactly: fetch, reset hard
-     * onto it, then remove everything the remote does not have.
-     */
-    /**
      * The remote branch that stands for this project.
      *
      * Tried in order: the branch this phone is on, the remote's own default, and
@@ -1261,6 +1259,98 @@ object GitService {
         val objectId = found.getObjectId(0)
         found.close()
         return walk.parseTree(objectId)
+    }
+
+    /** One file's part in a [changesBetween] answer. */
+    data class ChangedFile(
+        val path: String,
+        /** `A` added, `M` modified, `D` deleted. */
+        val kind: Char,
+        val added: Int,
+        val removed: Int,
+        /** The lines, when the file is text and small enough to be worth reading. */
+        val lines: List<DiffLine>,
+        /** Why there are no lines, when there are none. */
+        val notDiffed: String? = null,
+    )
+
+    /** What changed between two revisions: the files, and what happened in each. */
+    data class Changes(
+        val from: String,
+        val to: String,
+        val path: String,
+        val files: List<ChangedFile>,
+        /** True when more files matched than are listed. */
+        val more: Boolean = false,
+    )
+
+    /**
+     * Every path that differs between two revisions, under [path], as diffs.
+     *
+     * **`DiffFormatter` with a `TreeWalk`, not two `bytesAt` calls**, because [path] may name a
+     * folder: forty files changed under `src/` is forty diffs, and asking for each one by name would
+     * be forty tree lookups to discover what one walk already knows.
+     *
+     * **A binary file is named and not read.** `looksBinary` decides from the first bytes, so a
+     * 40 MB video costs one blob read rather than a page of replacement characters in a conversation.
+     */
+    fun changesBetween(
+        repo: Repository,
+        path: String,
+        from: String,
+        to: String,
+    ): Result<Changes> {
+        val old = repo.resolve(from) ?: return Result.failure(
+            IllegalArgumentException("There is no version $from"),
+        )
+        val new = repo.resolve(to) ?: return Result.failure(
+            IllegalArgumentException("There is no version $to"),
+        )
+        val prefix = path.trim('/')
+        val out = ArrayList<ChangedFile>()
+        var more = false
+        RevWalk(repo).use { walk ->
+            val a = walk.parseCommit(old).tree
+            val b = walk.parseCommit(new).tree
+            // **`DiffFormatter` implements `AutoCloseable`, not `Closeable`**, so `use` reaches it
+            // through the Kotlin extension. `NullOutputStream` because the entry list is what this
+            // needs — the formatted patch text would be a second representation of the same facts.
+            val formatter = DiffFormatter(NullOutputStream())
+            try {
+                formatter.setRepository(repo)
+                val entries = formatter.scan(a, b)
+                for (entry in entries) {
+                    val name = entry.newPath ?: entry.oldPath ?: continue
+                    if (prefix.isNotEmpty() && name != prefix && !name.startsWith("$prefix/")) continue
+                    if (out.size >= DIFF_FILES) {
+                        more = true
+                        break
+                    }
+                    val kind = when (entry.changeType) {
+                        DiffEntry.ChangeType.ADD -> 'A'
+                        DiffEntry.ChangeType.DELETE -> 'D'
+                        else -> 'M'
+                    }
+                    val before = if (kind == 'A') "" else blobText(repo, from, name).orEmpty()
+                    val after = if (kind == 'D') "" else blobText(repo, to, name).orEmpty()
+                    if (looksBinary(before) || looksBinary(after)) {
+                        out += ChangedFile(name, kind, 0, 0, emptyList(), "binary")
+                        continue
+                    }
+                    val lines = diffLines(before, after)
+                    out += ChangedFile(
+                        path = name,
+                        kind = kind,
+                        added = lines.count { it.kind == DiffLine.Kind.ADDED },
+                        removed = lines.count { it.kind == DiffLine.Kind.REMOVED },
+                        lines = lines,
+                    )
+                }
+            } finally {
+                formatter.close()
+            }
+        }
+        return Result.success(Changes(from, to, prefix, out, more))
     }
 
     /**

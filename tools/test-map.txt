@@ -127,3 +127,4 @@ DeviceFlowTest app/src/main/java/com/example/notes/DeviceFlow.kt
 ProjectTreeTest app/src/main/java/com/example/notes/ProjectTree.kt
 TokenScopesTest app/src/main/java/com/example/notes/TokenScopes.kt app/src/main/java/com/example/notes/DeviceFlow.kt
 SwipeTest app/src/main/java/com/example/notes/Swipe.kt
+GitToolTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt

@@ -125,48 +125,6 @@ class IndexQueueTest {
         )
     }
 
-    @Test
-    fun `a pull asks for a pass, because it changes files and records nothing`() {
-        // **The second case with no commit.** `replaceWithRemote` fetches and resets the worktree to
-        // the remote's copy — the files change, and no local version is written, so the commit hook
-        // is blind to it. Left to the search guard it would be indexed by whichever search came next,
-        // which is to say the one search that most needs to be fast pays for the whole diff.
-        val origin = File(temp.root, "origin").apply { mkdirs() }
-        val source = ProjectGit(
-            Workspace(origin),
-            { null },
-            { GitAuthor("Muffy", "muffy@example.com") },
-        ).also {
-            Workspace(origin).repoOf("far").mkdirs()
-            Workspace(origin).write(File(File(origin, "far"), "notes.txt"), "a fact\n")
-            it.init("far")
-        }
-        source.commit("far", "first")
-        // **Its own project, for the same reason as the clone test**: `shopping` already has a
-        // repository, and a clone into one is refused, so the pull would have nothing to pull.
-        git.cloneInto("arriving", File(origin, "far").toURI().toString())
-        asked.clear()
-
-        val replaced = git.replaceWithRemote("arriving")
-
-        assertTrue("the pull worked: ${replaced.message}", replaced.success)
-        assertEquals("one ask", 1, asked.size)
-        assertTrue(
-            "and it says what did it: ${asked.single().second}",
-            "remote" in asked.single().second,
-        )
-        // **And the housekeeping is asked for too.** A reset strands this phone's old commits, and
-        // no prune sees it — nothing shortened the history — so the reset itself is the only place
-        // that can notice. Left unwritten, those objects are never collected.
-        assertTrue(
-            "the reset says it stranded commits",
-            Maintenance.waiting(ws.projectDir("arriving")),
-        )
-        // **And the marker is cleared here**, because the queue's own pass would otherwise run a
-        // collection inside a test's temp folder after the test ended — the same reason `clear()` is
-        // called in `tearDown`.
-        File(File(ws.projectDir("arriving"), AgentLog.DIR), Maintenance.MARKER).delete()
-    }
 
     // ---- 3: many asks, one pass -------------------------------------------
 

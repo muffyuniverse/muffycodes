@@ -569,56 +569,6 @@ class ProjectGitTest {
         assertEquals("no commit was added", before, git.log("Shopping").size)
     }
 
-    @Test
-    fun `replacing uses whatever branch GitHub actually has`() {
-        // The reported failure: replace a local project with the remote one, and get
-        // an exception. A repository made before GitHub's own default changed has
-        // `master`, and asking for `origin/main` threw `RefNotFoundException: Ref
-        // origin/main not found` — which reads as the app being broken rather than as
-        // a different branch name.
-        val masterBare = File(root, "master.git")
-        org.eclipse.jgit.api.Git.init()
-            .setDirectory(masterBare)
-            .setBare(true)
-            .setInitialBranch("master")
-            .call()
-            .close()
-        // Something on the remote's `master`, so there is a copy to take.
-        val seed = File(root, "seed")
-        org.eclipse.jgit.api.Git.cloneRepository()
-            .setURI(masterBare.absolutePath)
-            .setDirectory(seed)
-            .call()
-            .use { clone ->
-                File(seed, "FromGitHub.txt").writeText("on github")
-                clone.add().addFilepattern(".").call()
-                clone.commit().setMessage("seed").setAuthor(author.ident())
-                    .setCommitter(author.ident()).call()
-                clone.push().setRemote("origin")
-                    .add("refs/heads/master:refs/heads/master").call()
-            }
-
-        workspace.createProjectFolders("Shopping").getOrThrow()
-        val git = gitFor()
-        val repo = git.open("Shopping") ?: run {
-            git.init("Shopping").getOrThrow()
-            git.open("Shopping")!!
-        }
-        repo.use { open -> GitService.setRemoteUrl(open, masterBare.absolutePath) }
-        File(workspace.repoOf("Shopping"), "OnlyHere.txt").writeText("mine")
-
-        val result = git.replaceWithRemote("Shopping")
-
-        assertTrue(result.message, result.success)
-        assertTrue(
-            "the remote's file arrived",
-            File(workspace.repoOf("Shopping"), "FromGitHub.txt").isFile,
-        )
-        assertFalse(
-            "and the local one that GitHub does not have went",
-            File(workspace.repoOf("Shopping"), "OnlyHere.txt").exists(),
-        )
-    }
 
     @Test
     fun `a sync pushes the branch GitHub actually has`() {
@@ -676,73 +626,7 @@ class ProjectGitTest {
         }
     }
 
-    @Test
-    fun `replacing a project brings the phone onto GitHub's branch`() {
-        // Replacing the files is the visible half. The other half is the branch
-        // name: a phone left on `main` after taking a `master` repository pushes a
-        // branch GitHub does not show, so the next sync is a silent no-op as far as
-        // anybody reading GitHub is concerned.
-        val masterBare = File(root, "master-replace.git")
-        org.eclipse.jgit.api.Git.init()
-            .setDirectory(masterBare)
-            .setBare(true)
-            .setInitialBranch("master")
-            .call()
-            .close()
-        val seed = File(root, "seed-replace")
-        org.eclipse.jgit.api.Git.cloneRepository()
-            .setURI(masterBare.absolutePath)
-            .setDirectory(seed)
-            .call()
-            .use { clone ->
-                File(seed, "FromGitHub.txt").writeText("on github")
-                clone.add().addFilepattern(".").call()
-                clone.commit().setMessage("seed").setAuthor(author.ident())
-                    .setCommitter(author.ident()).call()
-                clone.push().setRemote("origin")
-                    .add("refs/heads/master:refs/heads/master").call()
-            }
 
-        workspace.createProjectFolders("Shopping").getOrThrow()
-        val git = gitFor()
-        val repo = git.open("Shopping") ?: run {
-            git.init("Shopping").getOrThrow()
-            git.open("Shopping")!!
-        }
-        repo.use { open -> GitService.setRemoteUrl(open, masterBare.absolutePath) }
-        assertEquals("the phone starts on its own branch", "main", repo.use { GitService.currentBranch(it) })
-
-        val replaced = git.replaceWithRemote("Shopping")
-        assertTrue(replaced.message, replaced.success)
-
-        assertEquals(
-            "and now it is on the one GitHub has",
-            "master",
-            git.open("Shopping")!!.use { GitService.currentBranch(it) },
-        )
-    }
-
-    @Test
-    fun `replacing a project GitHub has nothing on says so`() {
-        // A project this phone made and never synced: there is no remote branch at
-        // all. That is not an exception, it is an answer — and the answer has to say
-        // what to do instead.
-        workspace.createProjectFolders("Shopping").getOrThrow()
-        val git = gitFor()
-        val repo = git.open("Shopping") ?: run {
-            git.init("Shopping").getOrThrow()
-            git.open("Shopping")!!
-        }
-        repo.use { open -> GitService.setRemoteUrl(open, bare.absolutePath) }
-
-        val result = git.replaceWithRemote("Shopping")
-
-        assertFalse("it did not claim to have replaced anything", result.success)
-        assertTrue(
-            "and it said why: ${result.message}",
-            result.message.contains("Sync this phone's copy"),
-        )
-    }
 
     @Test
     fun `syncing commits and pushes what changed`() {

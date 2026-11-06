@@ -304,6 +304,18 @@ class AgentTools(
         const val HITS_PER_FILE = 20
 
         /**
+         * Where a `git diff` files its answer.
+         *
+         * Under `agent/`, which is excluded from git, so a diff of the project never becomes part
+         * of the project. The same protocol as `runs` and `shot`: the conversation gets the counts
+         * and the first paths, and the file holds the lines.
+         */
+        const val DIFF_DIR = "agent/git"
+
+        /** How many changed files a `git diff` answer lists, before saying there are more. */
+        const val DIFF_SHOWN = 20
+
+        /**
          * How many rows one `forget` may name, after ranges are expanded.
          *
          * Generous against any real context — a row costs about a hundred bytes, so four thousand is
@@ -579,7 +591,7 @@ class AgentTools(
             // that it can determine when to push and to which branches (but still within their
             // project)". `state` is the reading half — an agent cannot decide *when* without knowing
             // whether there is anything to send.
-            "state" to setOf(),
+            "git" to setOf("op", "path", "from", "to"),
             "pull" to setOf(),
             "push" to setOf(),
         )
@@ -973,15 +985,20 @@ class AgentTools(
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
             spec(
-                "state",
-                "What this project's git has to say: how many tracked paths differ from what GitHub " +
-                    "was given, how many commits are ahead of and behind `origin/main`, and whether a " +
-                    "merge is in progress. " +
-                    "**Read this before deciding to push.** It answers the local half without a " +
-                    "network call, so it costs nothing to ask. " +
-                    "\"ahead 0, behind 0\" means the remote has everything; \"behind 2\" means " +
-                    "somebody else pushed and you must `pull` before your push can land.",
-                "{}",
+                "git",
+                "What changed between two revisions. **The compressed form of a change**, which " +
+                    "`read` cannot give you: reading a 400-line file to find that three lines moved " +
+                    "costs 400 lines of context and leaves you to diff in your head. " +
+                    "`from` and `to` are revision ids from `search {history}` or the history screen; " +
+                    "**both are required**, because every change here is committed the moment it " +
+                    "happens, so there is no working-tree side to compare against. " +
+                    "**`path` is a prefix**: \"src/\" answers what changed in that folder, and a file " +
+                    "path answers for that file. " +
+                    "The answer names each changed file with its added and removed counts; a binary " +
+                    "file is named and not diffed, because a diff of a zip is a page of replacement " +
+                    "characters.",
+                "{\"op\":\"diff\",\"path\":\"a file or folder\",\"from\":\"a revision id\"," +
+                    "\"to\":\"another revision id\"}",
             ),
             spec(
                 "pull",
@@ -1167,7 +1184,7 @@ class AgentTools(
                 )
             }
             "mcp" -> mcp(args, deadline)
-            "state" -> state()
+            "git" -> gitTool(args, deadline)
             "pull" -> pull()
             "push" -> push()
             else -> refusal("There is no tool called ${call.tool}")
@@ -4635,75 +4652,97 @@ class AgentTools(
      * not have; that answers "unknown" rather than a zero, because "0 ahead" about a branch that was
      * never sent is the one answer that would make a push look unnecessary when it is the whole job.
      */
-    private fun state(): String {
-        // **Not traced.** `state` changes nothing and reads nothing that moves, so a line per call
-        // would be noise — the trace is a record of acts, and asking a question is not one. The
-        // number it answers with is in the conversation already.
-        val repo = git.open(project)
-            ?: return refusal("This project has no repository yet")
-        return repo.use {
-            try {
-                val changes = GitService.status(it)
-                val unsent = GitService.unsentPaths(it).size
-                val tracks = GitService.aheadBehind(it)
-                val lines = mutableListOf<String>()
-                lines += "project: $project"
-                lines += "branch: ${it.branch ?: "?"}"
-                lines += "unsent paths: $unsent"
-                lines += if (tracks == null) {
-                    "ahead/behind: unknown — GitHub has no copy of this branch yet"
-                } else {
-                    "ahead ${tracks.first}, behind ${tracks.second}"
+    /**
+     * What changed between two revisions — **the compressed form of a change.**
+     *
+     * The operator's call: `read` answers full contents, not changes, so a 400-line file where three
+     * lines moved costs 400 lines of context and leaves the model to diff in its head, which it does
+     * badly. A diff is exactly the question being asked.
+     *
+     * **Revisions only, because a working-tree comparison is impossible here.** Every agent write
+     * ends in a commit and every person's edit goes through `afterChange`, so a tracked change that
+     * is not committed does not exist. That is why both ends are required rather than one defaulting
+     * to HEAD.
+     */
+    private fun gitTool(args: JSONObject, deadline: Deadline): String {
+        val op = args.optString("op", "").trim().lowercase()
+        if (op.isEmpty()) {
+            return refusal(
+                "`git` needs an `op`, and there is one: `diff`. It takes `path`, `from` and `to`.",
+            )
+        }
+        if (op != "diff") {
+            // **Named, because a model that guessed `log` or `status` deserves to know why not.**
+            return refusal(
+                "`op` is `diff`, and \"$op\" is not it. A diff is the one question `read` cannot " +
+                    "answer: it shows what changed between two revisions rather than what a file " +
+                    "says. For history, `search` with `history: true`; for what is unsent, `push` " +
+                    "tells you.",
+            )
+        }
+        val path = args.optString("path", "").trim()
+        val from = args.optString("from", "").trim()
+        val to = args.optString("to", "").trim()
+        if (from.isEmpty() || to.isEmpty()) {
+            return refusal(
+                "`diff` needs both `from` and `to`: the two revisions to compare. Every change in " +
+                    "this project is committed the moment it happens, so there is no working-tree " +
+                    "side to leave one out for. `search` with `history: true` names the revisions.",
+            )
+        }
+        deadline.check("git")
+        val result = git.diffBetween(project, path, from, to).getOrElse {
+            return refusal(it.message ?: "the difference could not be read")
+        }
+        val where = if (result.path.isEmpty()) "the whole project" else "\"${result.path}\""
+        if (result.files.isEmpty()) {
+            return success("nothing changed in $where between ${short(from)} and ${short(to)}")
+        }
+        val added = result.files.sumOf { it.added }
+        val removed = result.files.sumOf { it.removed }
+        val head = "${result.files.size} file(s) changed in $where between ${short(from)} and " +
+            "${short(to)}: +$added −$removed"
+        // **Filed whole, quoted in part.** A diff of forty files is not a conversation; the counts
+        // and the first paths are what a model needs to decide whether to ask for the rest, and the
+        // file is where the lines are. Same protocol as `runs` and `shot`.
+        val dir = File(projectDir, DIFF_DIR)
+        val name = "diff-${short(from)}-${short(to)}" +
+            (if (result.path.isEmpty()) "" else "-" + result.path.trim('/').replace('/', '_')) + ".txt"
+        val file = File(dir, name)
+        val body = result.files.joinToString("\n\n") { one ->
+            val said = one.notDiffed?.let { " ($it, not diffed)" }
+                ?: " (+${one.added} −${one.removed})"
+            one.path + said + if (one.lines.isEmpty()) "" else "\n" + one.lines.joinToString("\n") {
+                when (it.kind) {
+                    GitService.DiffLine.Kind.ADDED -> "+${it.text}"
+                    GitService.DiffLine.Kind.REMOVED -> "-${it.text}"
+                    GitService.DiffLine.Kind.SAME -> " ${it.text}"
                 }
-                // **The working tree, separately.** A push refuses when it is dirty, so an agent that
-                // has just written a file needs to see that the write is not yet a commit.
-                lines += "uncommitted: ${changes.staged + changes.unstaged} staged or changed, " +
-                    "${changes.untracked} untracked"
-                // **What the push will leave behind, said out loud.** An ignored file is not a change
-                // and not unsent — it is a file that is on the phone and will never be on GitHub until
-                // somebody says so. Without this line a project holding a 40 MB video and one note
-                // reports "Nothing to send", which is true of the note and a lie about the project:
-                // the agent would tell the person their work is on GitHub when half of it is not.
-                val ignored = GitService.ignoredPaths(it)
-                if (ignored.isNotEmpty()) {
-                    // The largest first, because it is the one worth acting on and the reason the
-                    // number is worth printing at all.
-                    val largest = ignored
-                        .mapNotNull { path -> File(it.workTree, path).let { f -> if (f.isFile) f else null } }
-                        .maxByOrNull { it.length() }
-                    lines += "ignored, so not sent and never will be until tracked: " +
-                        "${ignored.size} path(s)" +
-                        (largest?.let {
-                            val where = Workspace.pathBelow(repo.workTree, it) ?: it.name
-                            " — the largest is $where at ${Workspace.bytesFor(it.length())}"
-                        } ?: "")
-                }
-                // A merge left half-finished is the one state where a push would carry markers.
-                val merging = File(it.directory, "MERGE_HEAD").isFile
-                if (merging) lines += "**a merge is in progress and has not been committed**"
-                val said = when {
-                    merging -> "Finish the merge first."
-                    // **"Nothing to send" is about the tracked work, and now says so.** The ignored
-                    // line above is the rest of the answer; a sentence that claimed the project was
-                    // fully sent while the line above it named an ignored video would be the agent
-                    // contradicting itself in one message.
-                    unsent == 0 && (tracks == null || tracks.first == 0) && ignored.isEmpty() ->
-                        "Nothing to send."
-                    unsent == 0 && (tracks == null || tracks.first == 0) ->
-                        "Nothing tracked is unsent — but some paths are ignored and will not go " +
-                            "to GitHub unless they are tracked."
-                    tracks != null && tracks.second > 0 ->
-                        "GitHub has moved: pull before a push can land."
-                    else -> "There is work to send."
-                }
-                success(lines.joinToString("\n") + "\n\n$said")
-            } catch (e: Throwable) {
-                refusal(Secrets.describe(e))
             }
         }
+        val rel = try {
+            dir.mkdirs()
+            file.writeText(body)
+            file.relativeTo(projectDir).invariantSeparatorsPath
+        } catch (e: Throwable) {
+            return refusal("The difference was read and could not be saved: " + Secrets.describe(e))
+        }
+        val listed = result.files.take(DIFF_SHOWN).joinToString("\n") { one ->
+            "  " + one.kind + " " + one.path + (one.notDiffed?.let { " ($it)" }
+                ?: " (+${one.added} −${one.removed})")
+        }
+        val more = if (result.more) {
+            "\n  … and more than ${GitService.DIFF_FILES} files changed; narrow `path` to see them"
+        } else {
+            ""
+        }
+        return success("$head\n\n$listed$more\n\nThe whole diff is at $rel.")
     }
 
-    /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */
+    /** A revision id as a person reads it — seven characters, or whatever was given if shorter. */
+    private fun short(id: String): String = id.trim().take(7)
+
+    /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */    /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */
     private fun pull(): String {
         val result = git.pull(project)
         // **A pull can change the files under the agent's feet**, so it is in the log: a model that

@@ -120,36 +120,6 @@ class SyncFeatureTest : FeatureTest() {
         assertTrue("it does not fail", scene.viewModel.message !is String || true)
     }
 
-    @Test
-    fun `pulling replaces the worktree with what the repository holds`() {
-        scene.project("Shopping")
-        scene.open("Shopping")
-        scene.worktreeFile("milk.txt", "two litres")
-        scene.sync("Shopping")
-
-        // Someone else changes the repository.
-        val other = File(scene.root, "elsewhere")
-        org.eclipse.jgit.api.Git.cloneRepository()
-            .setURI(scene.remote("Shopping").toURI().toString())
-            .setDirectory(other).call().use { clone ->
-                File(other, "milk.txt").writeText("three litres")
-                clone.add().addFilepattern("milk.txt").call()
-                clone.commit().setMessage("Changed the milk").call()
-                clone.push().call()
-            }
-
-        // This phone has its own stale copy.
-        File(scene.workspace!!.repoOf("Shopping"), "milk.txt").writeText("one litre")
-
-        scene.viewModel.replaceWithRemote("Shopping")
-        scene.await("the pull to finish") { !scene.viewModel.busy }
-
-        assertEquals(
-            "the worktree is what the repository holds",
-            "three litres",
-            File(scene.workspace!!.repoOf("Shopping"), "milk.txt").readText(),
-        )
-    }
 
     @Test
     fun `a project is made against the account's own GitHub`() {

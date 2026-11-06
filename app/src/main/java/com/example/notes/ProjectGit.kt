@@ -415,6 +415,44 @@ class ProjectGit(
     }
 
     /**
+     * What changed between two revisions, for a file or a folder — **the agent's `git diff`.**
+     *
+     * ## Why both ends are required
+     *
+     * A working-tree comparison would be meaningless here: every agent write ends in a commit and
+     * every person's edit goes through `afterChange`, so a tracked change that is not committed does
+     * not exist. That is why there is no "no arguments" form — there is nothing for it to compare.
+     *
+     * ## Why the path is a prefix
+     *
+     * `"src/"` answers *"what changed in this folder"*, which is the `git log -- path/to/folder`
+     * question and the one that matters after `unpack` lands forty files. A file path answers for
+     * that file. The distinction is the trailing slash, not a second argument.
+     *
+     * ## Why binary paths are listed and not diffed
+     *
+     * `diffLines` on a zip is a page of replacement characters that costs the whole conversation and
+     * says nothing. `Workspace.kindOfPath` answers by name, before anything is read.
+     */
+    fun diffBetween(
+        project: String,
+        path: String,
+        from: String,
+        to: String,
+    ): Result<GitService.Changes> {
+        val repo = open(project) ?: return Result.failure(
+            IllegalStateException("This project has no repository yet"),
+        )
+        return repo.use {
+            try {
+                GitService.changesBetween(it, path, from, to)
+            } catch (e: Throwable) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
      * One file as it differs from the last push, line by line.
      *
      * **Pending means "not on GitHub", not "not committed"** — every save is a commit — so both sides
