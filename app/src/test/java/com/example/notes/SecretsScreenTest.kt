@@ -177,7 +177,7 @@ class SecretsScreenTest {
         scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
 
         val names = scene.viewModel.secretNames()
-        val hosts = names.map { scene.viewModel.secretHost(it) }
+        val hosts = names.map { scene.viewModel.secretHost(it).orEmpty() }
 
         assertEquals("the name is listed", listOf("github"), names)
         assertEquals("with the host it is for", listOf("api.github.com"), hosts)
