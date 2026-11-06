@@ -771,6 +771,85 @@ and nothing reporting a problem. The rule written in §3c.6 paid for itself twic
 | Someone pushes twice quickly | The second push cancels the first run (`cancel-in-progress`) | Correct — the first run's commit is superseded, and the watcher builds the newest |
 | **`main` cannot build a release** | `packageRelease` fails on the keystore | §3.3e. Not a watcher problem; a person must fix the secret |
 
+## 3d. The runner question: why not poll every few seconds?
+
+The operator asked: *"I heard you saying something about 5 min cron job, why 5 min? why not to use
+continuous poll that checks every couple seconds for changes?"* and *"if cron is slow, can we implement
+our own loop inside the runner?"*
+
+### 3d.1 The premise is wrong, and measuring it settles the question
+
+**A push already starts a build in about five seconds.** Measured, four pushes in a row:
+
+```
+commit 08:07:49 → run created 08:07:54    (+5s)
+commit 08:04:01 → run created 08:04:06    (+5s)
+commit 07:57:46 → run created 07:57:51    (+5s)
+commit 07:52:09 → run created 07:52:15    (+6s)
+```
+
+That is GitHub's `push` event, which is a **webhook** — GitHub tells the runner, the runner does not
+ask. There is nothing to poll for on a push, and no loop can beat a notification that already arrives in
+five seconds.
+
+### 3d.2 And the cron is worse than advertised, measured
+
+`watch.yml` asks for `*/10 * * * *`. What actually ran:
+
+```
+07:50:35  schedule
+06:37:18  schedule      ← 73 minutes later
+05:37:45  schedule      ← 60 minutes later
+04:39:53  schedule      ← 58 minutes later
+```
+
+**Three ticks in three hours, not eighteen.** That is the documented behaviour — GitHub's own docs say
+scheduled runs *"can be delayed during periods of high loads"* and *"if the load is sufficiently high
+enough, some queued jobs may be dropped"* — and it is far worse in practice than the 5-minute minimum
+suggests.
+
+**So the watcher's cron is not a 10-minute cadence. It is an hourly one, unreliably.** That is the
+opposite of what it was built for.
+
+### 3d.3 Why not a loop inside the runner
+
+The operator's second question, and it is the right instinct. Three measured limits decide it:
+
+| Limit | Value | What it means for a loop |
+|---|---|---|
+| `GITHUB_TOKEN` rate limit | **1,000 requests/hour/repository** | a poll every 2 seconds is 1,800/hour — **the loop exhausts its own budget in 33 minutes** and then 403s for the rest of the hour |
+| GitHub-hosted job ceiling | **6 hours** (self-hosted: none) | the loop dies every six hours and something must restart it |
+| Workflow run ceiling | 72 hours | the same, later |
+
+A 30-second poll is 120 requests/hour — affordable, and it would beat the hourly cron by 120×. But the
+loop still dies at six hours, and **a dead loop is invisible**: it looks exactly like "no commits
+happened". The cron's worst property is that it is late; the loop's worst property is that it can stop
+without saying so.
+
+### 3d.4 What is actually needed
+
+**Nothing, for the push case.** A push builds in five seconds already. The watcher was built for a
+problem that the `push` trigger had already solved — it only ever helps when a push *fails to create a
+run at all*, which happens when `paths-ignore` skips a docs-only commit.
+
+**The honest options, in order of cost:**
+
+1. **Delete the watcher's cron and keep it as a manual dispatch.** It costs nothing, and a person who
+   suspects a missed build can press it. The five-second push trigger is the real mechanism.
+2. **Keep the cron at `*/10`, knowing it is hourly in practice.** Cheap, and eventually catches a
+   missed build. Do not believe the schedule.
+3. **A 30-second loop in a 6-hour job, restarted by a cron.** Fast and reliable, but two mechanisms
+   where one would do, and the loop's silence is its worst failure.
+4. **A self-hosted runner on the phone.** No job ceiling, no billing, logs follow the repository. Needs
+   an Android SDK on the device.
+
+**Recommendation: 1, plus keeping the push trigger as the primary.** The measured five seconds makes
+every polling design a slower, more fragile copy of a webhook.
+
+**The one thing that would change this:** if a build ever needs to start from something *other* than a
+push — a schedule, a webhook from another service, a person's request — then a queue is needed, and the
+watcher becomes the only way to drain it. That is not today's shape.
+
 ## 4. Part four — the audit of today's work
 
 The operator asked: *"audit that the functionality that we implemented today fully implemented,
