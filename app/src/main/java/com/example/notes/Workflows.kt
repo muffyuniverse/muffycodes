@@ -174,7 +174,10 @@ class Workflows {
             // **A file that will not open is one whose contents are unknown, and unknown is not
             // safe.** Reporting "reaches nothing" for it would be the report lying in the direction
             // that matters.
-            return Reach(emptyList(), declaresEnvironment = true, secrets = true, seals = sealsIn(text))
+            // **`seals = true`, for the same reason `declaresEnvironment` is true here.** A file that
+            // cannot be read might seal, and reporting "does not seal" would tell a person their
+            // output is in the clear when nobody knows that. Unknown is not safe.
+            return Reach(emptyList(), declaresEnvironment = true, secrets = true, seals = true)
         }
         return Reach(environmentsOf(text), declaresEnvironment(text), secretsOf(text), sealsIn(text))
     }

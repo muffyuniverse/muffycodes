@@ -147,7 +147,13 @@ object CiSetup {
      * discovered later as a log nobody can read; `Workflows.survey` already answers that question per
      * file, and this is the project-wide summary of it.
      */
-    fun problems(github: GitHub, token: String, ref: RepoRef, projectDir: java.io.File): List<String> {
+    fun problems(
+        github: GitHub,
+        token: String,
+        ref: RepoRef,
+        projectDir: java.io.File,
+        workflows: Workflows = Workflows(),
+    ): List<String> {
         val said = mutableListOf<String>()
 
         val existing = github.environments(token, ref)
@@ -169,7 +175,10 @@ object CiSetup {
         // — deliberately not `environments.isNotEmpty()`, because a file whose environment is an
         // expression has no resolvable name and answering "none" for it would be the dangerous
         // direction. Reusing it here means this report and that guard can never disagree.
-        for (row in Workflows.survey(projectDir, emptySet())) {
+        // **`Workflows` is a class, not an object**, so the survey is asked of an instance. It holds
+        // no state — every question it answers is read from the files — so making one here costs
+        // nothing and keeps the constructor a seam a test can pass something else through.
+        for (row in workflows.survey(projectDir, emptySet())) {
             if (!row.seals) continue
             if (!row.reach.declaresEnvironment) {
                 said += "${row.path} seals its output but names no environment, so it cannot reach " +
