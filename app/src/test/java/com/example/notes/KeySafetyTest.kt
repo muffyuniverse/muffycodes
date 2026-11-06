@@ -275,4 +275,69 @@ class KeySafetyTest {
         assertFalse("not locked either", KeyVerdict.isLocked(odd))
     }
 
+    @Test
+    fun `a clone from another host refuses in words instead of sending the key`() {
+        // **The bug this exists for.** A private repository anywhere but GitHub went out with no
+        // credentials at all, the server answered 401, and the person was told their key was wrong —
+        // about a key the app had deliberately withheld. Silent, and wrong about which thing failed.
+        //
+        // The refusal is now a sentence that names the host and the reason, and it happens **before
+        // anything is opened**, because the request is the harm.
+        val target = File(root, "elsewhere")
+
+        val result = GitService.clone(
+            "https://gitlab.com/someone/private.git",
+            target,
+            author,
+            token,
+        )
+
+        assertFalse("it did not succeed", result.success)
+        assertTrue("it names the host: ${result.message}", result.message.contains("gitlab.com"))
+        assertTrue("and says why: ${result.message}", result.message.contains("GitHub key"))
+        assertTrue(
+            "and that it was not sent: ${result.message}",
+            result.message.contains("not sent"),
+        )
+        assertFalse("and the key is nowhere in it", result.message.contains(token))
+        assertFalse("and nothing was made", target.exists())
+    }
+
+    @Test
+    fun `a remote with no host is not refused, because it has nowhere to send the key`() {
+        // **A local path is not a foreign host.** A bare repository beside the project — which is
+        // how a folder-to-folder clone works, and how the clone test above works — has no host at
+        // all. Refusing it would have broken the one case that is obviously safe, and the guard
+        // exists to protect the key, not to ban paths.
+        val remote = File(root, "remote2")
+        val remoteRepo = GitService.initOrOpen(remote, author)
+        File(remote, "note.txt").writeText("milk")
+        GitService.commitAll(remoteRepo, "note", author)
+        remoteRepo.close()
+
+        val result = GitService.clone(remote.absolutePath, File(root, "clone2"), author, token)
+
+        assertTrue("it worked: ${result.message}", result.success)
+        assertTrue("the file arrived", File(root, "clone2/note.txt").isFile)
+    }
+
+    @Test
+    fun `the host of a url is read the one way, whichever scheme it came in`() {
+        // **One rule, so that a refusal and a guard cannot disagree.** `isGitHubHost` and the clone
+        // refusal both ask `hostOf`, so a URL one reads as `github.com` cannot be read as something
+        // else by the other.
+        assertEquals("https", "github.com", Secrets.hostOf("https://github.com/o/r.git"))
+        assertEquals("git", "github.com", Secrets.hostOf("git://github.com/o/r.git"))
+        assertEquals("ssh", "github.com", Secrets.hostOf("ssh://git@github.com/o/r.git"))
+        assertEquals(
+            "credentials stripped",
+            "github.com",
+            Secrets.hostOf("https://user:tok@github.com/o/r"),
+        )
+        assertEquals("port stripped", "gitlab.com", Secrets.hostOf("https://gitlab.com:8443/o/r"))
+        assertEquals("case folded", "github.com", Secrets.hostOf("https://GitHub.COM/o/r"))
+        assertEquals("a local path has no host", "", Secrets.hostOf("/tmp/some/repo"))
+        assertEquals("nor does a bare name", "", Secrets.hostOf("repo"))
+    }
+
 }

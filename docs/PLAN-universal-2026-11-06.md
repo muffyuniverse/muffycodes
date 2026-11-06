@@ -159,7 +159,7 @@ Test 4 belongs in `KeySafetyFeatureTest`, which already asserts the token never 
 
 ---
 
-## 4. Part B — `isGitHubHost`: a live bug, not a refactor
+## 4. Part B — `isGitHubHost`: **investigated, and the proposed fix was wrong**
 
 ```kotlin
 // GitService.kt:366 — the clone
@@ -168,19 +168,86 @@ if (Secrets.isGitHubHost(remoteUrl)) {
 }
 ```
 
-**A clone of a private repository on any non-GitHub host silently fails to authenticate.** The token never
-reaches the request, so it fails as though the credentials were wrong — which is the one failure mode the
-app's rules forbid: a failure must say what happened.
+**What this looked like:** a clone of a private repository on any non-GitHub host silently fails to
+authenticate. The token never reaches the request, so it fails as though the credentials were wrong — which
+is the one failure mode the app's rules forbid. The same guard is at `GitHub.kt:683, 763, 1047, 1129`.
 
-The same guard is at `GitHub.kt:683, 763, 1047, 1129`.
+**What this plan proposed:** make `isGitHubHost` mean *"is this a host we hold a token for"* — a lookup in the
+credential store rather than a string comparison against `github.com`.
 
-**The fix:** `isGitHubHost` must become **"is this a host we hold a token for"** — a lookup in the account's
-credential store, not a string comparison against `github.com`.
+**That proposal was wrong, and the investigation is why it is recorded here rather than implemented.**
 
-**Why this is Part B and not part of the remote config:** it is a bug *today*, it is ~10 lines, and it does
-not depend on any new config file existing. A person who clones from GitLab gets a working clone.
+### 4.1 The measurement
 
-**Test:** a clone against a non-GitHub HTTPS remote passes a `CredentialsProvider`. Fails today.
+```
+CredentialStore.tokenKey(login) = "token_$login"      // ONE token, per login
+CredentialStore.token(login)                          // no host argument at all
+```
+
+and the login itself comes from GitHub:
+
+```kotlin
+// AppViewModel.kt:4882
+val who = signInGitHub().identity(answer.token).value
+```
+
+So **there is exactly one token, and it is a GitHub token.** The store has no notion of a host. Rewriting the
+guard as "is this a host we hold a token for" would make the answer *yes* for every host — and then send a
+**GitHub OAuth token to `gitlab.com`**, because that is what `credentials(token)` would attach.
+
+**The guard is not a wall. It is the thing that keeps the token on the one host it belongs to.** Deleting it
+would be a token leak dressed as a portability fix — and it would be silent, which is the property the app
+forbids everywhere else.
+
+### 4.2 What the real defect is
+
+The clone's failure is not the guard. It is that **the guard's refusal has no voice**: the clone goes out
+unauthenticated and the server answers 401, so a person is told "authentication failed" about a token the app
+deliberately withheld.
+
+**So the fix is not to widen the guard, it is to make it speak:**
+
+```kotlin
+if (!Secrets.isGitHubHost(remoteUrl) && !token.isNullOrBlank()) {
+    return RemoteResult(
+        "This repository is at ${hostOf(remoteUrl)}, and the key on this phone is a GitHub key. " +
+            "It was not sent, because a key given to the wrong host is a leaked key. " +
+            "Cloning a private repository elsewhere needs a key for that host.",
+        false,
+    )
+}
+```
+
+That is ~10 lines, it changes no behaviour, and it turns a silent 401 into a sentence that names the
+situation. **A refusal with a voice is the whole of the fix.**
+
+### 4.3 What real non-GitHub support would need
+
+If cloning from another host is genuinely wanted, the guard is not the obstacle — **the credential model is.**
+It would need:
+
+1. `CredentialStore.secret(name, host)` — a secret bound to the host it was stored for, which is the same rule
+   §3.3 imposes on `http`'s `auth:` and which the vault does not have today (a secret is bound to a *name*,
+   never to a *host*).
+2. A place in the add-project dialog to say which host and which key, because "the key on this phone" stops
+   being a single answer.
+3. The `http` `auth:` mechanism from §3, so one rule covers both.
+
+**That is a feature, not a fix, and it belongs after §3 lands** — because §3 is where the host-bound secret is
+first needed, and building it twice would be building it wrong once.
+
+### 4.4 So Part B, as it stands
+
+| | Was | Now |
+|---|---|---|
+| The bug | a private clone elsewhere fails silently | **still true** |
+| The cause | the guard | **the guard is correct; the silence is the bug** |
+| The fix | widen the guard | **make it refuse in words** |
+| The credential model | "is this a host we hold a token for" | **one GitHub token, host-bound secrets are a separate feature (§4.3)** |
+
+**Cost:** ~10 lines and one test — a clone to a non-GitHub host with a token present returns a sentence
+naming the host and the reason, and sends nothing.
+
 
 ---
 
@@ -498,7 +565,7 @@ fires after the phone has buffered two gigabytes is not a cap.
 | # | Part | Size | Why here |
 |---|---|---|---|
 | **1** | **E — the refresh hook** (§7) | ~30 lines | **Smallest, most visible, fixes a live bug.** Do it first so the rest is watchable. |
-| **2** | **B — `isGitHubHost`** (§4) | ~10 lines | **A live bug.** Unblocks every non-GitHub host for free. |
+| **2** | **B — `isGitHubHost` says why** (§4) | ~10 lines | **A live bug.** The guard is right; its silence is the bug. Widening it would leak the token. |
 | **3** | **A — `Fetcher.request` + `http`** (§3) | ~180 lines, 12 tests | The core. Test 4 (the vault never leaks) **before the tool is reachable by a model**. |
 | **4** | delete `fetch`, rename the switch (§8) | small | Follows immediately from 3. |
 | **5** | **C — provider config** (§5) | ~200 lines | Independent of 1–4; do it when a second provider is wanted. |

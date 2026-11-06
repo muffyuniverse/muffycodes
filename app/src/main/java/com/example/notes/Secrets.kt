@@ -115,17 +115,33 @@ object Secrets {
      * repository that quietly points somewhere else cannot collect it.
      */
     fun isGitHubHost(url: String): Boolean {
-        val authority = stripCredentials(url)
+        val authority = hostOf(url)
+        return authority == "github.com" || authority.endsWith(".github.com")
+    }
+
+    /**
+     * The host of [url], lowercased and stripped of credentials, port and path.
+     *
+     * **Extracted so that "which host is this" is answered once.** [isGitHubHost] and the clone
+     * refusal that has to name the host it will not send a key to were spelling the same six
+     * chained calls separately, and a rule with two spellings is a rule that disagrees with itself
+     * eventually.
+     *
+     * `ssh://` is stripped as well as the two HTTP schemes, because a clone URL may be either and
+     * the host is the host. Empty when the string has no host at all — a bare path — and a caller
+     * that needs one has to handle that rather than being handed a guess.
+     */
+    fun hostOf(url: String): String =
+        stripCredentials(url)
             .removePrefix("https://")
             .removePrefix("http://")
             .removePrefix("git://")
+            .removePrefix("ssh://")
             .substringBefore('/')
             .substringAfterLast('@')
             .substringBefore(':')
             .trim()
             .lowercase()
-        return authority == "github.com" || authority.endsWith(".github.com")
-    }
 
     /** `scheme://userinfo@` — the user info is the part that must not survive. */
     private val URL_USER_INFO = Regex("""([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@""")

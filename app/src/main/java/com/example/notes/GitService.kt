@@ -353,6 +353,31 @@ object GitService {
         token: String? = null,
         deadline: Deadline? = null,
     ): RemoteResult {
+        // **A key that does not belong to this host is not sent, and the refusal says so.**
+        //
+        // The guard below is right — the key on this phone is a GitHub key, and giving it to
+        // `gitlab.com` would be a leaked key — but its silence was not. A private repository
+        // anywhere else went out unauthenticated, the server answered 401, and the person was told
+        // their credentials were wrong about a key the app had deliberately withheld. That is the
+        // one failure the app forbids: a failure that does not say what happened.
+        //
+        // **Said before anything is opened**, because the request is the harm: a clone that has
+        // already reached the host has already asked it a question.
+        //
+        // **A remote with no host at all is not this case.** A local path — a test's bare
+        // repository, or a project cloned from a folder on the phone — has no host to give a key
+        // to, so there is nothing to refuse. `hostOf` answers with an empty string there, and an
+        // empty host means "not a network remote", which is the honest reading rather than a
+        // guess that it is somebody else's server.
+        val host = Secrets.hostOf(remoteUrl)
+        if (host.isNotEmpty() && !token.isNullOrBlank() && !Secrets.isGitHubHost(remoteUrl)) {
+            return RemoteResult(
+                "This repository is at $host, and the key on this phone is a " +
+                    "GitHub key. It was not sent, because a key given to the wrong host is a leaked " +
+                    "key. Cloning a private repository elsewhere needs a key for that host.",
+                false,
+            )
+        }
         val partial = File(dir.parentFile, dir.name + ".partial")
         return try {
             dir.parentFile?.mkdirs()
@@ -363,9 +388,9 @@ object GitService {
                 .setDirectory(partial)
                 .setCloneAllBranches(true)
             deadline?.let { command.setProgressMonitor(it.monitor()) }
-            if (Secrets.isGitHubHost(remoteUrl)) {
-                credentials(token)?.let { command.setCredentialsProvider(it) }
-            }
+            // **No guard here any more.** `credentials` takes the URL and answers nothing for a
+            // host that is not GitHub's, which is the same rule stated once instead of twice.
+            credentials(remoteUrl, token)?.let { command.setCredentialsProvider(it) }
             val git = command.call()
             git.use {
                 // The clone inherits the remote's author; make the local identity ours.
@@ -514,7 +539,7 @@ object GitService {
     fun fetch(repo: Repository, token: String?) {
         Git(repo).use { git ->
             val fetch = git.fetch().setRemote("origin")
-            credentials(token)?.let { fetch.setCredentialsProvider(it) }
+            credentials(remoteOf(repo), token)?.let { fetch.setCredentialsProvider(it) }
             fetch.call()
         }
     }
@@ -1129,7 +1154,7 @@ object GitService {
             val branch = currentBranch(repo)
             Git(repo).use { git ->
                 val fetch = git.fetch().setRemote("origin")
-                credentials(token)?.let { fetch.setCredentialsProvider(it) }
+                credentials(remoteOf(repo), token)?.let { fetch.setCredentialsProvider(it) }
                 fetch.call()
 
                 // **Which branch is the project's?** Not necessarily the one this
@@ -1807,7 +1832,9 @@ object GitService {
                     .setRemote("origin")
                     .setForce(force)
                     .setRefSpecs(RefSpec("refs/heads/$local:refs/heads/$onto"))
-                credentials(token)?.let { command.setCredentialsProvider(it) }
+                // **The URL, so a project cloned from elsewhere cannot have the key sent to it.**
+                // This was the call site that had no guard at all.
+                credentials(remoteOf(repo), token)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()
                 val updates = results.flatMap { it.remoteUpdates }
                 val messages = updates
@@ -1860,7 +1887,7 @@ object GitService {
         return try {
             Git(repo).use { git ->
                 val command = git.pull()
-                credentials(token)?.let { command.setCredentialsProvider(it) }
+                credentials(remoteOf(repo), token)?.let { command.setCredentialsProvider(it) }
                 val result = command.call()
                 val ok = result.isSuccessful
                 RemoteResult(
@@ -1896,10 +1923,33 @@ object GitService {
     }
 
     /** The credentials for talking to GitHub, when a token is available. */
-    private fun credentials(token: String?): CredentialsProvider? {
+    /**
+     * The credentials for [remoteUrl] — **or null, and never a key for the wrong host.**
+     *
+     * **The URL is a parameter rather than something the caller has already checked.** Every call
+     * site used to do its own `isGitHubHost` test, and `pushNow` was the one that did not: it
+     * attached the account's GitHub key to whatever `origin` said, so a project cloned from another
+     * host would have had the key sent to that host on the first push. A guard each caller has to
+     * remember is a guard that one of them forgets, and the one that forgot was the one that sends.
+     *
+     * Taking the URL makes that unrepresentable: there is no way to ask for credentials without
+     * saying where they are going, and the answer for anywhere but GitHub is nothing at all.
+     *
+     * **A URL with no host is allowed through.** A local path — a bare repository beside the
+     * project, which is how the tests and a folder-to-folder clone work — has nowhere for the key to
+     * go, so there is nothing to protect. `Secrets.hostOf` answers with an empty string there.
+     */
+    private fun credentials(remoteUrl: String?, token: String?): CredentialsProvider? {
         if (token.isNullOrBlank()) return null
+        if (remoteUrl == null) return null
+        val host = Secrets.hostOf(remoteUrl)
+        if (host.isNotEmpty() && !Secrets.isGitHubHost(remoteUrl)) return null
         return UsernamePasswordCredentialsProvider(token, CharArray(0))
     }
+
+    /** The `origin` URL of [repo], or null when it has none. */
+    private fun remoteOf(repo: Repository): String? =
+        repo.config.getString("remote", "origin", "url")
 }
 
 /** The identity used for the commits the app makes. */
