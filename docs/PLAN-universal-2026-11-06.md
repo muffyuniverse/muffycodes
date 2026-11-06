@@ -445,8 +445,19 @@ tracked to born-untracked, and `assets/` becomes the one place a picture is trac
 fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) != EntryKind.TEXT
 ```
 
-**The cost, said plainly.** A person who drops a `.png` anywhere outside `assets/` gets a file with **no
-version and no undo**. That is the exact worry recorded in `createdByOperator`'s own comment — *"an
+**CORRECTED, 2026-11-06, by CI.** The paragraph below was wrong about where the cost lands. Four
+`EditorScreenTest` cases went red: `createFile` is the person's own door and it calls
+`shouldIgnoreOnCreate`, so once `IMAGE != TEXT` a `.png` made through New File stopped being committed
+and **every drawing lost its version**. That is not a stray screenshot in `src/` — it is the app's main
+picture flow, and the cost was underestimated here rather than merely accepted.
+
+**The rule that shipped keeps the distinction that was meant:** a picture **arrives** untracked (a
+screenshot in `src/`, an archive unpacked beside the code — those should not silently become repository
+blobs) and is **tracked when the person makes it**, because pressing New File and choosing a picture name
+is a decision rather than a default. `assets/` still decides where a picture is *stored*, through LFS; it
+is not a licence to take the version away.
+
+**The cost as it now stands.** A person who drops a `.png` anywhere outside `assets/` That is the exact worry recorded in `createdByOperator`'s own comment — *"an
 ignored file is not committed, so the person's own note had no version and no undo — and 'every change is
 a version' is the promise this app exists for"* — and the old rule answered it by keeping pictures
 tracked (*"same as with pictures"*).

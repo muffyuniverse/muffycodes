@@ -80,7 +80,11 @@ class SemanticSearchTest {
 
         val answer = engine().answer(null, "milk", paths = 10, depth = 8, Deadline.none()).getOrThrow()
 
-        assertTrue("the right file: $answer", answer.contains("shopping/milk.txt:1: the milk went sour"))
+        // **`1-2`, because the chunk really is two lines.** A file ending in a newline splits to
+        // `["the milk went sour", ""]`, and `Chunker` takes whole lines — so the chunk covers both
+        // and the answer says so. That range is exactly what `read {from: 1, to: 2}` takes, which is
+        // the point of naming it: a model can go straight to the text it was shown.
+        assertTrue("the right file: $answer", answer.contains("shopping/milk.txt:1-2: the milk went sour"))
         assertFalse("and not the other one: $answer", answer.contains("money.txt"))
         // **The extent, on every answer.** A person reading "nothing matches" cannot tell an empty
         // project from a search that only looked in one folder, and the second is this tool's design.
