@@ -626,6 +626,34 @@ Test 7 belongs in `tools/check-workflow.py`, which now reads every workflow in t
 Step 1 is deliberately first because it is the only step that is fully testable without a device or a
 second repository, and because the rest of the plan is worthless if the reader cannot read.
 
+### 3c.7b What is built, as of now
+
+| Step | State |
+|---|---|
+| **1. Marker, decryptor, tests 1–6** | **DONE** — `EncryptedLog.kt` + `EncryptedLogTest` (11 tests), CI green at `92b2b97` |
+| **2. Key generation** | **DONE** — `EncryptedLog.newKey()`, base64 so no shell or YAML rule can need quoting |
+| **3. Key storage and use** | **DONE** — `KEY_NAME` in the account's secret store; `runs` opens the log with it, CI green at `96033b0` |
+| **4. The workflow steps** | **NOT STARTED** — nothing encrypts yet, so nothing needs a key. The reader is live and passes plain logs through unchanged |
+| **5. The facade** | **NOT STARTED**, and correctly last |
+
+**Two real bugs were caught by CI rather than by reading, and both are worth recording:**
+
+1. **`PBEKeySpec`'s last argument is a length in BITS, not bytes.** Passing `KEY + IV` asked for 48
+   *bits* — six bytes — and every derivation threw `IndexOutOfBoundsException` while every constant in
+   the file read as though it were right. `openssl -pbkdf2` derives 48 *bytes*, so the number must be
+   `(KEY + IV) * 8`. A length unit that is silently wrong is exactly the shape of bug a format test
+   exists to catch, and [the format matches what openssl writes] did catch it.
+2. **The blob was found by position, not by shape.** `read()` took the first non-blank line after the
+   marker. The runner writes its own lines and this workflow does not control their order, so a
+   runner message arriving first was handed to the base64 decoder as if it were ciphertext. The blob
+   is now found by shape — one long unbroken run of base64 — and every other line is kept as plain
+   text, which is what they are.
+
+**Step 4 is deliberately still open.** Turning encryption on before the key exists would make every
+build log unreadable, so the order is: the reader first (live now, harmless), then the key, then the
+encryption. That is the reverse of the usual "turn it on and see", and it is the reverse because the
+failure mode of getting it wrong is a log nobody can read.
+
 ### 3c.8 What not to do
 
 - **Do not encrypt the artifacts.** Their bytes already need authentication (401 measured); only their
