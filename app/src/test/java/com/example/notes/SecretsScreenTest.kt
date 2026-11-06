@@ -74,6 +74,21 @@ class SecretsScreenTest {
     }
 
     /**
+     * Opens the add window **on a clock the test drives.**
+     *
+     * `AlertDialog`'s enter animation never reports idle under Robolectric, so every query against a
+     * dialog that was just opened waits sixty seconds and then fails — which is what took three CI
+     * rounds to find, because the symptom is `AppNotIdleException` on whatever line came next.
+     * Disabling auto-advance means the test decides when the frame settles, so there is nothing to
+     * wait for.
+     */
+    private fun openAdd() {
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("Add").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
+    }
+
+    /**
      * **An empty vault says so in the error colour and names what is missing.** The sentence has to
      * point at the consequence — an article or a tool has nothing to use — because a person who has
      * never made a secret does not yet know what one is for.
@@ -115,7 +130,7 @@ class SecretsScreenTest {
     @Test
     fun `the save button refuses a secret with no host, and says which field is missing`() {
         screen()
-        compose.onNodeWithText("Add").performClick()
+        openAdd()
 
         // **The button's own state first**, which is the fact: it will not press. The sentence is
         // asserted by `each missing field is named rather than reported as invalid` below, so this
@@ -128,7 +143,7 @@ class SecretsScreenTest {
     @Test
     fun `a name a value and a host are enough to keep one`() {
         screen()
-        compose.onNodeWithText("Add").performClick()
+        openAdd()
 
         type(0, "github")
         type(1, "ghp_the_real_token")
@@ -136,6 +151,7 @@ class SecretsScreenTest {
 
         compose.onNodeWithText("Save").assertIsEnabled()
         compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
 
         assertEquals("it is in the store", listOf("github"), scene.viewModel.secretNames())
         assertEquals("bound to its host", "api.github.com", scene.viewModel.secretHost("github"))
@@ -164,16 +180,22 @@ class SecretsScreenTest {
     fun `removing asks before it forgets`() {
         scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
         screen()
-
+        // **The same clock, because this is the same dialog machinery.** The window that asks before
+        // forgetting animates on entry exactly as the add window does.
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("Remove").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithText("Remove github?", substring = true).assertIsDisplayed()
 
         compose.onNodeWithText("Keep").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
         assertEquals("keeping leaves it", listOf("github"), scene.viewModel.secretNames())
 
         compose.onNodeWithText("Remove").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
         // **By its own word**, because the row behind the window says Remove too.
         compose.onNodeWithText("Forget").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
         assertEquals("and removing forgets it", emptyList<String>(), scene.viewModel.secretNames())
     }
 
