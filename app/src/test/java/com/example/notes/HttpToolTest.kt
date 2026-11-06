@@ -362,7 +362,7 @@ class HttpToolTest {
     fun `no url is refused`() {
         val said = call("http", "{}")
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
-        assertTrue(said, said.contains("\"url\""))
+        assertTrue("it names the argument to give: $said", said.contains("url"))
     }
 
     /** The address rule runs before the request, because the request is the harm. */

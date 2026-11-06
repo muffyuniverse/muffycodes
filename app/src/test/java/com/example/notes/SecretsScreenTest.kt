@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -55,6 +56,17 @@ class SecretsScreenTest {
         MaterialTheme { Surface { content() } }
     }
 
+    /**
+     * Types into the [index]th text field of the dialog.
+     *
+     * **By position, because the label is not the field.** `onNodeWithText("Name")` finds the label's
+     * own node, which takes no text — and `performTextInput` on it is what left the dialog waiting
+     * for an idle state it never reached. The order is fixed by the dialog itself: name, value, host.
+     */
+    private fun type(index: Int, text: String) {
+        compose.onAllNodes(hasSetTextAction())[index].performTextInput(text)
+    }
+
     private fun screen(onBack: () -> Unit = {}) {
         compose.setContent {
             Frame { SecretsScreen(viewModel = scene.viewModel, onBack = onBack) }
@@ -77,7 +89,9 @@ class SecretsScreenTest {
     /** A secret that is added is listed **by name and host**, and the value is nowhere. */
     @Test
     fun `a secret is listed by name and host, and its value is never shown`() {
-        scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
+        val problem = scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
+        assertEquals("the secret was kept: $problem", null, problem)
+        assertEquals("and it is in the store", listOf("github"), scene.viewModel.secretNames())
         screen()
 
         compose.onNodeWithText("github").assertIsDisplayed()
@@ -103,8 +117,8 @@ class SecretsScreenTest {
         screen()
         compose.onNodeWithText("Add").performClick()
 
-        compose.onNodeWithText("Name").performTextInput("github")
-        compose.onNodeWithText("Value").performTextInput("ghp_the_real_token")
+        type(0, "github")
+        type(1, "ghp_the_real_token")
 
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Say which host may use it.", substring = true).assertIsDisplayed()
@@ -116,9 +130,9 @@ class SecretsScreenTest {
         screen()
         compose.onNodeWithText("Add").performClick()
 
-        compose.onNodeWithText("Name").performTextInput("github")
-        compose.onNodeWithText("Value").performTextInput("ghp_the_real_token")
-        compose.onNodeWithText("Host").performTextInput("api.github.com")
+        type(0, "github")
+        type(1, "ghp_the_real_token")
+        type(2, "api.github.com")
 
         compose.onNodeWithText("Save").assertIsEnabled()
         compose.onNodeWithText("Save").performClick()
@@ -139,9 +153,9 @@ class SecretsScreenTest {
         screen()
         compose.onNodeWithText("Add").performClick()
 
-        compose.onNodeWithText("Name").performTextInput("github")
-        compose.onNodeWithText("Value").performTextInput("ghp_the_real_token")
-        compose.onNodeWithText("Host").performTextInput("https://api.github.com/user")
+        type(0, "github")
+        type(1, "ghp_the_real_token")
+        type(2, "https://api.github.com/user")
 
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Just the host, without the scheme", substring = true).assertIsDisplayed()

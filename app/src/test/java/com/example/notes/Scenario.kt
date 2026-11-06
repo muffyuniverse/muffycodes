@@ -82,6 +82,15 @@ open class MemoryCredentials : Credentials {
 
     override fun secretNames(): List<String> = secrets.keys.sorted()
 
+    /**
+     * The host a secret is bound to.
+     *
+     * **Without this the fake inherits the interface's null**, and a test that asserts a refusal names
+     * the host it was really stored for would be asserting a sentence the fake could never produce —
+     * which is exactly how it failed the first time.
+     */
+    override fun secretHost(name: String): String? = secretHosts[name]
+
     override fun forgetSecret(name: String) {
         secrets.remove(name)
         secretHosts.remove(name)

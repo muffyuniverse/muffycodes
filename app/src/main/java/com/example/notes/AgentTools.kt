@@ -943,7 +943,12 @@ class AgentTools(
                     "the body is the reason, and it is given to you to read. A redirect on " +
                     "anything but a GET is returned rather than followed, because a POST that " +
                     "became a GET would silently lose its body.",
-                "{\"method\":\"GET\",\"url\":\"https://api.github.com/user\",\"auth\":\"github\"}",
+                // **Every argument is named here, because the schema is built from this example** -
+                // an argument the runner reads and the schema omits is one the model cannot know
+                // about, which the suite asserts against.
+                "{\"method\":\"GET\",\"url\":\"https://api.github.com/user\"," +
+                    "\"headers\":{\"X-GitHub-Api-Version\":\"2022-11-28\"}," +
+                    "\"body\":\"\",\"auth\":\"github\"}",
             ),
             spec(
                 "mcp",
