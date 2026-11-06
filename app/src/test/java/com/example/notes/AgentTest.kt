@@ -2484,7 +2484,13 @@ class AgentTest {
         // **The list is a fact about the tools, so it is asserted rather than trusted.** A name added
         // to `CHANGES_DISK` that is not a real tool would silently do nothing, and a real writing
         // tool left off it would leave the list stale — neither is visible by reading the code.
-        val writes = setOf("write", "delete", "move", "restore", "fetch", "artifact", "download", "archive", "pull", "push")
+        // **`http` is here because it files its answer**, and the folder listing has to move for the
+        // same reason it has to after `write`: a listing that did not would be showing a project that
+        // does not exist.
+        val writes = setOf(
+            "write", "delete", "move", "restore", "fetch", "artifact", "download", "archive",
+            "pull", "push", "http",
+        )
         assertEquals("every writing tool, and only those", writes, AgentTools.CHANGES_DISK)
         assertTrue(
             "every one of them is a real tool",
