@@ -106,7 +106,12 @@ class LfsSyncTest {
             git.commit().setMessage("a binary").setAuthor("A", "a@b.c").setCommitter("A", "a@b.c").call()
             val commit = git.repository.parseCommit(git.repository.resolve("HEAD"))
             var blob: org.eclipse.jgit.lib.ObjectId? = null
-            TreeWalk(git.repository, commit.tree).use { walk ->
+            // **`TreeWalk(repo)` then `addTree`, which is the shape the app itself uses.**
+            // `TreeWalk(repository, tree)` is not an overload — the two-argument form takes an
+            // ObjectReader — and the compiler says so in terms that do not mention trees.
+            TreeWalk(git.repository).use { walk ->
+                walk.addTree(commit.tree)
+                walk.isRecursive = true
                 while (walk.next()) {
                     if (walk.pathString == "archive.zip") blob = walk.getObjectId(0)
                 }
