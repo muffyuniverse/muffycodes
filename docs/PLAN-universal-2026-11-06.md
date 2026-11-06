@@ -400,7 +400,10 @@ The operator's design (2026-11-06), which supersedes the extension-list approach
 |---|---|---|---|
 | `assets/` | **yes, through LFS** | LFS objects | **the person only** |
 | `ignored/` | **never** | this phone only | the person |
-| everything else | yes, if text | ordinary git blobs | person **and** agent |
+| everything else | **yes, whatever the kind** | ordinary git blobs | person **and** agent |
+
+**"All files can be tracked, but a non-text file is born untracked"** — the operator's correction, and it
+is the rule. Anything can be tracked; what differs is the **default** at the moment of creation.
 
 **This replaces the extension list, and that is the point.** Today `LFS_ATTRIBUTE` is built from
 `IMAGE_EXTENSIONS = {png, jpg, jpeg, gif, webp, bmp}` — so a `.zip`, `.mp4` or `.apk` in a project is
@@ -418,6 +421,41 @@ but it stops deciding what is *stored*, which was never the right question for i
 money to store (LFS bandwidth and quota are billed) and whose size is unbounded. An agent that can
 write there can spend the operator's quota without asking. It is the same shape as the existing `locked`
 concept, so the refusal is the one that already exists rather than a new mechanism.
+
+### 6.0b The born-untracked rule is `kindOf != TEXT`, and it is **wider** than today
+
+`Workspace.shouldIgnoreOnCreate(file)` is one line today:
+
+```kotlin
+fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) == EntryKind.UNKNOWN
+```
+
+`EntryKind` is `{FOLDER, TEXT, IMAGE, UNKNOWN}`, so the current defaults are:
+
+| kind | born | note |
+|---|---|---|
+| TEXT | tracked | |
+| **IMAGE** | **tracked** | which is *why* `LFS_ATTRIBUTE` exists |
+| UNKNOWN | ignored | |
+
+**The operator's rule is wider than the current behaviour**, not narrower: it flips **images** from
+tracked to born-untracked, and `assets/` becomes the one place a picture is tracked — through LFS.
+
+```kotlin
+fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) != EntryKind.TEXT
+```
+
+**The cost, said plainly.** A person who drops a `.png` anywhere outside `assets/` gets a file with **no
+version and no undo**. That is the exact worry recorded in `createdByOperator`'s own comment — *"an
+ignored file is not committed, so the person's own note had no version and no undo — and 'every change is
+a version' is the promise this app exists for"* — and the old rule answered it by keeping pictures
+tracked (*"same as with pictures"*).
+
+**The trade is accepted, for a reason the old comment could not have:** `assets/` now exists as the
+deliberate home for a picture, and a picture has no meaningful line history anyway. What the person loses
+is undo; what they gain is that a stray screenshot in `src/` no longer silently becomes a repository
+blob. **The screen must say so** — the same sentence the broken-link icon already implies — because a
+file with no version is the one thing here a person cannot discover by looking.
 
 ### 6.1 `.gitignore` is **kept**, and this is why
 
@@ -526,50 +564,67 @@ and it is billed twice.
 repository, so the cost the person actually pays does not change. Recorded here so it is a known cost
 rather than a surprise.
 
-### 6.5 What a pull does to an ignored file — **verified, and one risk**
+### 6.5 A pull leaves an ignored file alone — and there is now no second path
 
-The operator asked whether pulling replaces or removes ignored files. The answer is not uniform, and the
-difference is the two sync paths:
+**One sentence, because there is one path.** `pull` is `GitService.merge`, and a merge touches only the
+paths in the trees being merged. An ignored path is in no tree, so nothing in a pull can reach it: an
+ignored file stays until the project folder stays.
 
-**`pull` (a merge) — ignored files stay.** `GitService.merge` merges trees, and an ignored path is in no
-tree, so nothing in the merge can reach it. Untracked-and-ignored files survive untouched.
+**The earlier draft of this section had a second case and a risk in it.** `replaceWithRemote` did a hard
+reset and then deleted `status.untracked + untrackedFolders + missing` wholesale. `status.untracked`
+excludes ignored paths, so a plain ignored file survived — but `untrackedFolders` is coarse and
+`deleteRecursively` on a folder name is a bigger hammer than the question asks for, and whether it could
+eat an ignored file beside untracked content was **unverified**.
 
-**`replaceWithRemote` (a reset) — they are meant to go, and one case needs a test.**
-`GitService.resetToRemote` does a hard reset and then explicitly wipes:
+**The operator removed the question instead of answering it:** *"we dont need replace with remote — If I
+need that I will just delete the project locally and import it again."*
 
-```kotlin
-val status = git.status().call()
-(status.untracked + status.untrackedFolders + status.missing)
-    .forEach { path -> File(repo.workTree, path).deleteRecursively() }
-```
+That is better than a fix, for a reason worth keeping: **the delete path already exists**, is already
+destructive-with-confirmation, and already has the shape a person expects. A second way to destroy a
+project is a second set of rules about what survives, and this one had a hazard in it that nobody had
+measured.
 
-That is correct for what `replaceWithRemote` is — *"make this folder exactly what GitHub has"* is a
-deliberate destruction. `status.untracked` **excludes** ignored paths (JGit puts them in
-`ignoredNotInIndex`), so a plain ignored file is safe even here.
+### 6.5b `replaceWithRemote` is removed
 
-**The risk is `untrackedFolders`.** It is coarse: it names a folder rather than the paths in it, and
-`deleteRecursively()` then removes everything under that name — including an ignored file that happened to
-sit beside untracked content. **This is a hypothesis, not a measurement.** It needs a test before the
-folder rule lands:
+**One caller reaches it:** the add-project picker, when a repository with that name is already here
+(`MainActivity.kt:759` — *"Already here: replacing the copy is a question"*), plus `pullRepository`
+calling it directly (`AppViewModel.kt:3954`).
 
-> a project with `ignored/notes.md` and an untracked `scratch.txt` beside it, replaced with the remote,
-> keeps `ignored/notes.md`.
+**What goes with it:**
 
-If it fails, the fix is to delete `status.untracked` paths individually and never a folder wholesale —
-which is a better rule anyway, because `deleteRecursively` on a folder is a bigger hammer than the
-question asks for.
+| Removed | Where |
+|---|---|
+| `Pending.ReplaceProject`, the confirm dialog, `askReplace` | `MainActivity.kt:140, 593, 950` |
+| The picker's branch that offers it | `MainActivity.kt:759` |
+| `ProjectGit.replaceWithRemote` | `ProjectGit.kt:467` |
+| `GitService.resetToRemote` | `GitService.kt:1149` |
+| The Maintenance marker that names it | `Maintenance.kt:22` |
+| The index-invalidation comment that cites it | `SearchIndex.kt:397` |
+| The test built on the reset path | `IndexQueueTest.kt:130` |
+| A doc comment citing it as the other half of `fetch` | `GitService.kt:535` |
+
+**The picker's branch is replaced, not deleted.** Today *"that repo is already here"* offers **replace**.
+With replace gone the honest answer is **"this project is already here"** — and a person who wants a fresh
+copy deletes it and imports again, which is one act they already know.
+
+**`GitService.resetToRemote` goes too**, because nothing else calls it. `fetch` stays — `pull` uses it.
 
 ### 6.6 What is built, and in what order
 
 | # | What | Why here |
 |---|---|---|
 | 1 | `assets/` + `ignored/` as structural folders; `assets/**` in `.gitattributes`; agent refused in `assets/` | The rule everything else reads. |
-| 2 | The `untrackedFolders` test (§6.5) | Proves the folder rule does not eat a person's file on a replace. |
-| 3 | `git {op: "diff", path, from, to}` | The one genuinely missing capability. |
-| 4 | Remove `state` — tool, `KEYS`, UI row; move its `ignored` sentence to the project row | The operator's call, and it is right. |
+| 2 | `shouldIgnoreOnCreate` becomes `kindOf != TEXT` (§6.0b) | One line, and it is what makes the folder rule mean anything. |
+| 3 | Remove `replaceWithRemote` and everything it carries (§6.5b) | **Before `diff`**, because it deletes a reset path and a test, and doing it later means touching the same files twice. |
+| 4 | `git {op: "diff", path, from, to}` | The one genuinely missing capability. |
+| 5 | Remove `state` — tool, `KEYS`, UI row; move its `ignored` sentence to the project row | The operator's call, and it is right. |
 
-**Cost:** ~200 lines plus tests. The `diff` op reuses `GitService.diffLines` and `ProjectGit.log`; the
-folder rule is mostly `Workspace` and `GitService` constants plus one refusal.
+**Cost:** ~200 lines plus tests, and **less than the previous draft** — removing `replaceWithRemote` takes
+out a dialog, a `Pending` case, a picker branch, two service methods and a test, which is most of what the
+`untrackedFolders` test was going to cost. The `diff` op reuses `GitService.diffLines` and `ProjectGit.log`;
+the folder rule is mostly `Workspace` and `GitService` constants plus one refusal.
+
+**No test is owed for a wipe that no longer exists.** That is the whole gain of §6.5b.
 
 ### 6.7 What this does not do
 
@@ -770,7 +825,7 @@ fires after the phone has buffered two gigabytes is not a cap.
 | **3** | **A — `Fetcher.request` + `http`** (§3) | ~180 lines, 12 tests | The core. Test 4 (the vault never leaks) **before the tool is reachable by a model**. |
 | **4** | delete `fetch`, rename the switch (§8) | small | Follows immediately from 3. |
 | ~~5~~ | ~~**C — provider config**~~ (§5) | — | **Withdrawn by the operator.** The schema as it is is good enough; git, http and secrets matter more. |
-| **6** | **D — the folder rule, `diff`, and `state` removed** (§6) | ~200 lines | Last, and now first among the four: the folder rule decides what git sees, and `diff` is revisions-only because every tracked change is committed. |
+| **6** | **D — the folder rule, `replaceWithRemote` removed, `diff`, `state` removed** (§6) | ~200 lines, and **net negative** | The folder rule decides what git sees; `diff` is revisions-only because every tracked change is committed; and removing `replaceWithRemote` takes out a dialog, a `Pending`, two service methods and a test. |
 | **7** | one real call by hand against the GitHub API | — | Prove the shape end to end before trusting it. |
 
 **Parts 1 and 2 are a morning's work and each fixes something that is wrong right now.** That is deliberate:
