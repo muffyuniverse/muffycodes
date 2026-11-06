@@ -546,7 +546,30 @@ class Workspace(val accountDir: File) {
         // what its files are, and those decide for themselves.
         val kind = kindOf(file)
         if (kind == EntryKind.FOLDER) return false
+        // **A picture is tracked wherever the person makes it, and untracked when it merely
+        // arrives.** That distinction is the whole rule, and getting it wrong broke the drawing
+        // feature outright: `createFile` is the person's own door, it calls this, and once
+        // `IMAGE != TEXT` a `.png` made through it stopped being committed — so a drawing had no
+        // version and no undo, which is the one promise this app is built on.
+        //
+        // The operator's rule is about *defaults at creation*, and a person pressing New File and
+        // choosing a picture name is not a default — it is a decision. `assets/` still matters: it is
+        // where pictures are stored through LFS, so a picture made here and moved there stops being
+        // an ordinary blob. What it is not is a licence to take the version away.
+        if (kind == EntryKind.IMAGE) return false
         return kind != EntryKind.TEXT
+    }
+
+    /**
+     * True when [file] is inside the project's `assets/` folder.
+     *
+     * **A whole path segment, not a string prefix**, because the path is account-relative:
+     * `Shopping/assets/milk.png`. `assets-old/` is not `assets/`, and a project *named* `assets` is
+     * not a folder inside one.
+     */
+    fun insideAssets(file: File): Boolean {
+        val path = relative(file)?.let(::pathString) ?: return false
+        return path.split('/').any { it == ASSETS }
     }
 
     /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
@@ -1300,7 +1323,7 @@ class Workspace(val accountDir: File) {
         // `assets/milk.png`. The folder name is matched as a whole segment anywhere in the path,
         // which is what makes it a rule about a folder rather than about a string: `assets-old/` is
         // not `assets/`, and a project *named* `assets` is not a folder inside one.
-        if (path.split('/').any { it == ASSETS }) return true
+        if (insideAssets(file)) return true
         val locked = locked()
         if (locked.isEmpty()) return false
         if (path in locked) return true

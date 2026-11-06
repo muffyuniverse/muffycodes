@@ -4695,7 +4695,11 @@ class AgentTools(
         }
         deadline.check("git")
         val result = git.diffBetween(project, path, from, to).getOrElse {
-            return refusal(it.message ?: "the difference could not be read")
+            // **`describe`, not `message`.** A JGit failure arrives as a wrapper whose `message` is
+            // often null or the class name; `describe` unwraps the cause, so the refusal names
+            // something the caller can act on rather than saying "the difference could not be read"
+            // about a repository that does not exist.
+            return refusal(Secrets.describe(it))
         }
         val where = if (result.path.isEmpty()) "the whole project" else "\"${result.path}\""
         if (result.files.isEmpty()) {

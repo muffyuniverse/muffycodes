@@ -1067,12 +1067,16 @@ class WorkspaceTest {
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
         workspace.ensureIgnore(project)
 
-        assertTrue(
-            "a png is not text, so it waits",
+        // **A picture is the exception, and the drawing feature is why.** A person pressing New
+        // File and choosing a picture name is making a decision, not accepting a default - and
+        // ignoring it took the version away from every drawing, which is the one promise this app
+        // is built on. `assets/` decides where a picture is *stored*, not whether it has a history.
+        assertFalse(
+            "a picture the person makes keeps its version",
             workspace.shouldIgnoreOnCreate(File(project, "screenshot.png")),
         )
         assertTrue(
-            "and so does anything else the app cannot read",
+            "but anything the app cannot read waits",
             workspace.shouldIgnoreOnCreate(File(project, "data.zip")),
         )
         assertFalse(
