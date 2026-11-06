@@ -30,42 +30,56 @@ class CiSetupTest {
         private fun no(name: String): Nothing =
             throw UnsupportedOperationException("$name is not part of this test")
 
-        override fun identity(token: String) = no("identity")
-        override fun listRepos(token: String) = no("listRepos")
-        override fun licences(token: String) = no("licences")
+        override fun identity(token: String): GitHubResult<Identity> = no("identity")
+        override fun listRepos(token: String): GitHubResult<List<Repo>> = no("listRepos")
+        override fun licences(token: String): GitHubResult<List<Licence>> = no("licences")
         override fun createRepo(
             token: String,
             name: String,
             licence: String,
             description: String,
             private: Boolean,
-        ) = no("createRepo")
-        override fun renameRepo(token: String, owner: String, name: String, newName: String) =
-            no("renameRepo")
-        override fun deleteRepo(token: String, owner: String, name: String) = no("deleteRepo")
-        override fun cloneUrlFor(owner: String, name: String) = no("cloneUrlFor")
-        override fun webUrl(cloneUrl: String) = no("webUrl")
-        override fun owns(remoteUrl: String) = no("owns")
-        override fun runs(token: String, ref: RepoRef, workflow: String, branch: String, limit: Int) =
-            no("runs")
-        override fun jobs(token: String, ref: RepoRef, run: Long) = no("jobs")
-        override fun logs(token: String, ref: RepoRef, run: Long) = no("logs")
-        override fun artifacts(token: String, ref: RepoRef, run: Long) = no("artifacts")
-        override fun artifactBytes(token: String, ref: RepoRef, id: Long) = no("artifactBytes")
+        ): GitHubResult<Repo> = no("createRepo")
+        override fun renameRepo(
+            token: String,
+            owner: String,
+            name: String,
+            newName: String,
+        ): GitHubResult<Repo> = no("renameRepo")
+        override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> =
+            no("deleteRepo")
+        override fun cloneUrlFor(owner: String, name: String): String = no("cloneUrlFor")
+        override fun webUrl(cloneUrl: String): String = no("webUrl")
+        override fun owns(remoteUrl: String): Boolean = no("owns")
+        override fun runs(
+            token: String,
+            ref: RepoRef,
+            workflow: String,
+            branch: String,
+            limit: Int,
+        ): GitHubResult<List<CiRun>> = no("runs")
+        override fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>> = no("jobs")
+        override fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>> =
+            no("logs")
+        override fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>> =
+            no("artifacts")
+        override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> =
+            no("artifactBytes")
         override fun dispatch(
             token: String,
             ref: RepoRef,
             workflow: String,
             branch: String,
             inputs: Map<String, String>,
-        ) = no("dispatch")
-        override fun environments(token: String, ref: RepoRef) = no("environments")
+        ): GitHubResult<Unit> = no("dispatch")
+        override fun environments(token: String, ref: RepoRef): GitHubResult<List<CiEnvironment>> =
+            no("environments")
         override fun putEnvironment(
             token: String,
             ref: RepoRef,
             name: String,
             reviewers: List<String>,
-        ) = no("putEnvironment")
+        ): GitHubResult<CiEnvironment> = no("putEnvironment")
         override fun putEnvironmentSecret(
             token: String,
             ref: RepoRef,
@@ -73,25 +87,33 @@ class CiSetupTest {
             name: String,
             sealed: ByteArray,
             keyId: String,
-        ) = no("putEnvironmentSecret")
-        override fun environmentKey(token: String, ref: RepoRef, environment: String) =
-            no("environmentKey")
-        override fun repoSecretNames(token: String, ref: RepoRef) = no("repoSecretNames")
-        override fun environmentSecretNames(token: String, ref: RepoRef, environment: String) =
-            no("environmentSecretNames")
+        ): GitHubResult<Unit> = no("putEnvironmentSecret")
+        override fun environmentKey(
+            token: String,
+            ref: RepoRef,
+            environment: String,
+        ): GitHubResult<Pair<String, ByteArray>> = no("environmentKey")
+        override fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>> =
+            no("repoSecretNames")
+        override fun environmentSecretNames(
+            token: String,
+            ref: RepoRef,
+            environment: String,
+        ): GitHubResult<List<String>> = no("environmentSecretNames")
         override fun deleteEnvironmentSecret(
             token: String,
             ref: RepoRef,
             environment: String,
             name: String,
-        ) = no("deleteEnvironmentSecret")
-        override fun deleteRepoSecret(token: String, ref: RepoRef, name: String) = no("deleteRepoSecret")
+        ): GitHubResult<Unit> = no("deleteEnvironmentSecret")
+        override fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit> =
+            no("deleteRepoSecret")
         override fun restrictEnvironmentTo(
             token: String,
             ref: RepoRef,
             environment: String,
             branches: List<String>,
-        ) = no("restrictEnvironmentTo")
+        ): GitHubResult<Unit> = no("restrictEnvironmentTo")
     }
 
     /** A GitHub that answers what the test says, and records what it was asked to do. */
