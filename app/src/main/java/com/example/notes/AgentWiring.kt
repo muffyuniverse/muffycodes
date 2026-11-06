@@ -153,7 +153,7 @@ object AgentWiring {
                 key = { credentials.modelKey(login) },
                 threshold = { if (settings.scanAllowed) settings.scanThreshold else 0.0 },
             ),
-            fetchAllowed = { settings.fetchAllowed },
+            httpAllowed = { settings.httpAllowed },
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

@@ -411,13 +411,13 @@ class SettingsScreenTest {
         // **On by default, unlike the private-network switch**, because the direction of the risk is different:
         // a download writes a file a person can see and delete. The test asserts the default *and* the act,
         // because a switch whose default is wrong is the harder bug to notice.
-        assertTrue("a fresh account may download", scene.settings.fetchAllowed)
+        assertTrue("a fresh account may download", scene.settings.httpAllowed)
         settings()
 
         compose.onNodeWithText("Let it download files").performScrollTo()
         compose.onNodeWithText("Let it download files").performClick()
 
-        assertEquals("and one tap turns it off", false, scene.settings.fetchAllowed)
+        assertEquals("and one tap turns it off", false, scene.settings.httpAllowed)
     }
 
     @Test

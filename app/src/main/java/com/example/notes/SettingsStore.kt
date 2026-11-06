@@ -284,19 +284,25 @@ class SettingsStore(context: Context, name: String = "settings") {
      * part of every request's cache prefix — so a person who turns this off would pay for the description of a
      * capability they do not have, in every request, for ever.
      */
-    var fetchAllowed: Boolean by mutableStateOf(prefs.getBoolean(KEY_FETCH, true))
+    var httpAllowed: Boolean by mutableStateOf(prefs.getBoolean(KEY_FETCH, true))
         private set
 
-    /** Turns downloading on or off. */
-    fun keepFetch(on: Boolean) {
-        Trace.tap("fetch", if (on) "on" else "off")
-        fetchAllowed = on
+    /**
+     * Turns reaching the network on or off.
+     *
+     * **The stored key keeps its old name.** `KEY_FETCH` is what is on every phone that has this
+     * setting, and renaming it would silently turn the switch back on for anyone who had it off —
+     * a security setting that resets itself is worse than a name that reads oddly.
+     */
+    fun keepHttp(on: Boolean) {
+        Trace.tap("http", if (on) "on" else "off")
+        httpAllowed = on
         prefs.edit().putBoolean(KEY_FETCH, on).apply()
         Trace.said(
             if (on) {
-                "the agent may download a file from the web into agent/fetched/"
+                "the agent may send a request and keep the answer, in agent/http/"
             } else {
-                "the agent may not download files from the web"
+                "the agent may not reach the network"
             },
         )
     }

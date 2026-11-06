@@ -77,12 +77,12 @@ class HttpToolTest {
         log = AgentLog.open(project)
     }
 
-    private fun tools(fetchAllowed: Boolean = true) = AgentTools(
+    private fun tools(httpAllowed: Boolean = true) = AgentTools(
         ws, "shopping", git, log,
         credentials = credentials,
         fetcher = fetcher(),
         privateAllowed = { false },
-        fetchAllowed = { fetchAllowed },
+        httpAllowed = { httpAllowed },
     )
 
     private fun call(tool: String, args: String) =
@@ -381,7 +381,7 @@ class HttpToolTest {
             ws, "shopping", git, log,
             credentials = credentials,
             fetcher = fetcher(),
-            fetchAllowed = { false },
+            httpAllowed = { false },
         ).run(Call(id = "c-http", tool = "http", args = """{"url":"https://api.example.com/x"}"""))
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))

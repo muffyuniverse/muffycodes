@@ -902,15 +902,6 @@ class SemanticSearch(
             .removeSuffix("\u23ce")
             .trim()
 
-    private fun excerpt(text: String): String {
-        val line = text.lineSequence()
-            .firstOrNull { it.isNotBlank() }
-            ?.filterNot { it < ' ' && it != '\t' }
-            ?.trim()
-        if (line.isNullOrEmpty()) return "empty"
-        return if (line.length > EXCERPT) line.take(EXCERPT) + "\u2026" else line
-    }
-
     private fun score(value: Double): String =
         String.format(java.util.Locale.ROOT, "%.2f", value)
 
@@ -987,9 +978,6 @@ class SemanticSearch(
 
         /** Folder levels below the project that the walk will follow. A tree, not a graph. */
         const val WALK_DEPTH = 24
-
-        /** How much of a chunk's first line an answer shows. */
-        const val EXCERPT = 160
 
         /** A reason from a [Throwable], never empty, because "null" is not a sentence. */
         private fun reason(e: Throwable?): String {

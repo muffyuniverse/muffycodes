@@ -1238,7 +1238,7 @@ class AgentTest {
 
         assertEquals(
             "all three places, each with its own line number",
-            "0\nlist.txt:1: milk\nlist.txt:3: milk again\nlist.txt:5: milk",
+            "0\nshopping/list.txt:1: milk\nshopping/list.txt:3: milk again\nshopping/list.txt:5: milk",
             body,
         )
     }
@@ -1252,10 +1252,13 @@ class AgentTest {
         val many = (1..25).joinToString("\n") { "line $it milk" }
         ws.write(File(ws.repoOf("shopping"), "list.txt"), many + "\n")
 
-        val body = tool("search", """{"query":"milk"}""")
+        // **`paths` raised past the per-file cap**, so this test is about `HITS_PER_FILE` rather
+        // than about the answer running out of room — the two bounds are different questions and
+        // a test that let them overlap would pass while either one was wrong.
+        val body = tool("search", """{"query":"milk","paths":100}""")
 
-        assertTrue("the cap is honoured: $body", body.contains("list.txt:20: line 20 milk"))
-        assertFalse("and it stopped there: $body", body.contains("list.txt:21:"))
+        assertTrue("the cap is honoured: $body", body.contains("shopping/list.txt:20: line 20 milk"))
+        assertFalse("and it stopped there: $body", body.contains("shopping/list.txt:21:"))
         assertTrue("and it said how many were left: $body", body.contains("(+5 more lines match"))
     }
 
@@ -1270,7 +1273,7 @@ class AgentTest {
 
         val body = tool("search", """{"query":"milk","count":true}""")
 
-        assertEquals("two files, each with its own number", "0\na.txt: 2\nb.txt: 1", body)
+        assertEquals("two files, each with its own number", "0\nshopping/a.txt: 2\nshopping/b.txt: 1", body)
     }
 
     @Test
@@ -1289,7 +1292,7 @@ class AgentTest {
 
         assertEquals(
             "one row, because there is one version of the content",
-            "0\nlist.txt@${git.versions("shopping", "list.txt").first().first.shortId}:1: milk",
+            "0\nshopping/list.txt@${git.versions("shopping", "list.txt").first().first.shortId}:1: milk",
             body,
         )
     }

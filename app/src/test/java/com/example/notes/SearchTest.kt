@@ -166,7 +166,9 @@ class SearchTest {
         write("shopping", "many.txt", (1..40).joinToString("\n") { "milk $it" })
         write("shopping", "once.txt", "milk once\n")
 
-        val answer = tools().run(call("""{"query":"milk"}"""))
+        // **`paths` raised past the per-file cap**, so the answer is bounded by `HITS_PER_FILE`
+        // and not by `paths` — otherwise this test would be measuring the wrong bound.
+        val answer = tools().run(call("""{"query":"milk","paths":100}"""))
 
         // **One line in the message, because CI truncates at a newline.** An assertion that fails
         // with half its evidence missing is one that costs a second CI run to understand.

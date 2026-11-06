@@ -637,23 +637,24 @@ fun SettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { settings.keepFetch(!settings.fetchAllowed) },
+                    .clickable { settings.keepHttp(!settings.httpAllowed) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Let it download files", style = MaterialTheme.typography.bodyMedium)
+                    Text("Let it use the network", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "On, the agent can turn an address into a file under agent/fetched/ — a " +
-                            "dependency tarball, a release asset, anything a person gives it a link " +
-                            "to. Off, the tool is not offered at all rather than offered and refused. " +
-                            "Reading a page is not downloading, and is unaffected.",
+                        "On, the agent can send a request to an address and keep the answer in " +
+                            "agent/http/ — a dependency tarball, a release asset, an API call, " +
+                            "anything a person gives it a link to. Off, the tool is not offered at " +
+                            "all rather than offered and refused. Reading a page is a different " +
+                            "tool, and is unaffected.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Switch(
-                    checked = settings.fetchAllowed,
-                    onCheckedChange = { settings.keepFetch(it) },
+                    checked = settings.httpAllowed,
+                    onCheckedChange = { settings.keepHttp(it) },
                 )
             }
             Row(

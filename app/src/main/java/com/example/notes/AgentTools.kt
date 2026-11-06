@@ -101,7 +101,7 @@ class AgentTools(
      *
      * Read per call like every other limit here.
      */
-    private val fetchAllowed: () -> Boolean = { true },
+    private val httpAllowed: () -> Boolean = { true },
     /**
      * Where downloaded bytes come from.
      *
@@ -462,7 +462,7 @@ class AgentTools(
          */
         val CHANGES_DISK: Set<String> = setOf(
             "write", "delete", "move", "restore",
-            "fetch", "artifact", "download", "archive",
+            "artifact", "download", "archive",
             "pull", "push",
             // **`http` files its answer**, so a folder listing that did not move would be showing a
             // project that does not exist - the same bug `write` had.
@@ -564,7 +564,6 @@ class AgentTools(
             // there"*, and the reason vendoring is two visible steps rather than one that commits
             // 40 MB. That step works because `outputFolder` sends the output to the project when
             // `agent/` is not writable; without it the documented workflow would be a refusal.
-            "fetch" to setOf("url"),
             // **One request, with the verb and the body the caller chose.** This is what makes the app
             // reach any API without a typed method per endpoint - the thing that made `CiSetup` take five
             // compile rounds. `auth` names a secret in the vault and never holds one; the vault refuses it
@@ -616,13 +615,13 @@ class AgentTools(
         /**
          * Every tool the agent has, **minus the ones this account has turned off.**
          *
-         * [fetchAllowed] defaults to true so a caller that has not asked — a test, or a spec listing — sees the
+         * [httpAllowed] defaults to true so a caller that has not asked — a test, or a spec listing — sees the
          * whole set. The agent passes the account's answer, because a capability that is off must not be
          * *described* to the model: the tool list is part of every request's cache prefix, and a refusal would
          * also teach it to keep trying.
          */
         fun specs(
-            fetchAllowed: Boolean = true,
+            httpAllowed: Boolean = true,
         ): List<ToolSpec> = listOf(
             spec(
                 "search",
@@ -934,25 +933,7 @@ class AgentTools(
                 // that named only one shape would refuse the other before it ran.
                 "{\"path\":\"src\",\"unpack\":true}",
             ),
-            spec(
-                "fetch",
-                "Download a file from the web. **This is the only way bytes reach the phone from a " +
-                    "URL** — `browse` gives you a page's text and `shot` a picture, and neither is " +
-                    "a file. Use it for a dependency tarball " +
-                    "(`https://github.com/o/r/archive/refs/heads/main.tar.gz`), a release asset, or " +
-                    "anything a person gives you a link to. " +
-                    "**It always lands in `agent/fetched/`**, which is not in git, so a download " +
-                    "never commits itself; `archive` with `unpack` is how files get into the " +
-                    "project. The answer is the path, the size, and for a zip the names inside — " +
-                    "**never the bytes**, because binary in this conversation costs the whole " +
-                    "context to say nothing. " +
-                    "Private addresses are refused unless the person has allowed them, and so is " +
-                    "anything past ${Fetcher.size(Fetched.LIMIT_BYTES)}, which is the size of a " +
-                    "large dependency and not the size of an ISO. A download that is too big " +
-                    "is refused, not truncated: half an archive is worse than none, because it " +
-                    "fails later with the cause three steps back.",
-                "{\"url\":\"https://example.com/data.zip\"}",
-            ),
+
             spec(
                 "http",
                 "**Send one request to any API.** This is how you reach GitHub's REST API, a " +
@@ -1028,7 +1009,7 @@ class AgentTools(
                     "from itself.",
                 "{}",
             ),
-        ).filter { fetchAllowed || it.name != "fetch" }
+        ).filter { httpAllowed || it.name != "http" }
 
         /**
          * One tool, described to the model.
@@ -1177,20 +1158,12 @@ class AgentTools(
             "download" -> download(args, deadline)
             "upload" -> upload(args)
             "archive" -> archive(args, deadline)
-            "http" -> if (fetchAllowed()) {
+            "http" -> if (httpAllowed()) {
                 http(args, deadline)
             } else {
                 refusal(
                     "Reaching the network is switched off in this account's settings, so nothing can be " +
                         "sent. A page can still be read with `browse`.",
-                )
-            }
-            "fetch" -> if (fetchAllowed()) {
-                fetch(args, deadline)
-            } else {
-                refusal(
-                    "Downloading is switched off in this account's settings, so nothing can be fetched. " +
-                        "A page can still be read with `browse`.",
                 )
             }
             "mcp" -> mcp(args, deadline)
@@ -1612,7 +1585,11 @@ class AgentTools(
                 // instead of the lines themselves. A model asking "where is this used most" wants
                 // numbers it can compare, and twenty rows per file is the wrong shape for that.
                 if (state.counting) continue
-                if (shown >= HITS_PER_FILE) continue
+                // **Bounded by both the per-file cap and what is left of `paths`.** `paths` is how
+                // many ROWS the answer holds, so a file with twenty hits would otherwise fill an
+                // answer of ten and crowd out every other file — which is the defect `paths` exists
+                // to prevent, arriving from the other direction.
+                if (shown >= HITS_PER_FILE || state.count >= state.limit - 1) continue
                 shown++
                 found.add("$path:${index + 1}: ${excerpt(line, at, HIT)}")
                 state.count++
@@ -4059,10 +4036,19 @@ class AgentTools(
         // from it. Binary, or anything large, is filed only — putting a JPEG in the window spends the
         // budget on something the model cannot read.
         val inline = answer.bytes.size <= HTTP_INLINE && !looksBinary(answer.bytes)
+        // **A downloaded archive says what is inside it.** This was `fetch`'s answer and it is the
+        // reason `fetch` was not simply `http` with GET: an archive is the thing people download
+        // most, and "which files did this produce" is the question asked next. It moved here rather
+        // than being lost when `fetch` was deleted.
+        //
+        // A zip that will not open is not a failure of the download — the bytes are on disk either
+        // way — so an unreadable one simply has nothing to list.
+        val inside = if (method == "GET" && answer.ok) archiveListing(file) else null
         return if (answer.ok) {
             success(
                 head + "\n\n" + (if (inline) text else "The answer is ${Fetcher.size(answer.bytes.size.toLong())} and is filed, not quoted.") +
                     "\n\nIt is at $rel." +
+                    (inside ?: "") +
                     rateLimitNote(answer),
             )
         } else {
@@ -4077,6 +4063,27 @@ class AgentTools(
                     rateLimitNote(answer),
             )
         }
+    }
+
+    /**
+     * What an archive holds, as a sentence, or `null` when the file is not one.
+     *
+     * **Moved from `fetch`, which is why `fetch` was not merely `http` with GET.** A model that has
+     * just downloaded a zip needs to know which paths are inside before it can unpack it, and the
+     * listing is the difference between "I have a file" and "I have a dependency".
+     */
+    private fun archiveListing(file: File): String? {
+        val inside = try {
+            java.util.zip.ZipFile(file).use { zip ->
+                zip.entries().asSequence().filterNot { it.isDirectory }
+                    .take(FETCHED_SHOWN).map { it.name }.toList()
+            }
+        } catch (e: Throwable) {
+            return null
+        }
+        if (inside.isEmpty()) return null
+        return "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
+            if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else ""
     }
 
     /**
@@ -4120,63 +4127,7 @@ class AgentTools(
     private fun looksBinary(bytes: ByteArray): Boolean =
         bytes.take(1024).any { it == 0.toByte() }
 
-    private fun fetch(args: JSONObject, deadline: Deadline): String {
-        val url = args.optString("url", "").trim()
-        if (url.isEmpty()) {
-            return refusal("`fetch` needs a `url`: the address of the file to download.")
-        }
-        // **The address rule first, before anything is opened.** The refusal has to come before the
-        // request, not after it: the request is the harm, and a check that ran after the connection
-        // would already have reached the operator's router.
-        Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
-        deadline.check("fetch")
-        val got = fetcher.bytes(url, Fetched.LIMIT_BYTES).getOrElse {
-            return refusal(it.message ?: "The file could not be downloaded")
-        }
-        if (got.isEmpty()) {
-            return refusal("The server sent nothing for \"$url\".")
-        }
-        val dir = File(projectDir, Fetched.DIR)
-        val name = Fetched.nameFor(url)
-        val file = File(dir, name)
-        return try {
-            dir.mkdirs()
-            file.writeBytes(got)
-            val rel = file.relativeTo(projectDir).invariantSeparatorsPath
-            // **What is inside, when it can be read.** An archive is what a person fetches most of
-            // the time, and "which files did this produce" is the question a model asks next. A zip
-            // that will not open is not a failure of the download — the bytes are on disk either
-            // way.
-            val inside = try {
-                java.util.zip.ZipFile(file).use { zip ->
-                    zip.entries().asSequence().filterNot { it.isDirectory }
-                        .take(FETCHED_SHOWN).map { it.name }.toList()
-                }
-            } catch (e: Throwable) {
-                emptyList()
-            }
-            val listing = if (inside.isEmpty()) {
-                ""
-            } else {
-                "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
-                    if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else ""
-            }
-            success(
-                "Fetched ${Fetcher.size(got.size.toLong())} from $url into $rel." +
-                    listing +
-                    // **The next step, named**, because a fetched archive that stays in `agent/`
-                    // never reaches the project and the agent has to be told how it does.
-                    if (inside.isNotEmpty()) {
-                        "\n\nTo put it in the project, " +
-                            "{\"unpack\":\"$rel\",\"into\":\"<folder>\"}."
-                    } else {
-                        ""
-                    },
-            )
-        } catch (e: Throwable) {
-            refusal("The file could not be saved: " + Secrets.explain(e, "not written"))
-        }
-    }
+
 
     /**
      * `pack` and `unpack` — **one tool with a mode, because it is one capability.**

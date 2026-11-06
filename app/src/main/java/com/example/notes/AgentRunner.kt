@@ -94,7 +94,7 @@ class AgentRunner(
      * **A function, and it drops the tool rather than refusing it** — see [AgentTools.specs]. Read per call, so
      * a person who turns it off while an agent is idle means the next turn.
      */
-    private val fetchAllowed: () -> Boolean = { true },
+    private val httpAllowed: () -> Boolean = { true },
     /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
@@ -399,7 +399,7 @@ class AgentRunner(
                     mcp = mcp,
                     credentials = credentials,
                     scanner = scanner,
-                    fetchAllowed = fetchAllowed,
+                    httpAllowed = httpAllowed,
                     // **Read from the settings at the moment of the call**, like the other limits:
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },

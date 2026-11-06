@@ -158,7 +158,7 @@ class AgentToolsTest {
     fun `turning downloading off removes the tool rather than making it refuse`() {
         // **A described tool is a tool the model reaches for**, and its description is paid for in every
         // request's cache prefix — so a capability a person turned off must not be in the list at all.
-        val without = AgentTools.specs(fetchAllowed = false).map { it.name }
+        val without = AgentTools.specs(httpAllowed = false).map { it.name }
 
         assertFalse("fetch is not offered: $without", "fetch" in without)
         // **And everything else still is**, because a switch that quietly removed a second tool would be a
