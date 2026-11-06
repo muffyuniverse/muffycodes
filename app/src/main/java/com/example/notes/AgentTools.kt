@@ -294,6 +294,16 @@ class AgentTools(
         const val HIT = 200
 
         /**
+         * How many matching lines one file may contribute to a `search`.
+         *
+         * **A bound on the answer, not on the search.** A pattern like `\{` matches most lines of
+         * most source files, and answering every one of them would fill a conversation with one
+         * call. Twenty is enough to see the shape of the matches — and when it is hit, the answer
+         * says how many were left, so the model narrows the pattern instead of guessing.
+         */
+        const val HITS_PER_FILE = 20
+
+        /**
          * How many rows one `forget` may name, after ranges are expanded.
          *
          * Generous against any real context — a row costs about a hundred bytes, so four thousand is
@@ -493,7 +503,7 @@ class AgentTools(
             //   here", which is not a degenerate search but the same walk with no filter applied.
             // - **`paths` is the count**, named that because the answer is `path` or `path@sha7`.
             //   A content match answers **one row per path**, so the count and the rows agree.
-            "search" to setOf("scope", "query", "mode", "history", "depth", "paths"),
+            "search" to setOf("scope", "query", "mode", "history", "depth", "paths", "word", "count"),
             // **`from`/`to` stay here, and only here plus `write`.** You cannot grep text you have
             // not found yet: "show me lines 40-60 of a file I have never seen" has no pattern to
             // search with, and it is the most common first read an agent does.
@@ -501,7 +511,7 @@ class AgentTools(
             // **`path` may carry a version**: `notes.md@a1b2c3d`, the form `search {history}` and
             // `search` answers with. Splitting it is what makes a search hit directly usable
             // instead of requiring the model to move the id into `revision` itself.
-            "read" to setOf("path", "from", "to", "grep", "revision", "multi"),
+            "read" to setOf("path", "from", "to", "grep", "revision", "multi", "word", "lines"),
             // **One tool where `create` and `edit` were two.** Report: "merge create and edit into
             // one command 'write' - if path doesn't exist it creates it automatically (folders and
             // files)". So `write` is the only way anything is written, and there is no second name
@@ -518,7 +528,7 @@ class AgentTools(
             // acts on the file in front of it, and a key the runner never reads is a key a model is
             // told it may send — which is what `no tool takes an argument it never describes` exists to
             // catch, in the other direction.
-            "write" to setOf("path", "grep", "from", "to", "text", "multi"),
+            "write" to setOf("path", "grep", "from", "to", "text", "multi", "word"),
             "forget" to setOf("ids"),
             "delete" to setOf("path"),
             // **No `name`.** The operator: "move doesnt need \"name\" arg - it should rename
@@ -534,7 +544,7 @@ class AgentTools(
             "look" to setOf("paths"),
             "query" to setOf("sql", "path"),
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
-            "runs" to setOf("run", "job", "grep"),
+            "runs" to setOf("run", "job", "grep", "word"),
             "artifact" to setOf("run", "name"),
             // **Three acts, three verbs.** Report 37: *"what is downloads command? shouldn't it be 2
             // commands: download (from downloads), upload (to downloads)"* — and the listing is the
@@ -653,11 +663,23 @@ class AgentTools(
                     "files have versions reachable from here; the answer says when other projects " +
                     "in scope were left out. " +
                     "\n\n" +
+                    "**Every matching line is answered**, as `path:line: text` — so a hit is a " +
+                    "usable `read {path, from, to}` call as it stands, and one call shows all the " +
+                    "places a pattern occurs in a file rather than the first and a count. A file " +
+                    "with more than 20 matching lines answers 20 and says how many were left. " +
+                    "`word: true` matches whole words only. " +
+                    "**`count: true` answers `path: N` per file** — how many lines match, not which " +
+                    "ones — for a question about where something is used most. " +
+                    "**`history: true` searches saved versions too, newest first**, so the newest " +
+                    "version that matches is the first row. In text mode every version that changed " +
+                    "the file is a row; in semantic mode there is one row per file (the closest " +
+                    "version), because a question about meaning is a question about places. " +
                     "**`paths`** is how many paths to answer with: 10 by default when a `query` " +
                     "filters, 100 (the most) when nothing does, because a listing is read whole. " +
                     "It says when it stopped.",
                 "{\"scope\":\"src/\",\"query\":\"a case-insensitive regular expression\"," +
-                    "\"mode\":\"regex\",\"history\":false,\"depth\":8,\"paths\":10}",
+                    "\"mode\":\"regex\",\"history\":false,\"depth\":8,\"paths\":10,\"word\":false," +
+                    "\"count\":false}",
                 // **Nothing is required**, because every key is a filter and `{}` is a valid call —
                 // it lists the account. Marking them all required would tell a provider that a
                 // listing is malformed, which is the mode the operator named.
@@ -673,7 +695,12 @@ class AgentTools(
                     "`number: line` — where it is, for a next call that names a place. A pattern " +
                     "that matches **part of a line** (`\\d+`, `TODO`) answers with the text it " +
                     "matched, every match, no number — for a next call that pastes it into " +
-                    "`write`'s `text`. It is applied inside `from`/`to` rather than to the whole " +
+                    "`write`'s `text`. `lines: true` answers the other way for **every** matching " +
+                    "line: `number: line` as it is, never cut short, which is what you want when " +
+                    "you are about to name a place rather than paste a value. " +
+                    "**`word: true` matches whole words only** — `id` finds `id` and not `idea` or " +
+                    "`user_id` — which is how you stop a short pattern matching everywhere. " +
+                    "It is applied inside `from`/`to` rather than to the whole " +
                     "file. A pattern is a regular expression, case-insensitive, matched inside one " +
                     "line. A file is shown exactly as it is stored, columns and all. " +
                     "Your own `agent/context.log` is the rows in your context as " +
@@ -691,7 +718,7 @@ class AgentTools(
                     "lines it spans (`12-20: …`). Use `[\\s\\S]` for \"any character, newlines too\".",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"," +
-                    "\"multi\":false}",
+                    "\"multi\":false,\"word\":false,\"lines\":false}",
             ),
             spec(
                 "write",
@@ -716,7 +743,7 @@ class AgentTools(
                 // argument the model is never told it may send - while the runner still reads it.
                 "{\"path\":\"the file, relative to the project\",\"text\":\"the new text\"," +
                     "\"grep\":\"a pattern, when replacing matches\",\"from\":1,\"to\":20," +
-                    "\"multi\":false}",
+                    "\"multi\":false,\"word\":false}",
             ),
             spec(
                 "forget",
@@ -839,7 +866,7 @@ class AgentTools(
                     "matching lines — which is how to find `FAILED` or `e: file` in a build. " +
                     "The log is filed, so when you need a range rather than a match, `read` it: " +
                     "the path is in this answer and `read` takes `from`/`to`.",
-                "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\"}",
+                "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\",\"word\":false}",
             ),
             spec(
                 "artifact",
@@ -1347,9 +1374,9 @@ class AgentTools(
      * and because `paths` is a count of paths.
      */
     private fun searchTool(args: JSONObject, deadline: Deadline): String {
-        val scope = pattern(args.optString("scope", ""))
+        val scope = pattern(args, "scope")
             .getOrElse { return refusal("`scope` is not a pattern: ${it.message}") }
-        val query = pattern(args.optString("query", ""))
+        val query = pattern(args, "query")
             .getOrElse { return refusal("`query` is not a pattern: ${it.message}") }
         val mode = args.optString("mode", "").trim().lowercase()
         // **`mode` without `query` is refused, not ignored.** It says what the query *means*, so on
@@ -1424,7 +1451,7 @@ class AgentTools(
             )
         }
 
-        val state = SearchState(most)
+        val state = SearchState(most, args.optBoolean("count", false))
         val found = mutableListOf<String>()
         // **A file that is in scope but whose text does not match is still a directory entry**, and
         // in listing mode it is the answer. Content mode drops it, which is the difference between
@@ -1563,26 +1590,47 @@ class AgentTools(
                 continue
             }
             val lines = text.split("\n")
-            var first = -1
-            // **An `IntRange`, because that is what `hit` returns** — the span of the match inside
-            // the line, which [excerpt] widens into a readable window around it.
-            var at: IntRange? = null
-            var hits = 0
+            // **Every matching line, not the first one and a count.** The operator asked for it:
+            // *"if there are several grep hits across a file, all of them should be displayed"*.
+            // `(+N more)` was a number a model could not act on — it said there were other hits and
+            // then made the model search again to find them, which is the work the answer was
+            // supposed to save.
+            //
+            // **Each row is `path:line: text`, and `path` is the account-relative path**, so the
+            // answer is directly usable: `read {path, from, to}` takes the number this prints.
+            //
+            // **Bounded by `HITS_PER_FILE`, with the remainder counted.** A file where a pattern
+            // matches four thousand lines would otherwise answer four thousand rows, which is a whole
+            // conversation for one call — and the count says so, so a model that wants more can
+            // narrow the pattern rather than wonder whether it saw everything.
+            var matched = 0
+            var shown = 0
             for ((index, line) in lines.withIndex()) {
-                val where = hit(line, query, deadline, "search") ?: continue
-                hits++
-                if (first < 0) {
-                    first = index
-                    at = where
-                }
+                val at = hit(line, query, deadline, "search") ?: continue
+                matched++
+                // **`count: true` answers `grep -c`**: one row per file with how many lines match,
+                // instead of the lines themselves. A model asking "where is this used most" wants
+                // numbers it can compare, and twenty rows per file is the wrong shape for that.
+                if (state.counting) continue
+                if (shown >= HITS_PER_FILE) continue
+                shown++
+                found.add("$path:${index + 1}: ${excerpt(line, at, HIT)}")
+                state.count++
             }
-            // **`first` and `at` are set together**, so a `first` that is not -1 always has a span.
-            // Writing `?: IntRange.EMPTY` here would be a fallback for a case that cannot happen,
-            // and a fallback that cannot be reached is a claim that it can.
-            val span = at ?: continue
-            val more = if (hits > 1) " (+${hits - 1} more)" else ""
-            found.add("$path:${first + 1}: ${excerpt(lines[first], span, HIT)}$more")
-            state.count++
+            if (state.counting && matched > 0) {
+                found.add("$path: $matched")
+                state.count++
+            }
+            if (!state.counting && matched > shown) {
+                // **Counted separately from `found`, because `state.count` is what fills the answer.**
+                // The note is a row of its own so it cannot be lost by a later truncation, and it
+                // names the pattern so the next call can narrow rather than repeat.
+                found.add("$path: (+${matched - shown} more lines match, not shown)")
+                state.count++
+            }
+            // **A file with no match contributes nothing** — `matched == 0` adds no rows, which is
+            // what `continue` used to do.
+            if (matched == 0) continue
         }
         return false
     }
@@ -1675,6 +1723,10 @@ class AgentTools(
             null
         } ?: return Versions(noRepository = true)
         val seen = found.toMutableSet()
+        // **The content hashes already answered**, so a commit that did not change the file's text
+        // adds no row. Without this a mode change or a rename produced a second identical row under
+        // a different sha, and `(+N more in this version)` counted a difference that was not one.
+        val blobs = mutableSetOf<String>()
         // **The candidate paths, found by walking.** `found` holds the entries that already matched,
         // and the point of the history pass is the ones whose current text does not — a deleted line, a
         // renamed function. So the walk is repeated for paths only.
@@ -1721,8 +1773,22 @@ class AgentTools(
                     return Versions(skipped)
                 }
                 deadline.check("search")
+                // **Keyed by the blob, not the commit.** `versionsOf` answers every commit that
+                // *touched* the path, and a commit that changed a mode bit or moved the file
+                // elsewhere leaves the content identical — so two rows would say the same thing
+                // under two different shas. A version is a change in what the file says, so the
+                // content is what identifies it.
                 val shown = "$path@${commit.shortId}"
                 if (shown in seen) continue
+                // **A hash of the content, because a version is a change in what the file says.**
+                // SHA-256 rather than `hashCode`: this decides whether two rows are the same
+                // version, and a 32-bit hash that collides would silently hide a real change.
+                val content = text?.let {
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(it.toByteArray())
+                        .take(8)
+                        .joinToString("") { b -> "%02x".format(b) }
+                } ?: ""
                 // **No query means every version is an answer**, which is what the old command did. With a
                 // query, a version is shown only when its own text matches — and `versionsOf` has
                 // loaded every version's bytes anyway, so asking is free.
@@ -1731,8 +1797,16 @@ class AgentTools(
                 } else {
                     if (text == null) continue
                     val hit = firstHit(text, query, deadline, "search") ?: continue
-                    versionRow(path, commit, text, hit)
+                    // **One row per version, and the rest counted.** A version is the thing this
+                    // pass answers with — its sha is what `read` takes — so twenty rows for one
+                    // save would bury the other saves. The count is not decoration: a version
+                    // where a pattern occurs forty times is a very different hit from one where it
+                    // occurs once, and saying only the first would hide that.
+                    val also = countHits(text, query, deadline) - 1
+                    versionRow(path, commit, text, hit) +
+                        if (also > 0) " (+$also more in this version)" else ""
                 }
+                if (content.isNotEmpty() && !blobs.add(content)) continue
                 found.add(row)
                 seen.add(shown)
                 state.count++
@@ -1751,7 +1825,7 @@ class AgentTools(
     private data class Versions(val skipped: Int = 0, val noRepository: Boolean = false)
 
     /** How many files a search has answered with, so the walk can stop. */
-    private class SearchState(val limit: Int) {
+    private class SearchState(val limit: Int, val counting: Boolean = false) {
         var count: Int = 0
 
         /** True once the answer holds as many paths as the model asked for. */
@@ -1869,8 +1943,17 @@ class AgentTools(
      * **A refusal, not a crash.** A model writing `[` is making a mistake about a regular
      * expression, and the answer it needs is that sentence — not an exception turned into "that
      * tool could not be run", which says nothing about what to fix.
+     *
+     * The pattern [args] names, with `word` applied when it asks for one.
+     *
+     * **`word` is a flag on the call, not syntax in the pattern**, because the alternative is asking a
+     * model to write a lookaround it will get wrong. `-w` in grep is the same idea, and the operator
+     * asked for it by that name.
      */
-    private fun pattern(raw: String): Result<Regex?> {
+    private fun pattern(args: JSONObject, key: String = "grep"): Result<Regex?> =
+        pattern(args.optString(key, ""), args.optBoolean("word", false))
+
+    private fun pattern(raw: String, word: Boolean = false): Result<Regex?> {
         val text = raw.trim()
         if (text.isEmpty()) return Result.success(null)
         if (text.any { it == '\n' || it == '\r' }) {
@@ -1881,6 +1964,16 @@ class AgentTools(
                 ),
             )
         }
+        // **`(?<!\w)` and `(?!\w)`, not `\b`.** `\b` is the usual answer and it is wrong at the edges:
+        // it treats `_` as a word character, so a `word` search for `_id` would miss a bare `_id`
+        // between two non-word characters, and it collapses to "start or end of a word" rather than
+        // "not part of a longer word". Lookarounds say exactly the second thing, and wrapping the
+        // pattern rather than appending to it means a pattern with its own `^`/`$` still works.
+        //
+        // **The wrap is `(?:…)`, so alternation stays inside it.** `cat|dog` with `word` must not
+        // become `(?<!\w)cat|dog(?!\w)`, which would anchor only the first alternative and then
+        // match `dog` inside `dogma`.
+        val body = if (word) "(?<!\\w)(?:$text)(?!\\w)" else text
         return try {
             // **`Pattern`, not `Regex`, because Kotlin has no Unicode case option.** `RegexOption`
             // has `IGNORE_CASE` and nothing that goes with it, and `CASE_INSENSITIVE` alone folds
@@ -1888,7 +1981,7 @@ class AgentTools(
             // for "KRAKÓW" missed "Kraków". The engine underneath is the same one; only the flag is
             // out of reach from the Kotlin wrapper.
             Result.success(
-                Pattern.compile(text, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE).toRegex(),
+                Pattern.compile(body, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE).toRegex(),
             )
         } catch (e: Throwable) {
             Result.failure<Regex?>(IllegalArgumentException("that is not a regular expression"))
@@ -1928,6 +2021,19 @@ class AgentTools(
     }
 
     /**
+     * Every match of [pattern] in [line] as its **position**, in order — so a caller can answer with
+     * the text, the line, or a slice, without walking the line a second time.
+     *
+     * The same [Timed] view as [hits], for the same reason.
+     */
+    internal fun spansOf(line: String, pattern: Regex, deadline: Deadline): List<IntRange> {
+        val timed = Timed(line, deadline, "read")
+        val out = ArrayList<IntRange>()
+        for (match in pattern.findAll(timed)) out.add(match.range)
+        return out
+    }
+
+    /**
      * The text a matcher walks, with the clock in it.
      *
      * A view and not a copy, so a match is still asked about the file's own characters.
@@ -1962,6 +2068,16 @@ class AgentTools(
      * shows where the match was (`path@sha7:12: …`) in the same place a current file does, so both
      * kinds of hit read the same way and `read` takes the same next step.
      */
+    /** How many lines of [text] match [pattern] — used to say what a single row is not showing. */
+    private fun countHits(text: String, pattern: Regex, deadline: Deadline): Int {
+        var count = 0
+        for (line in text.split("\n")) {
+            deadline.check("search")
+            if (hit(line, pattern, deadline, "search") != null) count++
+        }
+        return count
+    }
+
     private fun firstHit(
         text: String,
         pattern: Regex,
@@ -2107,7 +2223,7 @@ class AgentTools(
                 )
             String(bytes, Charsets.UTF_8)
         }
-        val grep = pattern(args.optString("grep", ""))
+        val grep = pattern(args)
             .getOrElse { return Result.failure(IllegalArgumentException("That is not a pattern: ${it.message}")) }
         val lines = text.split("\n")
         val chosen = slice(lines, args)
@@ -2191,15 +2307,43 @@ class AgentTools(
             return Result.success(found.joinToString("\n"))
         }
         if (grep != null) {
+            // **Two shapes, and the caller chooses when the shape is not obvious.** The default is
+            // the one the live log asked for: the text the pattern matched, with nothing around it,
+            // because a model that pasted `12: …` into `write` wrote the number into the file.
+            //
+            // `lines: true` asks the other question — *where* — and answers one row per line, every
+            // matching line, each with its number and the whole line as it is. That is the flag the
+            // operator asked for, and it is a flag rather than a change of default because the
+            // default was fought over: "grep only gives lines!!!" and then "the line numbers get
+            // passed as well — they shouldn't". Both are right, for different questions.
+            //
+            // **Every hit on every line**, in both shapes. The old code answered a whole-line match
+            // with `excerpt`, which cut a long line to a window and so could not be pasted back;
+            // `lines` answers the line entire.
+            val asLines = args.optBoolean("lines", false)
             val found = ArrayList<String>()
             var any = false
             for ((offset, line) in chosen.withIndex()) {
-                val at = hit(line, grep, deadline, "read") ?: continue
+                val number = from + offset
+                if (hit(line, grep, deadline, "read") == null) continue
                 any = true
-                if (at.first == 0 && at.last == line.length - 1) {
-                    found.add("${from + offset}: ${excerpt(line, at, HIT)}")
-                } else {
-                    found.addAll(hits(line, grep, deadline, "read"))
+                if (asLines) {
+                    // The whole line, unmodified: a line answer is a place to name, and `excerpt`
+                    // strips control characters, which would silently change what is being shown.
+                    found.add("$number: $line")
+                    continue
+                }
+                // **The matched text, one row per match** — and the number is carried in front when
+                // the match is a whole line, because that answer is a place rather than a string.
+                val spans = spansOf(line, grep, deadline)
+                for (span in spans) {
+                    found.add(
+                        if (span.first == 0 && span.last == line.length - 1) {
+                            "$number: ${excerpt(line, span, HIT)}"
+                        } else {
+                            line.substring(span.first, span.last + 1)
+                        },
+                    )
                 }
             }
             if (!any) {
@@ -2269,7 +2413,7 @@ class AgentTools(
         mayWrite(file)?.let { return refusal(it) }
 
         val hasText = args.has("text")
-        val find = pattern(args.optString("grep", ""))
+        val find = pattern(args)
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val hasFind = find != null
         val hasRange = args.has("from") || args.has("to")
@@ -4338,18 +4482,20 @@ class AgentTools(
      */
     private fun slice(body: String, path: String, args: JSONObject): String {
         val lines = body.split('\n')
-        val pattern = args.optString("grep").trim().ifEmpty { null }
-        if (pattern != null) {
-            val regex = try {
-                Regex(pattern, RegexOption.IGNORE_CASE)
-            } catch (e: Throwable) {
-                return "`grep` is not a pattern: \"$pattern\""
-            }
+        val asked = args.optString("grep").trim().ifEmpty { null }
+        if (asked != null) {
+            // **Through [pattern], not a bare `Regex`.** This was the one place a pattern was
+            // compiled without the `word` flag and without [Timed] — so a `runs {grep}` call could
+            // not use `word`, and a catastrophic pattern here had no clock in it while the same
+            // pattern in `read` did.
+            val regex = pattern(args).getOrElse {
+                return "`grep` is not a pattern: \"$asked\""
+            } ?: return "`grep` is empty"
             val hits = lines.withIndex().filter { regex.containsMatchIn(it.value) }
             if (hits.isEmpty()) {
-                return "$path has ${lines.size} lines and none of them match \"$pattern\"."
+                return "$path has ${lines.size} lines and none of them match \"$asked\"."
             }
-            return "$path — ${hits.size} line(s) matching \"$pattern\":\n" +
+            return "$path — ${hits.size} line(s) matching \"$asked\":\n" +
                 hits.joinToString("\n") { "${it.index + 1}: ${it.value}" }
         }
         // **No range here any more.** `from`/`to` were a paging cursor over a *filed log*, which gave

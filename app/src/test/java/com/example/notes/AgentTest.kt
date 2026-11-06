@@ -1168,6 +1168,133 @@ class AgentTest {
     }
 
     @Test
+    fun `lines true answers every matching line with its number, whole`() {
+        // **The operator asked for this one directly:** *"read should have lines flag that shows
+        // line numbers of grepped lines"*. The default answer is the matched text, because a model
+        // that pasted `12: …` into `write` wrote the number into the file — but the opposite
+        // question is just as real, and now it has a name instead of being inferred from the shape
+        // of a pattern.
+        //
+        // **Every matching line, not the first.** And the line entire: `excerpt` cuts to a window,
+        // which would silently shorten the very line the caller is about to name.
+        val long = "padding " + "x".repeat(300) + " TODO"
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\n$long\nthird TODO\n")
+
+        val body = tool("read", """{"path":"milk.txt","grep":"TODO","lines":true}""")
+
+        assertEquals(
+            "both lines, both numbers, neither cut short",
+            "0\n2: $long\n4: third TODO",
+            body,
+        )
+    }
+
+    @Test
+    fun `word matches a whole word, and not the same letters inside a longer one`() {
+        // **`-w` by the name the operator used for it.** Without it, a pattern that is a short word
+        // matches everywhere it appears as a fragment — `id` inside `idea`, `override`, `user_id` —
+        // and the answer is noise a model has to filter by eye.
+        //
+        // **`\b` is the usual answer and it is wrong at the edges**: it counts `_` as a word
+        // character, so `\bid\b` misses a bare `id` beside an underscore and finds `user_id` as
+        // two words. The lookarounds say the thing that was meant.
+        ws.write(
+            File(ws.repoOf("shopping"), "milk.txt"),
+            "id\nidea\nuser_id\nid_x\nthe id here\n",
+        )
+
+        val plain = tool("read", """{"path":"milk.txt","grep":"id","lines":true}""")
+        val worded = tool("read", """{"path":"milk.txt","grep":"id","lines":true,"word":true}""")
+
+        assertTrue("without word, every line has it: $plain", plain.contains("2: idea"))
+        assertTrue("and the underscore lines too: $plain", plain.contains("3: user_id"))
+        assertEquals(
+            "with word, only the lines where `id` stands alone",
+            "0\n1: id\n5: the id here",
+            worded,
+        )
+    }
+
+    @Test
+    fun `word does not anchor only the first alternative of a pattern`() {
+        // **The wrapping is `(?:…)` for this reason.** A `word` search for `cat|dog` that became
+        // `(?<!\w)cat|dog(?!\w)` would anchor `cat` and not `dog`, so `dogma` would match — a
+        // result that is right about one half of the pattern and silent about the other.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "cat\ndog\ndogma\ncatalog\n")
+
+        val body = tool("read", """{"path":"milk.txt","grep":"cat|dog","lines":true,"word":true}""")
+
+        assertEquals("both words, neither fragment", "0\n1: cat\n2: dog", body)
+    }
+
+    @Test
+    fun `search answers every matching line in a file, not the first and a count`() {
+        // **The operator: *"if there are several grep hits across a file, all of them should be
+        // displayed"*.** The old answer was `path:2: … (+2 more)` — a number a model could not act
+        // on, which made it search again to find the places the answer had already counted.
+        ws.write(File(ws.repoOf("shopping"), "list.txt"), "milk\nbread\nmilk again\neggs\nmilk\n")
+
+        val body = tool("search", """{"query":"^milk"}""")
+
+        assertEquals(
+            "all three places, each with its own line number",
+            "0\nlist.txt:1: milk\nlist.txt:3: milk again\nlist.txt:5: milk",
+            body,
+        )
+    }
+
+    @Test
+    fun `a file with more matches than the cap says how many it did not show`() {
+        // **A bound on the answer, not on the search.** A pattern like `\{` matches most lines of
+        // most source files, and answering every one would fill a conversation with a single call.
+        // The count is the important half: a model told only "here are twenty" cannot tell a file
+        // with twenty matches from one with two thousand.
+        val many = (1..25).joinToString("\n") { "line $it milk" }
+        ws.write(File(ws.repoOf("shopping"), "list.txt"), many + "\n")
+
+        val body = tool("search", """{"query":"milk"}""")
+
+        assertTrue("the cap is honoured: $body", body.contains("list.txt:20: line 20 milk"))
+        assertFalse("and it stopped there: $body", body.contains("list.txt:21:"))
+        assertTrue("and it said how many were left: $body", body.contains("(+5 more lines match"))
+    }
+
+    @Test
+    fun `count answers how many lines match per file, not which ones`() {
+        // **`grep -c`, and the reason it is not the default.** Rows are right for "where", counts
+        // are right for "how much" — a model asking which file uses a name most wants a number it
+        // can compare down a column, and twenty rows per file is the wrong shape for that.
+        ws.write(File(ws.repoOf("shopping"), "a.txt"), "milk\nbread\nmilk\n")
+        ws.write(File(ws.repoOf("shopping"), "b.txt"), "milk\n")
+        ws.write(File(ws.repoOf("shopping"), "c.txt"), "bread\n")
+
+        val body = tool("search", """{"query":"milk","count":true}""")
+
+        assertEquals("two files, each with its own number", "0\na.txt: 2\nb.txt: 1", body)
+    }
+
+    @Test
+    fun `a history search does not repeat a version whose content did not change`() {
+        // **`versionsOf` answers every commit that touched the path**, and a commit that changed a
+        // mode bit or moved the file leaves the text identical. Two rows under two shas saying the
+        // same thing is noise, and it made `(+N more)` count a difference that was not one.
+        val file = File(ws.repoOf("shopping"), "list.txt")
+        ws.write(file, "milk\n")
+        git.commit("shopping", CommitMessage.SAVE)
+        // A second commit that touches the path but changes nothing — `git.commit` writes whatever
+        // is on disk, and an unchanged file is not a second version of its content.
+        git.commit("shopping", CommitMessage.SAVE)
+
+        val body = tool("search", """{"query":"milk","history":true}""")
+
+        assertEquals(
+            "one row, because there is one version of the content",
+            "0\nlist.txt@${git.versions("shopping", "list.txt").first().first.shortId}:1: milk",
+            body,
+        )
+    }
+
+    @Test
     fun `a pattern that matches part of a line answers with the matched text`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
 

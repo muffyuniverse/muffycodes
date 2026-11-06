@@ -613,7 +613,10 @@ class SemanticSearch(
     /** One chunk that survived the walk, with the text a reader needs to judge it. */
     private data class Candidate(
         val path: String,
+        /** The first line of the chunk. */
         val line: Int,
+        /** The last line of the chunk, so the answer can name the range `read` takes. */
+        val last: Int,
         val text: String,
         /** The vector's score, or the reranker's when one ran. */
         val score: Double,
@@ -685,7 +688,9 @@ class SemanticSearch(
             val commit = if (hit.commit.isEmpty()) "" else saves[hit.path to hit.commit] ?: return@mapNotNull null
             val text = chunkText(root, hit.path, hit.start, hit.end, hit.commit, cache)
                 ?: return@mapNotNull null
-            Candidate(hit.path, hit.start, text, hit.score, commit)
+            // **The range, not just the start.** `hit.end` is the chunk's last line, which is what
+            // makes `path:12-31:` a directly usable `read {from: 12, to: 31}`.
+            Candidate(hit.path, hit.start, hit.end, text, hit.score, commit)
         }
         if (candidates.isEmpty()) {
             // **A row whose text is gone is not an answer.** A file deleted between the index and the
@@ -724,18 +729,54 @@ class SemanticSearch(
             }
         }
 
+        // **One row per place, when the answer spans versions.**
+        //
+        // `nearest(history = true)` drops the `version = ''` filter, so the current file and every
+        // historical version of it compete on score — and the same paragraph scores the same at
+        // every sha it was saved under. `paths` then fills with thirteen rows that all say the same
+        // thing at thirteen different commits, which is a ranking of *saves* where the question was
+        // *where*.
+        //
+        // **The newest version wins a tie**, because `nearest` answers in descending score order and
+        // a stable grouping keeps the first — and when two versions score the same, the one still on
+        // disk is the more useful answer. How many were collapsed is said, so a person who wants the
+        // earlier saves knows there are some.
+        val collapsed = if (!history) {
+            0
+        } else {
+            val before = candidates.size
+            val best = LinkedHashMap<String, Candidate>()
+            for (one in candidates) {
+                val there = best[one.path]
+                if (there == null || one.score > there.score) best[one.path] = one
+            }
+            candidates = best.values.toList()
+            before - candidates.size
+        }
+
         val rows = candidates.take(paths).map { one ->
-            val said = excerpt(one.text)
-            // **`path:line`, account-relative**, which is the same spelling a text-mode hit uses and
-            // the same thing `read {path, from}` takes. The score is in brackets because it is one
-            // number a reader can compare down the column, and it is the only thing that tells one
-            // semantic row from another once the text is what they both match on.
+            // **The whole chunk, not a fifth of it.**
+            //
+            // This row used to show `excerpt(one.text)` — 160 characters of an 800-character chunk.
+            // The cost of that was paid three times over and thrown away: the embedding was computed
+            // on all 800, the reranker scored all 800, and then the answer showed the first line.
+            // A model reading it had to guess a line range and call `read` again to see the text it
+            // had already paid for.
+            //
+            // **The line range is named**, so that second call is exact rather than a guess:
+            // `path:12-31:` is directly `read {path, from: 12, to: 31}`. A one-line chunk is
+            // answered as `:12:` the same as a text-mode hit, so the two kinds of row read alike.
             //
             // **`path@sha7` for a saved version**, the same spelling `search {history}` answers in
             // text mode and the same thing `read {revision}` takes — so a row is directly usable as
             // the next call whether it names the file now or the file as it was.
             val where = if (one.commit.isEmpty()) one.path else "${one.path}@${one.commit.take(7)}"
-            "$project/$where:${one.line}: $said  [${score(one.score)}]"
+            val range = if (one.last > one.line) "${one.line}-${one.last}" else "${one.line}"
+            "$project/$where:$range: ${whole(one.text)}  [${score(one.score)}]"
+        }
+        if (collapsed > 0) {
+            notes += "$collapsed earlier version(s) of the same files were left out — " +
+                "one row per file, newest of the equally-close ones"
         }
         return Result.success(compose(rows, notes))
     }
@@ -834,6 +875,19 @@ class SemanticSearch(
         path.count { it == '/' } + 2 <= depth
 
     /** The chunk's first line that says something, cut to a readable length. */
+    /**
+     * A chunk as it is, minus the control characters that would break the answer's shape.
+     *
+     * **Not cut to a length.** A chunk is bounded by `Chunker.CHARS` (800), which is the unit this
+     * search works in — showing less of it than was scored is showing an answer to a smaller question
+     * than the one that was asked. Newlines become ` \u23ce ` so a row stays one row and a model can
+     * still see where the line breaks were.
+     */
+    private fun whole(text: String): String =
+        text.filterNot { it < ' ' && it != '\n' }
+            .replace("\n", " \u23ce ")
+            .trim()
+
     private fun excerpt(text: String): String {
         val line = text.lineSequence()
             .firstOrNull { it.isNotBlank() }
