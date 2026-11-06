@@ -850,6 +850,63 @@ every polling design a slower, more fragile copy of a webhook.
 push — a schedule, a webhook from another service, a person's request — then a queue is needed, and the
 watcher becomes the only way to drain it. That is not today's shape.
 
+### 3d.5 Is the runner stateful? No — and the operator's idea was about something else
+
+The operator's clarification: *"my initial idea with polling was about statefull runners."*
+
+**Every GitHub-hosted job starts on a fresh virtual machine.** Nothing on disk survives between runs.
+What survives is only what is explicitly saved and restored, and this pipeline already does that:
+
+| What | Where it lives | Measured |
+|---|---|---|
+| Gradle's configuration cache | `actions/cache` → `.gradle/configuration-cache` | **"Configuration cache entry reused."** |
+| Robolectric's runtime jars | `actions/cache` → `~/.m2/repository` | 32 "Cache restored" lines in one run |
+| Gradle's own build cache | `actions/cache` | **31 tasks `FROM-CACHE`, 8 `UP-TO-DATE`, 20 executed** |
+
+So the answer is: **stateless machine, stateful build** — and the state is already there. A stateful
+runner would add a machine that persists, which would save the *restore* time, not the compile time.
+
+**What a persistent machine would actually save, measured on a cache-hit run:**
+
+```
+Build the release   170s
+Test (0)            112s
+Test (1)            152s
+Deliver              11s
+```
+
+Of a 112-second Test job, 31 of 51 tasks are already `FROM-CACHE`. The remainder is: Java setup,
+Gradle distribution, checkout, the cache restore itself, and 20 tasks that genuinely execute.
+
+**So the saving a persistent runner offers is the fixed setup — tens of seconds — not the work.** That
+is a real saving, and it is the reason self-hosted runners exist. But it is not the saving the polling
+idea was aiming at, because the thing that makes a build slow here is *executing 20 tasks*, and a
+persistent disk does not make those tasks faster.
+
+**Where a persistent runner would genuinely win:**
+
+1. **No six-hour job ceiling**, so a long-running loop becomes possible at all.
+2. **No per-minute billing**, so a private repository stops costing money.
+3. **The Android SDK and emulator stay installed** — `setup-java` and the SDK download are pure
+   overhead today, and on a phone they would be paid once.
+4. **Logs follow the repository**, which removes the entire encryption problem in §3c for the app's own
+   CI.
+
+**Where it loses:** it needs a machine with an Android SDK that stays awake. The only always-on
+computer in this picture is the phone, and running the build on the device being built is a different
+problem — one that also makes the phone hot and slow for the person using it.
+
+### 3d.6 What this means for the polling question
+
+The original idea — poll every couple of seconds from a stateful runner — would have been the right
+design **if the runner were stateful**. On GitHub-hosted runners it is not, so the poll would be buying
+nothing that the webhook does not already deliver in five seconds, while spending the API budget that
+§3d.3 measured.
+
+**The idea becomes right again on a self-hosted runner**, and there it is not needed either: a
+self-hosted runner *is told* by GitHub when a job is queued. Polling is what you do when you cannot be
+told. Both GitHub-hosted and self-hosted runners can be told.
+
 ## 4. Part four — the audit of today's work
 
 The operator asked: *"audit that the functionality that we implemented today fully implemented,
