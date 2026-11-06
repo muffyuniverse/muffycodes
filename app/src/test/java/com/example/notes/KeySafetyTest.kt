@@ -337,7 +337,17 @@ class KeySafetyTest {
         assertEquals("port stripped", "gitlab.com", Secrets.hostOf("https://gitlab.com:8443/o/r"))
         assertEquals("case folded", "github.com", Secrets.hostOf("https://GitHub.COM/o/r"))
         assertEquals("a local path has no host", "", Secrets.hostOf("/tmp/some/repo"))
-        assertEquals("nor does a bare name", "", Secrets.hostOf("repo"))
+        // **A `file:` URL has no authority either, and this is the case that broke a build.**
+        // `file:///tmp/x` used to answer `file` — the first segment after the scheme — which reads as
+        // a hostname and is not one. A test GitHub on disk clones from exactly this shape, so every
+        // signing test failed on a URL that has nowhere to send a key.
+        assertEquals("a file url has no host", "", Secrets.hostOf("file:///tmp/x"))
+        assertEquals("nor does a file url with a path", "", Secrets.hostOf("file:///tmp/a/b.git"))
+        // **A bare name with no scheme is read as an authority**, which is what git does with
+        // `clone host:path` and with `clone repo/path`. It is not a *local* path — that has a leading
+        // slash — so answering the name is the honest reading rather than a guess.
+        assertEquals("a bare name is an authority", "repo", Secrets.hostOf("repo"))
+        assertEquals("scp shape", "github.com", Secrets.hostOf("git@github.com:o/r.git"))
     }
 
 }
