@@ -606,3 +606,46 @@ that was available for probing. It is recorded as **unproven**, not as done.
 - History rewriting.
 - Any change to how pictures are stored.
 - A 6-hour loop, unless §3's measurements justify it.
+
+
+---
+
+## 8. What shipped, what was found, what is open
+
+### 8.1 Shipped
+
+| Piece | State |
+|---|---|
+| **A binary waits; a note does not** | A file the app cannot classify is ignored on creation, whoever made it; a text file and a picture are tracked and keep their history. Tracking a binary writes its LFS line before the commit. |
+| **The person's creation default actually fires** | `createdByOperator` was dead code; five doors call it now (`createFile`, `createFolder`, `createImage`, `importFiles`, `importFolder`). |
+| **The row caption** | `12.4 MB · /data/user/0/…`, selectable on its own so the row's tap and long-press still work. A folder says `12 items`, never a byte count. |
+| **The watcher** | Live on `main`. An empty tick costs 8 seconds and one job; a new commit is built. |
+| **The cache key** | Names "is this a PR", which is the only thing the build varies on — so a dispatched build can restore the entry a push build wrote. |
+| **Private projects** | The licence window offers "Private (no licence)" first and starts on it. |
+| **The workflow checker** | Reads every file in `.github/workflows/`, proven by catching a planted error in `watch.yml`. |
+| **The stale lock cache** | Removed. It was stale by construction — `AppViewModel.workspace` builds a new `Workspace` on every access, so a cache could never be shared. |
+| **`pull`'s missing test** | Written. |
+
+### 8.2 Found, and worth more than the features
+
+1. **An ignored file is not committed.** `git add .` honours `.gitignore`, so ignoring also means no version and no undo. This is why the rule is narrow — the broad version was implemented first and fourteen tests said no.
+2. **A `workflow_dispatch` on the same ref cancels an in-progress push run.** Measured: my dispatch killed my own commit's build.
+3. **A scheduled workflow only runs on the default branch.** Measured: `watch.yml` on `development` 404s on dispatch. It lives on `main` now, watching `development`.
+4. **A companion member is not reachable by callable reference.** `Workspace::bytesFor` compiles as "inapplicable candidate". Third time today the companion has cost a compile.
+5. **`main` cannot build a release** — the keystore secret is invalid (`Tag number over 30`). Pre-existing, unrelated, and a person's to fix.
+6. **A test that could not pass**: `hold(...) == null` compares an enum to null; the compiler folded it away.
+
+### 8.3 Open, and not pretendable
+
+| # | Open | Who |
+|---|---|---|
+| 1 | **`MUFFY_KEYSTORE_BASE64` is not a valid keystore.** `main` cannot produce a release until it is. Needs the real file. | the person |
+| 2 | **`push`/`pull` have never run against a real GitHub remote.** The offline suite is all there is; the one available repo was write-refused. | needs a writable test repo |
+| 3 | **`MediaStore` import is untested on a device.** No device here. | the person, on the phone |
+| 4 | **The facade repository is researched, not built.** §3b has the measured facts and the design; the leak (public logs of private test failures) is real and unsolved. | a decision, then work |
+| 5 | **`sweep`'s cost on a large project** is unmeasured — it walks every tree at app start. | needs a real project |
+| 6 | **A docs-only push costs a pipeline**, because the watcher honestly answers "not built". | known cost, accepted |
+
+### 8.4 The rule this session kept proving
+
+**A feature is not done until something fails when it is removed.** Three of the six findings above were features that looked finished — a function with no caller, a tool with no test, an assertion that could not fail. Each was invisible to the tests that existed, and each was found by asking "what would break if this were deleted" rather than "does this work".
