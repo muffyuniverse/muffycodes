@@ -280,6 +280,40 @@ rewrites history, which this app has already decided against — `HistoryPrune` 
 
 **Cost:** ~250 lines including refusals; one test per `op`.
 
+### 6.4 The `git` tool is **local only** — and that is the whole point
+
+This is the distinction the first draft of this plan left ambiguous, and it decides the shape of the tool:
+
+| | Local history | The network |
+|---|---|---|
+| **What** | `status` `log` `diff` `show` `blame` `branch` `checkout` `revert` `stash` | `clone` `pull` `push` |
+| **Who drives it** | **the agent**, through `git` | **the app**, through `pull` / `push` |
+| **Touches a remote** | never | always |
+| **Takes arguments** | yes (`op`, `path`, `revision`…) | **no** (`setOf()`) |
+
+**`clone`, `pull` and `push` are NOT part of the `git` tool, and must not be added to it.**
+
+Three reasons, each already paid for elsewhere in this plan:
+
+1. **They are not one JGit call.** `ProjectGit.push` runs `LfsSync.push` **first** — because GitHub rejects a
+   tree naming an LFS object it does not have (GH008) — then the ref push, then reports which half failed.
+   A `git push` op would either duplicate that ordering or lose it.
+2. **They hold a lock and obey rules a local op does not.** `RepoLocks.hold(dir, "push")`, the dirty check
+   (*"a push sends commits, not files"*), and the commit-first rule. `git checkout` needs a lock; `git push`
+   needs the whole ritual.
+3. **The agent has no reason to name a remote.** It has exactly one project, one remote, one token. An
+   `op: "push"` would take either no arguments — in which case it is `push` under a second name — or
+   arguments that let the agent choose a remote, which is a capability nobody asked for and a way to send
+   the operator's work somewhere unintended.
+
+**So the tool list stays as it is:** `git` for local history, `state` / `pull` / `push` for the network.
+Nothing is subsumed.
+
+**And `clone` was never the agent's.** `ProjectGit.cloneInto` is a **UI** act — a person adds a project from
+an existing repository. There is no `clone` tool and there should not be: the agent works inside a project
+that already exists, and a clone that created one would need a name, a licence and a destination — three
+answers the app's own add-project dialog already collects from the person.
+
 ---
 
 ## 7. Part E — the refresh hook: a bug that is live now
@@ -381,6 +415,24 @@ a program needs an interpreter, and an interpreter needs a sandbox this app does
 
 **Build it only after `http` has been used, and only with evidence of what the two-call pain actually was.**
 A sequence runner that hides the middle step also hides which step failed.
+
+### 10.1b To be unambiguous: **the plan does not include a `.http` runner, and part A does not build one**
+
+`http` takes **one request** — `method`, `url`, `headers`, `body`, `auth`. There is no `file:` key, no
+`sequence:` key, and no second argument that turns it into a program. That is deliberate and it is the whole
+of §3.
+
+If a runner is ever built, the smallest honest shape is **a separate tool** (`httpseq`) with these limits,
+written down now so the argument does not have to be had twice:
+
+- **Requests in order, no branching.** `GET → POST → POST`, each answer filed to `agent/http/`.
+- **Named variables from a JSON path of an earlier answer** — `{{runs[0].id}}` — and nothing else.
+- **Every step through `Fetcher.request`**, so the address guard, the vault and the filing rule apply
+  unchanged. **This is the one non-negotiable requirement:** a runner that opened its own sockets would
+  retire `Addresses.problem` (§10.1, the Karate finding).
+- **A step that fails stops the sequence, and the answer names the step and its status.** A runner that
+  reported one failure for five steps would be worse than five calls.
+- **No `file:` reading of a second `.http` file** — one file, one sequence, one answer.
 
 ### 10.2 Artifact upload as the agent's "stdin"
 
