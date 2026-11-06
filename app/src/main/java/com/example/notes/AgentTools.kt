@@ -3308,7 +3308,29 @@ class AgentTools(
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     if (!entry.name.endsWith(".enc")) continue
-                    found = zip.readBytes()
+                    // **`readBytes()` would read the whole STREAM, not this entry.** It is an extension
+                    // on `InputStream`, and a `ZipInputStream` happily runs past the end of the current
+                    // entry into the rest of the archive — so the note file and any later entry came
+                    // back glued to the ciphertext, and the blob failed to decode as base64. Read the
+                    // entry's own length, which the entry already knows.
+                    // **Stopped at the entry's own size.** `read` also runs past the end of the last
+                    // entry into whatever follows, so the limit is the declared size rather than the
+                    // stream's end. A zip whose size was not recorded falls back to reading until the
+                    // next entry, which is the only other thing a `ZipInputStream` can offer.
+                    val limit = entry.size
+                    val out = java.io.ByteArrayOutputStream(
+                        if (limit in 1..(8L * 1024 * 1024)) limit.toInt() else 8192,
+                    )
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (limit <= 0 || total < limit) {
+                        val want = if (limit > 0) minOf(buffer.size.toLong(), limit - total).toInt() else buffer.size
+                        val read = zip.read(buffer, 0, want)
+                        if (read <= 0) break
+                        out.write(buffer, 0, read)
+                        total += read
+                    }
+                    found = out.toByteArray()
                 }
                 found?.let { EncryptedLog.openBytes(it, key) } ?: data
             }

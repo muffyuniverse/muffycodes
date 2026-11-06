@@ -218,6 +218,11 @@ object EncryptedLog {
         }
         // The blob is base64 text after the marker, and the workflow writes a note file beside it, so
         // only the first line of the remainder is the ciphertext.
+        // **Whitespace between the marker and the ciphertext is expected, not an error.** The
+        // workflow writes `printf 'MUFFYLOG1 '` and then the blob on the same line, but a caller that
+        // writes the marker and a newline gets the same thing — and a sealed file whose first bytes
+        // are the marker followed by a line break is not a different format. Only the ciphertext has
+        // to be found; how it was laid out beside the marker is not a fact this reader cares about.
         val body = String(sealed, marker.size, sealed.size - marker.size, Charsets.US_ASCII)
         val blobLine = body.lineSequence().map { it.trim() }.firstOrNull { looksLikeBlob(it) }
             ?: throw IllegalStateException(
