@@ -62,6 +62,14 @@ class Workflows {
         val declaresEnvironment: Boolean,
         /** True when the text mentions a secret, a token, or inherits secrets. */
         val secrets: Boolean,
+        /**
+         * True when the text seals its own output with a key.
+         *
+         * Read from the text rather than from a list of known step names, because the sealing step is
+         * a shell command: a workflow that runs `openssl enc` seals, whoever wrote it and whatever the
+         * step is called.
+         */
+        val seals: Boolean = false,
     ) {
         /** True when this workflow's runs may read an environment secret. */
         val canReachSecrets: Boolean get() = declaresEnvironment || secrets
@@ -84,6 +92,16 @@ class Workflows {
         val locked: Boolean,
         val reach: Reach,
     ) {
+        /**
+         * True when this workflow seals its own output — a log, an artifact, or both.
+         *
+         * **The seal is what makes a public runner usable for a private project**, and it is also what
+         * makes the environment mandatory: a file that seals without naming one cannot reach the key,
+         * so it encrypts under an empty password and produces output nobody can read. That pairing is
+         * why this lives on the row rather than being re-derived wherever it is needed.
+         */
+        val seals: Boolean get() = reach.seals
+
         /** The file's own name, for a row that already sits inside `.github/workflows/`. */
         val name: String get() = path.substringAfterLast('/')
 
@@ -156,9 +174,9 @@ class Workflows {
             // **A file that will not open is one whose contents are unknown, and unknown is not
             // safe.** Reporting "reaches nothing" for it would be the report lying in the direction
             // that matters.
-            return Reach(emptyList(), declaresEnvironment = true, secrets = true)
+            return Reach(emptyList(), declaresEnvironment = true, secrets = true, seals = sealsIn(text))
         }
-        return Reach(environmentsOf(text), declaresEnvironment(text), secretsOf(text))
+        return Reach(environmentsOf(text), declaresEnvironment(text), secretsOf(text), sealsIn(text))
     }
 
     /**
@@ -324,6 +342,18 @@ class Workflows {
         }
         return found.toList()
     }
+
+    /**
+     * True when the text seals something with a key.
+     *
+     * **`openssl enc` is the whole test, and it is a shell command rather than a known action.** A
+     * list of approved step names would be a second place to keep in step with the workflow, and the
+     * failure of getting it wrong is a file reported as "does not seal" that does — which is the
+     * direction that would let a person believe their output is private when it is not.
+     */
+    private fun sealsIn(text: String): Boolean =
+        text.contains("openssl enc") || text.contains("gpg --encrypt") ||
+            text.contains("age --encrypt") || text.contains("age -e")
 
     private fun secretsOf(text: String): Boolean {
         val lower = text.lowercase()
