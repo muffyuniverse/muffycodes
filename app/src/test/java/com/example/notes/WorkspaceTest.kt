@@ -1096,7 +1096,7 @@ class WorkspaceTest {
         )
         assertTrue(
             "and it can still be made",
-            workspace.createFolder("Shopping", "drafts").isSuccess,
+            workspace.createFolder(project, "drafts").isSuccess,
         )
     }
 

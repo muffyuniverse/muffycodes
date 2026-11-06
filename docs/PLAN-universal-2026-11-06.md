@@ -843,6 +843,29 @@ rather than of what was intended.
 | **3** | `78b45a6`, `8bd4694`, `cc49c00` — `Fetcher.request` + `http` | The size estimate held (~180 lines + ~20 tests). Two Kotlin facts cost a round each: the schema is built **from the example**, so an example naming three of five arguments leaves two the model cannot know about; and `AgentLog`'s constructor is private, so a test builds one with `open`. |
 | **3b** | `99ad20c`, `62a0e0f`, `2a68d33` — `secret(name, host)` + the screen | **The host binding had to be two-way**, which the plan did not anticipate: `AgentTools` reads `MUFFY_LOG_KEY` to decrypt a CI log, and that key is never sent anywhere. Special-casing the caller would have been wrong; an empty host now means "travels nowhere" and the two kinds cannot be confused in either direction. **Also found: the vault had no door at all** — `setSecret` was called by nothing outside tests. |
 
+### 12.2 Part 4 and Part D, and the six rounds they cost
+
+**Both are done.** Part 4 deleted `fetch`; Part D built the folder rule, `git {op: diff}`, and removed
+`replaceWithRemote` and `state`.
+
+| # | Built | The plan was wrong about |
+|---|---|---|
+| **4** | `b3b1678` — `fetch` deleted | **The plan said `fetch` was "`http` with GET and a fixed folder". It was not.** `fetch` listed what is inside a downloaded zip, and `http` had no equivalent — so deleting it would have quietly lost the answer to "which files did this dependency tarball produce". `archiveListing` moved into `http` first. **Also: `fetchAllowed` could not simply be renamed** — the stored pref key `KEY_FETCH` is on every phone, and renaming it would silently turn the switch back **on** for anyone who had it off. A security setting that resets itself is worse than a name that reads oddly, so `keepHttp` writes `KEY_FETCH`. |
+| **D** | `31c06da`, `a489a20`, `8be8957`, `6cd1876`, `09335bf`, `7caffe9` | **`shouldIgnoreOnCreate = kindOf != TEXT` is wider than the plan's own table said**, and I had the direction backwards at first: the rule was `== UNKNOWN`, and `EntryKind` has a separate `IMAGE`, so **pictures were born tracked** — which is *why* `LFS_ATTRIBUTE` is a list of image extensions. **And `FOLDER != TEXT` is true**, so the one-line form ignored every folder a person made and `createFolder` refused, taking a whole screen's behaviour with it. **`GitService.Changes` was already taken**, so the new data class shadowed it: fine in one file, broken everywhere both were in scope. **`NullOutputStream()` does not compile** — the class has a private constructor and is exposed as `INSTANCE`. |
+
+**Six CI rounds, and every one was a Kotlin fact QC cannot see.** QC does not type-check; the compiler
+is the only checker and CI is the only compiler. Four of the six would have been caught by reading the
+declaration rather than the call site:
+
+1. `commit()` returns `String?`, not an object with `.id`.
+2. `NullOutputStream` has a private constructor — `INSTANCE`.
+3. `GitService.Changes` already exists; mine shadowed it.
+4. Four test files still called `replaceWithRemote` after it was deleted.
+
+**The lesson is narrower than "be careful".** The pattern is: *a symbol whose shape I assumed rather than
+read*. Each of these was one grep away — `fun commit(`, `data class Changes`, the jar's field list — and
+none was found by reading my own new code.
+
 **Three CI rounds were spent on test defects rather than product defects**, and each is worth remembering:
 
 1. `hostOf("file:///tmp/x")` answered `file` — a scheme with no authority is not a host. Every signing test
