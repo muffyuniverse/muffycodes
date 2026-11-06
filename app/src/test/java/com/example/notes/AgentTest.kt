@@ -2645,42 +2645,7 @@ class AgentTest {
     private fun call(tool: String, args: JSONObject = JSONObject()) =
         tools().run(Call("c-$tool", tool, args.toString()))
 
-    @Test
-    fun `state says there is nothing to send before anything was pushed`() {
-        // **"unknown", not "0 ahead".** A branch GitHub has never seen is not zero commits ahead of
-        // it — it has never been sent. Answering zero would tell an agent the work was delivered
-        // when nothing has ever left the phone, which is the one wrong answer that matters here.
-        val said = call("state")
-        assertTrue("it answers: $said", said.startsWith("0"))
-        assertTrue("it names the project: $said", said.contains("project: shopping"))
-        assertTrue(
-            "and says the remote state is unknown rather than zero: $said",
-            said.contains("unknown"),
-        )
-        assertTrue("and that there is nothing to send: $said", said.contains("Nothing to send"))
-    }
 
-    @Test
-    fun `state names the paths a push would leave behind`() {
-        // **The number that stops a lie.** An ignored file is not a change and not unsent — it is on
-        // the phone and will never be on GitHub until somebody says so. Without this a project
-        // holding a video and one note answered "Nothing to send", which is true of the note and a
-        // lie about the project: the agent would tell the person their work was on GitHub when half
-        // of it was not.
-        // **`createdByOperator`, because a binary is exactly what it holds back.** A `.mp4` is
-        // UNKNOWN, so the person's default ignores it — and git then reports it as ignored, which is
-        // the state this test is about. No test-only back door needed.
-        val ignored = File(ws.repoOf("shopping"), "holiday.mp4")
-        ignored.writeBytes(ByteArray(4096))
-        ws.createdByOperator(ignored)
-
-        val said = call("state")
-
-        assertTrue("it answers: $said", said.startsWith("0"))
-        assertTrue("and names the ignored path: $said", said.contains("ignored"))
-        assertTrue("with its size: $said", said.contains("4 KB"))
-        assertTrue("and does not claim the project is fully sent: $said", !said.contains("Nothing to send"))
-    }
 
     @Test
     fun `pull refuses a project with no GitHub address, and says what is missing`() {

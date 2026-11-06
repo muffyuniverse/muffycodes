@@ -385,6 +385,17 @@ class MaintenanceTest {
         assertTrue("a png is a pointer", lines.any { it.startsWith("*.png ") })
         assertTrue("and it is the LFS filter", lines.any { it.contains("filter=lfs") })
         assertTrue("with -text, so line endings are not converted", lines.any { it.endsWith("-text") })
+        // **The folder rule, which the extension list could never be.** A zip, an mp4 or an apk
+        // unpacked into a project was committed as a raw blob into ordinary history, where it stays
+        // for ever — and `fetch` + `unpack` is the documented way to vendor a dependency, so that
+        // was a live bug rather than a hypothetical one.
+        assertTrue(
+            "and everything under assets/ is a pointer, whatever it is: $lines",
+            lines.any { it.startsWith("assets/** ") && it.contains("filter=lfs") },
+        )
+        // **The extension list is kept beside it**, because a picture saved before `assets/`
+        // existed lives in the project root with no folder rule to cover it.
+        assertTrue("and the image list is still there", lines.any { it.startsWith("*.jpg ") })
     }
 
     /** Every file under `.git/lfs/objects`, which is the store `gc` never looks at. */

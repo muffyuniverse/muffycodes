@@ -1339,9 +1339,15 @@ object GitService {
                         DiffEntry.ChangeType.DELETE -> 'D'
                         else -> 'M'
                     }
+                    // **The name first, then the bytes.** A `.zip`, a `.png` or an `.mp4` is a
+                    // binary by its extension whatever the bytes happen to look like — a tiny zip
+                    // with no NUL in its first block would otherwise be diffed as text. The NUL test
+                    // is the second net, for a binary with no useful extension.
                     val before = if (kind == 'A') "" else blobText(repo, from, name).orEmpty()
                     val after = if (kind == 'D') "" else blobText(repo, to, name).orEmpty()
-                    if (looksBinary(before) || looksBinary(after)) {
+                    if (Workspace.kindOfPath(name) != EntryKind.TEXT ||
+                        looksBinary(before) || looksBinary(after)
+                    ) {
                         out += ChangedFile(name, kind, 0, 0, emptyList(), "binary")
                         continue
                     }

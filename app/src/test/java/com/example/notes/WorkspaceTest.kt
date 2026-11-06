@@ -1053,4 +1053,82 @@ class WorkspaceTest {
             exclude.readText().lineSequence().any { it.trim() == ".env" },
         )
     }
+    // ---- the two folders, and what each means ------------------------------
+
+    @Test
+    fun `a picture is born untracked, because assets is where it belongs`() {
+        // **The operator's rule, and it is wider than what shipped.** The rule was
+        // `kindOf == UNKNOWN`, and `EntryKind` has a separate `IMAGE` - so pictures were born
+        // *tracked*, which is why `LFS_ATTRIBUTE` is a list of image extensions. Now anything that
+        // is not text is born untracked, and `assets/` is the one place a picture is tracked.
+        //
+        // The cost is real and accepted: a picture outside `assets/` has no version and no undo.
+        // This test is what says the rule changed, so a later edit cannot quietly revert it.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        workspace.ensureIgnore(project)
+
+        assertTrue(
+            "a png is not text, so it waits",
+            workspace.shouldIgnoreOnCreate(File(project, "screenshot.png")),
+        )
+        assertTrue(
+            "and so does anything else the app cannot read",
+            workspace.shouldIgnoreOnCreate(File(project, "data.zip")),
+        )
+        assertFalse(
+            "and text does not",
+            workspace.shouldIgnoreOnCreate(File(project, "notes.md")),
+        )
+    }
+
+    @Test
+    fun `a folder is not a file kind, so making one still works`() {
+        // **The bug the rule introduced, as a test.** `FOLDER != TEXT` is true, so the one-line form
+        // ignored every folder a person made and `createFolder` refused - which took a whole
+        // screen's worth of behaviour with it. A folder holds what its files are, and those decide
+        // for themselves.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        workspace.ensureIgnore(project)
+
+        assertFalse(
+            "a folder is not held back",
+            workspace.shouldIgnoreOnCreate(File(project, "drafts")),
+        )
+        assertTrue(
+            "and it can still be made",
+            workspace.createFolder("Shopping", "drafts").isSuccess,
+        )
+    }
+
+    @Test
+    fun `the agent may not write assets, and may write anywhere else`() {
+        // **A folder rule, not a lock.** `assets/` is the one folder whose contents cost the
+        // operator money to store and whose size is unbounded, so an agent that can write there can
+        // spend quota without asking. A rule rather than a list of locked paths because the folder
+        // is what the rule is about: a new picture in `assets/` is refused without anybody
+        // remembering to lock it.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+
+        assertTrue(
+            "a picture in assets is refused",
+            workspace.isAgentLocked(File(project, "assets/milk.png")),
+        )
+        assertTrue(
+            "and a note in assets, because the folder is the rule",
+            workspace.isAgentLocked(File(project, "assets/notes.md")),
+        )
+        assertTrue(
+            "and the folder itself",
+            workspace.isAgentLocked(File(project, "assets")),
+        )
+        assertFalse(
+            "but everything else is the agent's",
+            workspace.isAgentLocked(File(project, "notes.md")),
+        )
+        assertFalse(
+            "including a folder whose name merely starts with it",
+            workspace.isAgentLocked(File(project, "assets-old/notes.md")),
+        )
+    }
+
 }

@@ -76,7 +76,8 @@ class GitToolTest {
         val (from, to) = twoVersions("milk.txt", "one\ntwo\n", "one\nTWO\n")
 
         val body = tool("""{"op":"diff","path":"milk.txt","from":"$from","to":"$to"}""")
-        val where = Regex("""agent/git/diff-[^\s.]+\.txt""").find(body)!!.value
+        // **The path as the answer gives it**, which is project-relative and ends in `.txt`.
+        val where = Regex("""agent/git/diff-[^ ]+\.txt""").find(body)!!.value
         val filed = File(ws.projectDir("shopping"), where).readText()
 
         assertTrue("the new line: $filed", filed.contains("+TWO"))
