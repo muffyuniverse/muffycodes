@@ -4592,6 +4592,15 @@ class AppViewModel @JvmOverloads constructor(
                     }
                 }
             },
+            // **The folder, when a command has changed it.** The tree is not cached anywhere —
+            // `ProjectTree` calls `listFiles()` on every read — so the only thing that was missing
+            // was something to ask for the read. `refresh()` had twenty-nine call sites and every
+            // one of them was a person's tap; a command that wrote ten files left the list exactly
+            // as it was until somebody left the project screen and came back.
+            //
+            // **On the main thread, because it writes Compose state**, and posted rather than
+            // called: this arrives from the tool's own thread, and `refresh()` reads the disk.
+            onDiskChanged = { main.post { refresh() } },
             changed = { sessions ->
                 main.post {
                     agentSessions = sessions

@@ -157,6 +157,24 @@ class AgentTools(
      * a conversation that goes nowhere for no visible reason. So this refuses in words instead.
      */
     private val modelSees: (() -> Boolean)? = null,
+    /**
+     * **What the screens are told when a command has changed the project on disk.**
+     *
+     * The tree is not cached anywhere — `ProjectTree` calls `listFiles()` on every read — so a
+     * redraw always shows the truth. The problem is that **nothing asked for one.** `refresh()` had
+     * twenty-nine call sites and every one of them was a person's tap; a command that wrote ten
+     * files left the list exactly as it was until somebody left the project screen and came back.
+     * That is the same defect as the one `AppViewModel.projectNames` documents, fixed for taps and
+     * never extended to the agent.
+     *
+     * **A callback rather than a watcher.** The app knows when it changed a file — it is the one
+     * doing it — so this is exact where a `FileObserver` would be a guess: unreliable across the
+     * Android storage boundary, a thread per directory, and dozens of events during one `checkout`.
+     *
+     * Called after the work, never before, so a screen that redraws sees the change rather than the
+     * intention. Defaults to nothing, so a tool set built in a test needs no screen at all.
+     */
+    private val onDiskChanged: () -> Unit = {},
 ) {
 
     /**
@@ -386,6 +404,28 @@ class AgentTools(
          * slow one's.
          */
         const val RESULTS_DIR = AgentLog.DIR
+
+        /**
+         * The commands that can leave the project folder different from how they found it.
+         *
+         * **`read`-only tools are absent on purpose**, and so are the ones that only reach the
+         * network (`ci`, `runs`, `downloads`) — a redraw after those would be a comparison that can
+         * never differ. What is here is what writes: the four that change files (`write`, `delete`,
+         * `move`, `restore`), the three that bring something in (`fetch`, `artifact`, `download`),
+         * the two that sync the whole tree (`pull`, `push`), and `archive`, which unpacks into it.
+         *
+         * **`upload` is not here.** It copies a file *out* to the phone's Downloads and changes
+         * nothing in the project.
+         *
+         * The list is used to answer one question — "should the screens be told?" — and the
+         * conservative answer is the right one: a tool wrongly on the list costs a re-read and a
+         * comparison, and a tool wrongly off it leaves a person looking at a list that is wrong.
+         */
+        val CHANGES_DISK: Set<String> = setOf(
+            "write", "delete", "move", "restore",
+            "fetch", "artifact", "download", "archive",
+            "pull", "push",
+        )
 
         /**
          * What each command takes — **and the whole of what it takes.**
@@ -1026,7 +1066,10 @@ class AgentTools(
         // can leave everything exactly as it was.
         val unknown = unknownIn(call.tool, args)
         if (unknown.isNotEmpty()) return refuseKeys(call.tool, unknown)
-        when (call.tool) {
+        // **Every path out of the `when` is answered, and every one of them tells the screens.**
+        // The command's own answer is what comes back; the notification is a separate act that
+        // happens after it, whether the answer was a success or a refusal.
+        val said = when (call.tool) {
             "search" -> searchTool(args, deadline)
             "read" -> read(args, deadline)
             "write" -> write(args, deadline)
@@ -1060,7 +1103,14 @@ class AgentTools(
             "push" -> push()
             else -> refusal("There is no tool called ${call.tool}")
         }
+        if (call.tool in CHANGES_DISK) onDiskChanged()
+        said
     } catch (e: StoppedException) {
+        // **A command that ran out of time may still have written something.** A folder delete that
+        // stopped part way has already removed files; a write that was handed over is still running.
+        // Either way the list a person is looking at is now wrong, and this is the case they are most
+        // likely to be watching.
+        if (call.tool in CHANGES_DISK) onDiskChanged()
         // **Report 13: the work carries on and its result arrives later.** A command that outlasts
         // the operator's wait is restarted in the background - restarted, not resumed, because
         // nothing here can carry on from the middle - and the turn is told where the result will be.
@@ -1071,6 +1121,9 @@ class AgentTools(
         }
         e.message ?: Stopped.body(call.tool, deadline)
     } catch (e: Throwable) {
+        // **The same rule for a command that threw.** A tool that failed half way through a folder
+        // is indistinguishable, from the screen's side, from one that stopped part way through it.
+        if (call.tool in CHANGES_DISK) onDiskChanged()
         refusal(Secrets.explain(e, "That tool could not be run"))
     }
 

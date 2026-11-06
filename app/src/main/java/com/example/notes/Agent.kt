@@ -222,6 +222,14 @@ class Agent(
      */
     private val modelSees: (() -> Boolean)? = null,
     /**
+     * **What the screens are told when a command has changed the project on disk.**
+     *
+     * Passed through to [AgentTools] unchanged, where the reasoning lives. Here it is one more
+     * injected dependency of the same shape as the browser and the fetcher: a test builds an `Agent`
+     * with no screen, and the app passes the one that redraws.
+     */
+    private val onDiskChanged: () -> Unit = {},
+    /**
      * Where a vector comes from, and whether a hit can be reordered.
      *
      * **Injected like the browser and the fetcher**, and the default refuses — so an agent built
@@ -246,6 +254,7 @@ class Agent(
         fetchAllowed = fetchAllowed,
         github = github, githubToken = githubToken, phone = phone,
         modelSees = modelSees,
+        onDiskChanged = onDiskChanged,
         // **One engine per agent, because one agent is one project.** That is also the extent of a
         // semantic search — see [SemanticSearch] — so the two facts are the same fact here.
         semantic = SemanticSearch(

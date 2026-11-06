@@ -32,6 +32,14 @@ class AgentRunner(
     private val notify: (AgentSession) -> Unit = {},
     /** Called with the sessions after anything changes, so a screen can redraw. */
     private val changed: (List<AgentSession>) -> Unit = {},
+    /**
+     * **Called when a command has changed a project on disk**, so the file list can be re-read.
+     *
+     * Separate from [changed] on purpose: [changed] is about the *sessions* — what is running and
+     * what needs a person — and this is about the *folder*. A command that writes ten files changes
+     * no session at all, which is exactly the case where the list used to stay stale.
+     */
+    private val onDiskChanged: () -> Unit = {},
     /** Called with a project's fresh rows after a check, when somebody is reading them. */
     private val polled: (String, List<AgentLog.Row>) -> Unit = { _, _ -> },
     /**
@@ -401,6 +409,7 @@ class AgentRunner(
                     phone = phone,
                     embedder = embedder,
                     models = models,
+                    onDiskChanged = onDiskChanged,
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

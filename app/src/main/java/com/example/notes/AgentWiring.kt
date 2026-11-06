@@ -59,6 +59,14 @@ object AgentWiring {
         /** What the agent is doing, page by page, while it works. See `Agent.onPage`. */
         onPage: (String, Agent.Live) -> Unit = { _, _ -> },
         /**
+         * Called when a command has changed a project on disk, so the file list can be re-read.
+         *
+         * **A parameter rather than something this function does itself**, because this is a plain
+         * factory with no `Looper` and no view model: `main` and `refresh()` live in the caller. The
+         * default does nothing, so a wiring built in a test needs no screen.
+         */
+        onDiskChanged: () -> Unit = {},
+        /**
          * The browser the agent may use.
          *
          * **Made once and shared, not per runner.** A WebView owns a `Looper` thread and a Chromium
@@ -156,6 +164,7 @@ object AgentWiring {
             // person who exports the same one should find them identical, and two implementations of
             // "copy this to Downloads" would drift in exactly the ways nobody notices.
             phone = MediaStoreDownloads(app),
+            onDiskChanged = onDiskChanged,
         )
     }
 

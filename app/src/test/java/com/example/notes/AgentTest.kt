@@ -2422,6 +2422,76 @@ class AgentTest {
         assertEquals("the middle line is gone", "circle red\nstar gold", shapes.readText())
     }
 
+    // ---- telling the screens that the folder changed -------------------------
+
+    @Test
+    fun `a write tells the screens, because the list is only as fresh as the last redraw`() {
+        // **The bug this exists for.** `refresh()` had twenty-nine call sites and every one of them
+        // was a person's tap, so a command that wrote a file left the folder list exactly as it was
+        // until somebody left the project screen and came back. The tree itself was never cached —
+        // `ProjectTree` calls `listFiles()` on every read — so the only missing piece was something
+        // to ask for the read.
+        var told = 0
+        val watched = AgentTools(ws, "shopping", git, log, onDiskChanged = { told++ })
+
+        val body = watched.run(
+            Call("c1", "write", """{"path":"note.txt","text":"hello"}"""),
+        )
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the screens were told once", 1, told)
+    }
+
+    @Test
+    fun `a read tells nobody, because a read changes nothing`() {
+        // **The other half of the pair**, and the reason the notification is a set of tool names
+        // rather than "always": a redraw after every `read` would be a disk walk and a comparison
+        // that can never differ, on the tool a turn calls most often.
+        var told = 0
+        val watched = AgentTools(ws, "shopping", git, log, onDiskChanged = { told++ })
+
+        val body = watched.run(Call("c1", "read", """{"path":"milk.txt"}"""))
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the screens were not told", 0, told)
+    }
+
+    @Test
+    fun `a refusal still tells the screens, because a half-done delete has still deleted`() {
+        // **A refusal is not a promise that nothing happened.** A folder delete that stops part way
+        // has already removed files, and a list that stayed as it was would be wrong in exactly the
+        // case a person is most likely to be looking at it. The notification is cheap and
+        // idempotent — `refresh()` compares its own signature — so it is told either way.
+        var told = 0
+        val watched = AgentTools(ws, "shopping", git, log, onDiskChanged = { told++ })
+
+        // A locked file, so the refusal comes from the funnel rather than from the path being wrong.
+        // Locked the way the screen does it: by path, through the funnel that owns the list.
+        val locked = File(ws.repoOf("shopping"), "locked.txt")
+        ws.write(locked, "mine")
+        val lockedPath = ws.relative(locked) ?: error("the file is not in the account")
+        ws.setLocked(setOf(ws.pathString(lockedPath)))
+
+        val body = watched.run(Call("c1", "delete", """{"path":"locked.txt"}"""))
+
+        assertTrue("it refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertEquals("the screens were still told", 1, told)
+        assertTrue("and nothing was deleted", locked.isFile)
+    }
+
+    @Test
+    fun `a tool that cannot change the folder is not on the list`() {
+        // **The list is a fact about the tools, so it is asserted rather than trusted.** A name added
+        // to `CHANGES_DISK` that is not a real tool would silently do nothing, and a real writing
+        // tool left off it would leave the list stale — neither is visible by reading the code.
+        val writes = setOf("write", "delete", "move", "restore", "fetch", "artifact", "download", "archive", "pull", "push")
+        assertEquals("every writing tool, and only those", writes, AgentTools.CHANGES_DISK)
+        assertTrue(
+            "every one of them is a real tool",
+            AgentTools.CHANGES_DISK.all { it in AgentTools.KEYS },
+        )
+    }
+
     // ---- the agent's own compaction: forget, by id ---------------------------
 
     private fun tools() = AgentTools(ws, "shopping", git, log)
