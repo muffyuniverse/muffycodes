@@ -315,6 +315,30 @@ release until the keystore secret is fixed**, and that is a person's job: it nee
 keystore, which is not in this repository by design. It is recorded as an **open defect**, not
 something to work around by changing the workflow.
 
+### 3.3f Measured — both halves of the watcher
+
+**Half one, nothing new** (run `42158094877`): 8 seconds, `Build the new commit` **skipped**, log says
+`Nothing new — the newest commit is already built.`
+
+**Half two, something new** (run `42159332560`):
+
+```
+newest:     7ec72c0e6ce68236ca959a9e1ce8332952b5dbbd
+last built: 7e4fa0df03ac92795f595c82fe3b32fac08442a8
+Started a build for 7ec72c0e…
+```
+
+and a `workflow_dispatch` build appeared for exactly that sha. Both jobs succeeded.
+
+**And a third thing this proved, which was already designed and is now measured:** `d9ad267` and
+`7ec72c0` are docs-only commits, and **no build ran for either** — `docs/**` is in the workflow's
+`paths-ignore`, so the push created no run at all. The watcher then found those commits "not built"
+and dispatched a build for them, which is *correct behaviour* rather than a duplicate: the watcher's
+question is "has this commit been built", and the answer for a docs-only commit is honestly no. A
+person who wants docs-only commits left alone would need the watcher to ask "does this commit touch
+anything the build reads", which is a `paths-ignore` check the API does not offer — so the watcher
+builds them, at the cost of one pipeline per docs push. **Recorded as a known cost, not fixed.**
+
 ### 3.4 What to build
 
 **Phase 1 — measure the baseline (no workflow change).**
