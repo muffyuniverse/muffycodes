@@ -383,91 +383,205 @@ thing — not a template language that pretends two different protocols are one.
 
 ---
 
-## 6. Part D — the `git` tool: named operations, not argv
+## 6. Part D — the `git` tool, and the folder rule that decides what git sees
 
-The operator asked for `{ git: "arguments" }`. **JGit ships a CLI** (`org.eclipse.jgit.pgm`), so this was
-researched properly rather than dismissed.
+### 6.0 The folder rule: `assets/` and `ignored/`
 
-### 6.1 Why argv passthrough is refused
+The operator's design (2026-11-06), which supersedes the extension-list approach the app has today:
 
-`{ git: "arguments" }` **is a shell by another name**: quoting, `-c`-style flags, `--upload-pack=…`
-reaching an arbitrary binary, and a model asked to remember git's 200 flags. It also fails the app's rule —
-a failure must say what happened, and argv hands back git's error text.
+> *"leave 2 folders at the project root … those are assets and ignored folders. and only files from
+> assets go to lfs. and in other folders only text files are tracked. And no rule difference between
+> operator and agent, only that agent cant put anything inside lfs folder — it is under operator's
+> control."*
 
-### 6.2 Why embedding `pgm` is refused
+**Two folders, one meaning each:**
 
-Measured against the version the app already pins (`6.10.1.202505221210-r`):
+| Folder | Tracked | Stored | Who writes it |
+|---|---|---|---|
+| `assets/` | **yes, through LFS** | LFS objects | **the person only** |
+| `ignored/` | **never** | this phone only | the person |
+| everything else | yes, if text | ordinary git blobs | person **and** agent |
 
-- `org.eclipse.jgit` and `org.eclipse.jgit.lfs` — **already in the APK.**
-- `org.eclipse.jgit.ui` — **AWT/Swing.** 11 classes, all `awtui.*` (`SwingCommitList`, `CommitGraphPane`,
-  `AWTPlotRenderer`). **Android has neither.**
-- **Only two of `pgm`'s own classes touch it:** `Glog` (a Swing graph viewer) and `Main` (help plumbing).
-  Every porcelain command is free of it — so it is *nearly* embeddable, which is what makes this worth
-  recording rather than hand-waving.
-- But it also drags in **Jetty** (an HTTP server for `git lfs serve`), a **second Apache HttpClient**, SSH
-  transports and a GPG stack — all to run a terminal CLI this app has no terminal for.
+**This replaces the extension list, and that is the point.** Today `LFS_ATTRIBUTE` is built from
+`IMAGE_EXTENSIONS = {png, jpg, jpeg, gif, webp, bmp}` — so a `.zip`, `.mp4` or `.apk` in a project is
+committed **as a raw blob**, which is a live bug given that `fetch` + `unpack` is the documented way to
+vendor a dependency. A folder rule is one line instead of a list that has to grow:
 
-### 6.3 What is built instead
-
-```kotlin
-"git" to setOf("op", "path", "into", "message", "revision", "branch")
+```
+assets/** filter=lfs diff=lfs merge=lfs -text
 ```
 
-`op` is a **closed set**, each mapping to JGit porcelain that already exists or is one call:
+`Workspace.IMAGE_EXTENSIONS` stays where it is still needed — `kindOf` deciding whether a file is text —
+but it stops deciding what is *stored*, which was never the right question for it.
 
-| `op` | JGit | Status |
+**Why the agent may not write to `assets/`.** It is the one folder whose contents cost the operator
+money to store (LFS bandwidth and quota are billed) and whose size is unbounded. An agent that can
+write there can spend the operator's quota without asking. It is the same shape as the existing `locked`
+concept, so the refusal is the one that already exists rather than a new mechanism.
+
+### 6.1 `.gitignore` is **kept**, and this is why
+
+The operator asked whether removing it was a bad idea. **It is, and the reason is not that it is already
+built.**
+
+`assets/` + `ignored/` is a **fixed, structural** rule: two folders, one meaning each. `.gitignore` is a
+**per-path** rule. They do different jobs, and the case that breaks the folder-only design is ordinary:
+
+> A person has `vendor/dependency/` — 40 MB, one folder among two hundred they *do* want. Or a
+> `notes/drafts/` folder. Or a 300 MB `.mp4` in the project root, which `assets/` cannot hold (it is not
+> theirs to spend quota on) and `ignored/` cannot hold (they did not put it there).
+
+The folder-only answer is *"move it into `ignored/`"*. But **moving a file is a different act from
+declaring it not sent**, and it changes the shape of the person's project to suit the sync engine — which
+is the thing the ignore rule was built to avoid.
+
+**The stronger reason: `.gitignore` is content.** It is a tracked file, it goes to GitHub, and it is a
+document a person may read and edit. The folder rule is **not in the repository at all**. A project
+cloned onto a desktop, or opened by any other git tool, would carry no record of which paths are
+deliberately excluded. That loss only shows up when somebody uses the project outside this app.
+
+So the three are complementary, and the plan says so:
+
+| | `assets/` | `ignored/` | `.gitignore` |
+|---|---|---|---|
+| Decides | where binaries live | where scratch lives | one path, either way |
+| In the repository | yes (as LFS pointers) | no | **yes, as a file** |
+| The person's act | put it here | put it here | mark *this* one |
+
+**The default and the escape.** A person who puts a binary in `assets/` and scratch in `ignored/` never
+touches `.gitignore`. One who has a file that belongs in neither uses it, and the broken-link icon stays
+because it is the only way to say *"this one, here, not sent"*.
+
+### 6.2 `state` is removed
+
+**Its two halves are two different questions wearing one name**, and the operator is right that the agent
+should own push and pull:
+
+| `state` line | what it actually compares |
+|---|---|
+| `unsent paths` | **HEAD vs `origin/<branch>`** — commits not pushed |
+| `ahead/behind` | the same pair, as counts |
+| `uncommitted` | **working tree vs HEAD** — a different question |
+| `ignored` | `ignoredNotInIndex` |
+
+The tool, the `state` row in the UI, and `KEYS["state"]` all go. `pull` and `push` stay — they are the
+agent's, and they need no status call to be correct.
+
+**What must not be lost with it.** The `ignored` line is the only place the app says *"there is a 40 MB
+video on this phone that will never be on GitHub"*. Without it, a project holding one video and one note
+reports **"Nothing to send"** — true of the note, a lie about the project. That sentence moves to the
+**project row** (`BrowserScreen.kt:679`, which already shows the unsent count), because it is a fact for
+the person, not a question for the model.
+
+### 6.3 `diff` — revisions only, because every tracked change is committed
+
+The operator: *"working tree vs HEAD doesnt make sense because we autocommit on every change to tracked
+files/folders."* **Correct**, and I verified it: every agent write ends in `commit(...)`, and the person's
+edits go through `afterChange` → `commitProjectOf`. A tracked change that is not committed does not exist.
+
+```kotlin
+"git" to setOf("op", "path", "from", "to")
+```
+
+| `from` | `to` | answers |
 |---|---|---|
-| `status` | `GitService.status` | **already written** |
-| `log` | `RevWalk` | already used by the history screen |
-| `diff` / `show` | `DiffFormatter` | already used |
-| `checkout` | `git.checkout()` | new |
-| `revert` | `RevertCommand` | new |
-| `stash` | `git.stashCreate()` / `stashApply()` | new |
-| `blame` | `BlameCommand` | new |
+| absent | absent | **HEAD's last commit** — what the most recent change did |
+| present | absent | that revision **vs HEAD** |
+| present | present | **A..B** — the case the operator named |
 
-**Why this beats argv:** the agent cannot reach a flag the app has not reasoned about, every refusal is a
-sentence the app wrote, and every operation goes through `RepoLocks.hold` and the existing rules — the dirty
-check, commit-first, LFS-before-refs. `git revert` on a locked path must refuse, and it will, because it is
-the app's code rather than a subprocess.
+`path` is a **prefix**, so `src/` answers *"what changed in this folder between these two"* — the
+`git log -- path/to/folder` question, and the one that matters after `unpack` lands forty files.
 
-**The honest limit:** this is not a git CLI. No `gc`, no `filter-branch`, no `rebase -i`. `filter-branch`
-rewrites history, which this app has already decided against — `HistoryPrune` was deleted.
+**Why this is the strong candidate the operator says it is:** `read` shows **full contents, not changes**.
+For a 400-line file where three lines moved, reading costs 400 lines of context and leaves the model to
+diff in its head, which it does badly. A diff is the compressed form of exactly the question being asked.
 
-**Cost:** ~250 lines including refusals; one test per `op`.
+**Always filed, never quoted** — `agent/git/diff-<from>-<to>.txt`, with the conversation getting the
+count, the added/removed line totals, and the first N paths. Same protocol as `runs` and `shot`.
 
-### 6.4 The `git` tool is **local only** — and that is the whole point
+**Binary paths are listed and not diffed** — `data.zip: binary, changed` — because `diffLines` on a zip is
+a page of replacement characters. `Workspace.kindOfPath` answers this by name, before anything is read.
 
-This is the distinction the first draft of this plan left ambiguous, and it decides the shape of the tool:
+**Nothing else is in the tool.** No `show` (every commit is one file and its message is generated from the
+filename — it would print the same string twice). No `blame` (in a single-person project the answer is
+almost always "you"). No `stash` (nothing to park: tracked changes are committed). No `checkout` (moving
+HEAD silently changes which history the agent reads and which commits `push` sends; the agent has one
+project, one branch, one remote). No `revert` (`restore {path, revision}` already puts a file back and
+commits; if multi-file undo is wanted, the fix is `restore` taking a list, not a second op).
 
-| | Local history | The network |
+### 6.4 LFS is **per repository**, on both sides — and it costs
+
+Measured, not assumed:
+
+- **Local:** `LfsStore.dirOf(repo) = File(repo.directory, "lfs/objects")` — inside `.git/`, so one store
+  per project.
+- **Remote:** `LfsClient.endpointOf(remoteUrl)` → `https://github.com/<owner>/<repo>.git/info/lfs` — one
+  endpoint per repository on the server.
+
+**So the same picture in two projects is uploaded twice and stored twice.** There is no account-level
+blob store and no cross-repository dedupe. For a 40 MB asset shared between two projects that is 80 MB,
+and it is billed twice.
+
+**Not worth fixing.** A shared local store would save phone disk and nothing else — GitHub bills LFS per
+repository, so the cost the person actually pays does not change. Recorded here so it is a known cost
+rather than a surprise.
+
+### 6.5 What a pull does to an ignored file — **verified, and one risk**
+
+The operator asked whether pulling replaces or removes ignored files. The answer is not uniform, and the
+difference is the two sync paths:
+
+**`pull` (a merge) — ignored files stay.** `GitService.merge` merges trees, and an ignored path is in no
+tree, so nothing in the merge can reach it. Untracked-and-ignored files survive untouched.
+
+**`replaceWithRemote` (a reset) — they are meant to go, and one case needs a test.**
+`GitService.resetToRemote` does a hard reset and then explicitly wipes:
+
+```kotlin
+val status = git.status().call()
+(status.untracked + status.untrackedFolders + status.missing)
+    .forEach { path -> File(repo.workTree, path).deleteRecursively() }
+```
+
+That is correct for what `replaceWithRemote` is — *"make this folder exactly what GitHub has"* is a
+deliberate destruction. `status.untracked` **excludes** ignored paths (JGit puts them in
+`ignoredNotInIndex`), so a plain ignored file is safe even here.
+
+**The risk is `untrackedFolders`.** It is coarse: it names a folder rather than the paths in it, and
+`deleteRecursively()` then removes everything under that name — including an ignored file that happened to
+sit beside untracked content. **This is a hypothesis, not a measurement.** It needs a test before the
+folder rule lands:
+
+> a project with `ignored/notes.md` and an untracked `scratch.txt` beside it, replaced with the remote,
+> keeps `ignored/notes.md`.
+
+If it fails, the fix is to delete `status.untracked` paths individually and never a folder wholesale —
+which is a better rule anyway, because `deleteRecursively` on a folder is a bigger hammer than the
+question asks for.
+
+### 6.6 What is built, and in what order
+
+| # | What | Why here |
 |---|---|---|
-| **What** | `status` `log` `diff` `show` `blame` `branch` `checkout` `revert` `stash` | `clone` `pull` `push` |
-| **Who drives it** | **the agent**, through `git` | **the app**, through `pull` / `push` |
-| **Touches a remote** | never | always |
-| **Takes arguments** | yes (`op`, `path`, `revision`…) | **no** (`setOf()`) |
+| 1 | `assets/` + `ignored/` as structural folders; `assets/**` in `.gitattributes`; agent refused in `assets/` | The rule everything else reads. |
+| 2 | The `untrackedFolders` test (§6.5) | Proves the folder rule does not eat a person's file on a replace. |
+| 3 | `git {op: "diff", path, from, to}` | The one genuinely missing capability. |
+| 4 | Remove `state` — tool, `KEYS`, UI row; move its `ignored` sentence to the project row | The operator's call, and it is right. |
 
-**`clone`, `pull` and `push` are NOT part of the `git` tool, and must not be added to it.**
+**Cost:** ~200 lines plus tests. The `diff` op reuses `GitService.diffLines` and `ProjectGit.log`; the
+folder rule is mostly `Workspace` and `GitService` constants plus one refusal.
 
-Three reasons, each already paid for elsewhere in this plan:
+### 6.7 What this does not do
 
-1. **They are not one JGit call.** `ProjectGit.push` runs `LfsSync.push` **first** — because GitHub rejects a
-   tree naming an LFS object it does not have (GH008) — then the ref push, then reports which half failed.
-   A `git push` op would either duplicate that ordering or lose it.
-2. **They hold a lock and obey rules a local op does not.** `RepoLocks.hold(dir, "push")`, the dirty check
-   (*"a push sends commits, not files"*), and the commit-first rule. `git checkout` needs a lock; `git push`
-   needs the whole ritual.
-3. **The agent has no reason to name a remote.** It has exactly one project, one remote, one token. An
-   `op: "push"` would take either no arguments — in which case it is `push` under a second name — or
-   arguments that let the agent choose a remote, which is a capability nobody asked for and a way to send
-   the operator's work somewhere unintended.
-
-**So the tool list stays as it is:** `git` for local history, `state` / `pull` / `push` for the network.
-Nothing is subsumed.
-
-**And `clone` was never the agent's.** `ProjectGit.cloneInto` is a **UI** act — a person adds a project from
-an existing repository. There is no `clone` tool and there should not be: the agent works inside a project
-that already exists, and a clone that created one would need a name, a licence and a destination — three
-answers the app's own add-project dialog already collects from the person.
+- **No branch operations.** No create, switch or list. A branch is a decision about what the project *is*,
+  not a step in a task, and the agent has one branch.
+- **No history rewriting.** `filter-branch` and `rebase -i` stay refused; `HistoryPrune` was deleted on
+  purpose.
+- **No `gc`.** Maintenance is the app's own schedule, not something a model triggers.
+- **No argv passthrough.** `{git: "arguments"}` is a shell by another name: quoting, `-c` flags, and
+  `--upload-pack=…` reaching an arbitrary binary. Refused in §6.1 of the earlier draft and still refused.
+- **No `pgm` embed.** Measured: `org.eclipse.jgit.pgm` drags Jetty (for `lfs serve`), a second Apache
+  HttpClient, SSH transports and a GPG stack — for a terminal CLI this app has no terminal for.
 
 ---
 
@@ -491,8 +605,8 @@ That is the same defect already documented at `AppViewModel.kt:165` — *"adding
 the change only after you exit and enter the project menu again"* — fixed for **UI actions** and never
 extended to **agent actions**.
 
-**And Part D makes it urgent:** a `checkout` can change hundreds of files at once, and a list refreshed only
-by taps would be stale for the entire time the agent works.
+**And Part D makes it urgent:** an `unpack` writes forty files in one call and commits none of them, and a
+list refreshed only by taps would be stale for the entire time the agent works.
 
 ### 7.3 The fix
 
@@ -656,7 +770,7 @@ fires after the phone has buffered two gigabytes is not a cap.
 | **3** | **A — `Fetcher.request` + `http`** (§3) | ~180 lines, 12 tests | The core. Test 4 (the vault never leaks) **before the tool is reachable by a model**. |
 | **4** | delete `fetch`, rename the switch (§8) | small | Follows immediately from 3. |
 | ~~5~~ | ~~**C — provider config**~~ (§5) | — | **Withdrawn by the operator.** The schema as it is is good enough; git, http and secrets matter more. |
-| **6** | **D — the `git` tool** (§6) | ~250 lines | Last, because it needs the refresh hook (1) to be visible and `checkout` makes staleness worst. |
+| **6** | **D — the folder rule, `diff`, and `state` removed** (§6) | ~200 lines | Last, and now first among the four: the folder rule decides what git sees, and `diff` is revisions-only because every tracked change is committed. |
 | **7** | one real call by hand against the GitHub API | — | Prove the shape end to end before trusting it. |
 
 **Parts 1 and 2 are a morning's work and each fixes something that is wrong right now.** That is deliberate:
