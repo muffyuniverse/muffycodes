@@ -270,6 +270,26 @@ This was found by trying it, not by reading: the file was committed and pushed c
 exactly what a watcher is. The plan's earlier assumption ("put it next to the work") was wrong and
 is recorded here rather than quietly corrected.
 
+### 3.3d Measured — the watcher, working
+
+`watch.yml` is live on `main` and registered (`Watch  .github/workflows/watch.yml  active`).
+
+**A tick with nothing new, measured end to end:** created 03:41:50, finished 03:41:58 — **8 seconds**,
+one job, `Build the new commit` **skipped**. The log says:
+
+```
+newest:     7e4fa0df03ac92795f595c82fe3b32fac08442a8
+last built: 7e4fa0df03ac92795f595c82fe3b32fac08442a8
+Nothing new — the newest commit is already built. One API call, no pipeline.
+```
+
+That is the number the design was built for. The alternative measured earlier — dispatch the build and
+let it decide — was about **4 minutes** of wall clock across six jobs per tick.
+
+**Cost per day at a 10-minute cadence: 144 ticks × 8 s ≈ 19 minutes of runner time, all of it one
+short job.** The repository is public, so those minutes are unmetered; the figure matters only if it
+ever goes private, and then it is still small next to one push-triggered pipeline.
+
 ### 3.4 What to build
 
 **Phase 1 — measure the baseline (no workflow change).**
