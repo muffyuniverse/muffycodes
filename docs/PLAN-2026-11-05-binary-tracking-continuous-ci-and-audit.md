@@ -907,6 +907,63 @@ nothing that the webhook does not already deliver in five seconds, while spendin
 self-hosted runner *is told* by GitHub when a job is queued. Polling is what you do when you cannot be
 told. Both GitHub-hosted and self-hosted runners can be told.
 
+### 3d.7 What setup costs, measured to the step
+
+A Test job, cache-hit, timed from the run's own log:
+
+```
+Set up job                                            3.2s
+Check out the code                                    1.5s
+six check scripts                                     1.1s
+Set up Java                                           0.1s
+Set up Gradle                                        11.6s   ← the big one
+Remember the runtime the tests need                   2.1s
+Remember how the project is put together              1.0s
+──────────────────────────────────────────────────────────
+setup, job start to tests start                      20.7s
+the tests themselves                                 78.3s
+checks and teardown after                            10.3s
+```
+
+**So the fixed cost is 20.7 seconds, and 11.6 of it is `Set up Gradle`** — which is the wrapper
+downloading and verifying the Gradle distribution, then restoring the configuration cache.
+
+**A persistent runner saves that 20.7 seconds, and only that.** On a 112-second job it is 18%. It does
+not touch the 78.3 seconds of tests, which is the actual work. **On the 170-second release job it is 12%.**
+
+This is worth having and it is not transformative. Stated plainly because the polling idea was
+motivated by the belief that setup dominates, and it does not.
+
+### 3d.8 Is polling the only way to tell a runner about a job? **No — and no polling is involved anywhere.**
+
+**The runner does not poll for work, and neither does the workflow.** The mechanism is a **long poll**:
+the runner application opens an HTTPS connection to GitHub and **holds it open for 50 seconds**. If a
+job arrives during those 50 seconds, GitHub answers on that already-open connection. If nothing
+arrives, the connection times out and the runner opens another.
+
+So the runner is *told*, and it is told within milliseconds of a job being queued — because the
+connection is already open and waiting. The 50-second timeout exists only so a silent connection does
+not stay open for ever; it is not a poll interval, and it does not add latency to a job.
+
+```
+GitHub-hosted runner   →  same mechanism: GitHub owns both ends and pushes the job
+self-hosted runner     →  long poll, 50-second connection, told within milliseconds
+```
+
+**Three consequences, and they matter for the design:**
+
+1. **There is nothing to poll.** A loop that asked "is there a job" every two seconds would be asking a
+   question GitHub already answers unprompted. It would also spend the 1,000-requests-per-hour budget
+   that §3d.3 measured, for information that arrives free.
+2. **A self-hosted runner would be no faster to start than a hosted one.** The job is delivered in
+   milliseconds either way; the difference is only what is already installed on the disk.
+3. **The `push` → run-created gap of 5–6 seconds** measured in §3d.1 is not the runner asking; it is
+   GitHub's own dispatch, before any runner is involved.
+
+**The one case where polling is genuinely the only way:** a machine that cannot receive an inbound
+connection *and* cannot run the runner agent — for example a build that must be started by something
+outside GitHub entirely. That is not this project.
+
 ## 4. Part four — the audit of today's work
 
 The operator asked: *"audit that the functionality that we implemented today fully implemented,
