@@ -56,10 +56,35 @@ open class MemoryCredentials : Credentials {
      */
     private val secrets = LinkedHashMap<String, String>()
 
-    override fun secret(name: String): String? = secrets[name]
+    /**
+     * Keyed by name, and **the host is enforced**, so a test that asserts a token reaches a server is
+     * asserting the same rule the real store applies. A fake that ignored the host would let the suite pass
+     * while the app leaked.
+     */
+    private val secretHosts = LinkedHashMap<String, String>()
 
-    override fun setSecret(name: String, value: String) {
+    override fun secret(name: String, host: String): String? {
+        val allowed = secretHosts[name] ?: return null
+        val asked = host.trim().lowercase()
+        val stored = allowed.trim().lowercase()
+        if (stored.isEmpty() || asked.isEmpty()) {
+            if (asked != stored) return null
+        } else if (!(asked == stored || asked.endsWith(".$stored"))) {
+            return null
+        }
+        return secrets[name]
+    }
+
+    override fun setSecret(name: String, value: String, host: String) {
         secrets[name] = value
+        secretHosts[name] = host
+    }
+
+    override fun secretNames(): List<String> = secrets.keys.sorted()
+
+    override fun forgetSecret(name: String) {
+        secrets.remove(name)
+        secretHosts.remove(name)
     }
 }
 

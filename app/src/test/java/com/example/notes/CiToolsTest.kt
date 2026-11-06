@@ -100,8 +100,8 @@ class CiToolsTest {
         override fun hasToken(login: String) = true
         override fun modelKey(login: String): String? = null
         override fun setModelKey(login: String, key: String) {}
-        override fun secret(name: String) = secrets[name]
-        override fun setSecret(name: String, value: String) { secrets[name] = value }
+        override fun secret(name: String, host: String) = secrets[name]
+        override fun setSecret(name: String, value: String, host: String) { secrets[name] = value }
     }
 
     private fun tools(withGitHub: Boolean = true, withDownloads: Boolean = false) = AgentTools(

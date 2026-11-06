@@ -3232,7 +3232,9 @@ class AgentTools(
         // output prints only ciphertext, so without this every failing run would answer a page of
         // base64 that reads exactly like a broken build. The key is the account's, kept in the same
         // store as every other secret.
-        val key = credentials?.secret(EncryptedLog.KEY_NAME)
+        // **The empty host says it is never sent anywhere.** A log key is read by this app and travels
+        // nowhere, so it is stored with no host - and the vault will not hand it out for one.
+        val key = credentials?.secret(EncryptedLog.KEY_NAME, "")
         val all = found.value.orEmpty().mapValues { (_, text) -> EncryptedLog.read(text, key) }
         val wanted = args.optString("job").trim()
         val chosen = if (wanted.isBlank()) {
@@ -3355,7 +3357,9 @@ class AgentTools(
         // the assertion text in plain, measured on a probe run — so this is the step that turns an
         // unreadable upload back into the report it was.
         val opened = try {
-            val key = credentials?.secret(EncryptedLog.KEY_NAME)
+            // **The empty host says it is never sent anywhere.** A log key is read by this app and travels
+        // nowhere, so it is stored with no host - and the vault will not hand it out for one.
+        val key = credentials?.secret(EncryptedLog.KEY_NAME, "")
             java.util.zip.ZipInputStream(data.inputStream()).use { zip ->
                 var found: ByteArray? = null
                 while (true) {

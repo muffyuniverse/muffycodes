@@ -268,7 +268,7 @@ class McpTestTools {
     @Test
     fun `a secret on the phone is sent, and is not in the article`() {
         article("shopping", "linear", auth = "bearer", token = "linear")
-        credentials.setSecret("linear", "lin_api_value")
+        credentials.setSecret("linear", "lin_api_value", "mcp.example.com")
         fake.tools = listOf(Mcp.Tool("list_issues", "List", null))
 
         val answer = tools().run(call("""{"server":"linear"}"""))

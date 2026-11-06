@@ -54,7 +54,10 @@ data class McpServer(
     fun authorization(credentials: Credentials): String? = when (auth) {
         AUTH_BEARER -> {
             val name = tokenName ?: return null
-            val token = credentials.secret(name) ?: return null
+            // **The destination is the article's own URL**, so the vault can refuse a secret that was
+            // stored for a different server. An article in git is editable by anyone with the
+            // repository, so "which secret" must not be the only question asked.
+            val token = credentials.secret(name, Secrets.hostOf(url)) ?: return null
             "Bearer $token"
         }
         else -> null
@@ -64,8 +67,9 @@ data class McpServer(
     fun missing(credentials: Credentials): String? = when {
         auth == AUTH_BEARER && tokenName == null ->
             "$article says `auth: bearer` but does not name a secret. Add `token: <name>`."
-        auth == AUTH_BEARER && credentials.secret(tokenName!!) == null ->
-            "The secret `$tokenName` that $article names is not on this phone. " +
+        auth == AUTH_BEARER && credentials.secret(tokenName!!, Secrets.hostOf(url)) == null ->
+            "The secret `$tokenName` that $article names is not on this phone for " +
+                "${Secrets.hostOf(url).ifEmpty { "this server" }}. " +
                 "Add it in settings, and it is never written into the article."
         auth != AUTH_NONE && auth != AUTH_BEARER ->
             "$article asks for `auth: $auth`, and only `none` and `bearer` are understood. " +

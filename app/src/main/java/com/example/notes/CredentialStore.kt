@@ -72,13 +72,38 @@ interface Credentials {
      * two: encrypted with the keystore key, unreadable while the phone is locked, scrubbed out of every
      * message. It is not a fourth mechanism.
      *
+     * **The [host] is part of the question, not part of the name.** A name alone cannot say where its value
+     * may go, so `secret("github")` would let the agent send the token anywhere by naming it: the tool that
+     * resolves the name chooses the destination, and the vault has no say. Passing the destination makes the
+     * rule unskippable — there is no way to ask for a secret without saying where it is going.
+     *
+     * **An empty [host] means "this is not being sent anywhere"**, which is a real kind of secret: the key
+     * that decrypts a CI log is read by this app and never travels. The binding is two-way, so the two kinds
+     * cannot be confused: a secret stored for a host is never answered for `""`, and one stored for `""` is
+     * never answered for a host. Otherwise a decryption key could be handed to a server by naming it, which is
+     * the same hole in a different door.
+     *
+     * **Null for any host the secret was not stored for**, including a look-alike: the match is on whole
+     * labels, so `api.github.com` does not satisfy `github.com` and `evil-github.com` satisfies neither.
+     *
      * A default of null rather than an abstract method, so a store that has never heard of named secrets —
      * every fake in the suite — compiles and answers honestly.
      */
-    fun secret(name: String): String? = null
+    fun secret(name: String, host: String): String? = null
 
-    /** Keeps [value] as [name]'s secret for the active account. */
-    fun setSecret(name: String, value: String) {}
+    /** Keeps [value] as [name]'s secret for the active account, usable **only** at [host]. */
+    fun setSecret(name: String, value: String, host: String) {}
+
+    /**
+     * The names of this account's secrets, **never their values**, so a person (and the agent) can see what
+     * exists without learning anything that could be used.
+     *
+     * Empty rather than throwing, for the same reason as the other defaults.
+     */
+    fun secretNames(): List<String> = emptyList()
+
+    /** Forgets [name], so a value that is no longer wanted cannot be used by anything. */
+    fun forgetSecret(name: String) {}
 }
 
 /** The three things a store can say about a stored key. */
@@ -272,12 +297,20 @@ class CredentialStore(context: Context) : Credentials {
      * **Per account, and the account is the active one**, because that is the identity the app acts as and
      * the key that reaches a server belongs to it. The name is not a path: a secret called `../x` is a key
      * in this store like any other, and nothing is opened on disk.
+     *
+     * **The host is checked here rather than by every caller**, because a caller that forgot would be the
+     * hole this signature exists to close. A secret stored for `api.github.com` answers nothing when asked
+     * for `evil.example`, and the answer is null rather than an exception: the caller is a tool that says
+     * "there is no secret for that host" and stops, which is what a person needs to hear.
      */
-    override fun secret(name: String): String? {
+    override fun secret(name: String, host: String): String? {
         val login = activeLogin ?: return null
         val stored = prefs.getString(secretKey(login, name), null) ?: return null
+        // **The host comes back with the value**, from the same string, so they cannot drift apart.
+        val (allowed, encrypted) = splitHost(stored) ?: return null
+        if (!hostMatches(host, allowed)) return null
         return try {
-            decrypt(stored)
+            decrypt(encrypted)
         } catch (e: Exception) {
             // **Kept rather than dropped**, unlike the GitHub token: a locked phone is ordinary here too,
             // and the caller is a tool that can say "that secret could not be read" and try again.
@@ -285,9 +318,44 @@ class CredentialStore(context: Context) : Credentials {
         }
     }
 
-    override fun setSecret(name: String, value: String) {
+    override fun setSecret(name: String, value: String, host: String) {
         val login = activeLogin ?: return
-        prefs.edit().putString(secretKey(login, name), encrypt(value)).apply()
+        val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
+        prefs.edit().putString(secretKey(login, name), packed).apply()
+    }
+
+    /**
+     * The names, sorted, read straight from the keys.
+     *
+     * **No decryption, so this answers on a locked phone** — which is the point of a listing: knowing that a
+     * secret exists is not the same as being able to use it, and a screen that showed nothing while the phone
+     * was locked would look like the secret had been lost.
+     */
+    override fun secretNames(): List<String> {
+        val login = activeLogin ?: return emptyList()
+        val prefix = "secret_${login}_"
+        return prefs.all.keys
+            .filter { it.startsWith(prefix) }
+            .mapNotNull { key ->
+                try {
+                    java.net.URLDecoder.decode(key.removePrefix(prefix), "UTF-8")
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            .sorted()
+    }
+
+    /** The host a stored secret is bound to, for a screen that shows where a name may be used. */
+    fun secretHost(name: String): String? {
+        val login = activeLogin ?: return null
+        val stored = prefs.getString(secretKey(login, name), null) ?: return null
+        return splitHost(stored)?.first
+    }
+
+    override fun forgetSecret(name: String) {
+        val login = activeLogin ?: return
+        prefs.edit().remove(secretKey(login, name)).apply()
     }
 
     /** True when [login] has a token stored. */
@@ -306,6 +374,41 @@ class CredentialStore(context: Context) : Credentials {
      */
     private fun secretKey(login: String, name: String): String =
         "secret_${login}_${java.net.URLEncoder.encode(name, "UTF-8")}"
+
+    /**
+     * Splits a stored secret into the host it is bound to and the ciphertext.
+     *
+     * **Null when there is no separator**, which is every secret written before hosts existed. Those are
+     * refused rather than trusted: a secret with no host is one that could go anywhere, and the whole point
+     * of the change is that it cannot. The cost is that an existing secret must be entered again, which is
+     * the right trade — a silent widening of where a token may go is not.
+     */
+    private fun splitHost(stored: String): Pair<String, String>? {        val at = stored.indexOf(HOST_SEPARATOR)
+        if (at < 0) return null
+        return stored.substring(0, at) to stored.substring(at + HOST_SEPARATOR.length)
+    }
+
+    /**
+     * True when [host] may have the secret stored for [allowed].
+     *
+     * **Whole labels, never a suffix.** `"evil-github.com".endsWith("github.com")` is false, but the naive
+     * version of this check is the kind of thing that passes review and fails an attacker: a bare
+     * `endsWith` would accept `notgithub.com` for `github.com`. Requiring the dot makes the subdomain case
+     * work and the look-alike case fail.
+     *
+     * A subdomain is allowed because a service's API and its upload host are routinely different names
+     * (`api.github.com`, `objects.githubusercontent.com`) and a person setting up one secret should not have
+     * to guess which one the app will use.
+     *
+     * **An empty stored host matches only an empty question**, and the reverse. That is what keeps a
+     * decryption key from being sent and a token from being printed into a log.
+     */
+    private fun hostMatches(host: String, allowed: String): Boolean {
+        val asked = host.trim().lowercase()
+        val stored = allowed.trim().lowercase()
+        if (stored.isEmpty() || asked.isEmpty()) return asked == stored
+        return asked == stored || asked.endsWith(".$stored")
+    }
 
     // ---- encryption --------------------------------------------------------
 
@@ -369,5 +472,13 @@ class CredentialStore(context: Context) : Credentials {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val IV_LENGTH = 12
         const val TAG_LENGTH = 128
+
+        /**
+         * Between the host and the ciphertext in a stored secret.
+         *
+         * **A newline, because neither part can contain one**: a host is a normalised hostname and the
+         * ciphertext is base64. Any separator would do; this one is the one that cannot be forged.
+         */
+        const val HOST_SEPARATOR = "\n"
     }
 }

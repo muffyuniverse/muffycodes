@@ -158,7 +158,7 @@ class McpTest {
         // GitHub, so a token written into one is a leaked token in a repository. The article names a secret;
         // only the store can turn the name into a token.
         val credentials = MemoryCredentials()
-        credentials.setSecret("linear", "lin_api_secret_value")
+        credentials.setSecret("linear", "lin_api_secret_value", "mcp.example.com")
         val server = McpServer.parse(
             article(auth = McpServer.AUTH_BEARER, token = "linear"),
             "linear",

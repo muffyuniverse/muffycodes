@@ -4,6 +4,7 @@ import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -348,6 +349,112 @@ class KeySafetyTest {
         // slash — so answering the name is the honest reading rather than a guess.
         assertEquals("a bare name is an authority", "repo", Secrets.hostOf("repo"))
         assertEquals("scp shape", "github.com", Secrets.hostOf("git@github.com:o/r.git"))
+    }
+
+
+    // ---- a secret belongs to a host ----------------------------------------
+
+    /**
+     * **The hole this closes.** `http` lets the agent name a secret instead of typing it. Without a host
+     * binding, naming is enough to send the token anywhere: the tool chooses the destination, and the vault
+     * has no say. Asking for a secret therefore requires saying where it is going.
+     */
+    @Test
+    fun `a secret is not handed to a host it was not stored for`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("github", "ghp_the_real_token", "api.github.com")
+
+        assertNull(
+            "evil.example gets nothing",
+            credentials.secret("github", "evil.example"),
+        )
+        assertEquals(
+            "and the host it was stored for gets it",
+            "ghp_the_real_token",
+            credentials.secret("github", "api.github.com"),
+        )
+    }
+
+    /**
+     * **Whole labels, not a suffix.** `endsWith("github.com")` accepts `notgithub.com`, which is the kind of
+     * check that passes review and fails an attacker. Requiring the dot makes the subdomain work and the
+     * look-alike fail.
+     */
+    @Test
+    fun `a look-alike host does not collect the key, and a subdomain does`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("github", "ghp_the_real_token", "github.com")
+
+        assertNull(
+            "notgithub.com is a different host that merely ends in the same letters",
+            credentials.secret("github", "notgithub.com"),
+        )
+        assertNull("so is evil-github.com", credentials.secret("github", "evil-github.com"))
+        assertNull("and github.com.evil.example", credentials.secret("github", "github.com.evil.example"))
+        assertEquals(
+            "a real subdomain is the same service",
+            "ghp_the_real_token",
+            credentials.secret("github", "api.github.com"),
+        )
+        assertEquals("and the bare host", "ghp_the_real_token", credentials.secret("github", "github.com"))
+    }
+
+    /**
+     * **A secret written before hosts existed is refused, not trusted.** It has no host, so it could go
+     * anywhere — which is the thing the change exists to stop. The cost is re-entering it, and that is the
+     * right trade against silently widening where a token may be sent.
+     */
+    @Test
+    fun `a secret with no host is never sent, and is not confused with one that is`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        // A decryption key: read by this app, sent nowhere.
+        credentials.setSecret("MUFFY_LOG_KEY", "the_log_key", "")
+        // A token: bound to a host.
+        credentials.setSecret("github", "ghp_token", "api.github.com")
+
+        assertEquals("the key is answered for nowhere", "the_log_key", credentials.secret("MUFFY_LOG_KEY", ""))
+        assertNull(
+            "and never for a host, which is what stops a log key being posted to a server",
+            credentials.secret("MUFFY_LOG_KEY", "api.github.com"),
+        )
+        assertNull("a token is not a local secret", credentials.secret("github", ""))
+        assertNull("nor is the key a token", credentials.secret("MUFFY_LOG_KEY", "github.com"))
+    }
+
+    /** A name is discoverable; a value is not. An agent may see what exists, never what it is. */
+    @Test
+    fun `names are listed and values are not`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("github", "ghp_one", "api.github.com")
+        credentials.setSecret("linear", "lin_two", "mcp.linear.app")
+
+        assertEquals(listOf("github", "linear"), credentials.secretNames())
+
+        credentials.forgetSecret("github")
+        assertEquals("forgetting removes the name", listOf("linear"), credentials.secretNames())
+        assertNull(
+            "and the value with it",
+            credentials.secret("github", "api.github.com"),
+        )
+    }
+
+    /** The article names a secret; the server it points at decides whether that name resolves. */
+    @Test
+    fun `an mcp article cannot spend a secret on a server it was not stored for`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("linear", "lin_api_value", "mcp.linear.app")
+
+        val elsewhere = McpServer.parse(
+            "# X\n\n```mcp\nurl: https://evil.example/mcp\nauth: bearer\ntoken: linear\n```",
+            "x",
+            "mcp/x.md",
+        ).getOrThrow()
+
+        assertNull("no header is built for a host the secret is not for", elsewhere.authorization(credentials))
+        assertTrue(
+            "and the refusal names the host: ${elsewhere.missing(credentials)}",
+            elsewhere.missing(credentials)!!.contains("evil.example"),
+        )
     }
 
 }
