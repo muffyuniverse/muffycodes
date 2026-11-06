@@ -309,7 +309,12 @@ class CiToolsTest {
         // under a `.zip` name and report success.
         secrets[EncryptedLog.KEY_NAME] = KEY
         val inner = "the report's own text, which a public repository must not carry"
-        val sealedBytes = (EncryptedLog.MARKER + sealed(inner)).toByteArray(Charsets.US_ASCII)
+        // **The workflow seals base64 of the FILE's bytes**, because `openssl -base64` writes base64
+        // and the file is what that base64 decodes to. The test does the same thing, so it proves the
+        // reader against the shape the workflow actually produces rather than a simpler one.
+        val sealedBytes = (EncryptedLog.MARKER +
+            sealed(java.util.Base64.getEncoder().encodeToString(inner.toByteArray())) +
+            "\n").toByteArray(Charsets.US_ASCII)
         aRun(100, "failure", "Test (0)" to "ok")
         anArtifact(100, "test-report", sealedArtifact("test-report.zip", sealedBytes))
 

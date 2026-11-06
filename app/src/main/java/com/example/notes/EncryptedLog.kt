@@ -229,12 +229,20 @@ object EncryptedLog {
                 "This artifact says it is sealed but carries no ciphertext after the marker.",
             )
         val opened = open(blobLine, key)
+
+        // **`open` answers the plaintext, and the workflow sealed a FILE — so the plaintext is
+        // base64 of the file's bytes.** `openssl ... -base64` writes base64, which is what makes the
+        // blob one token that survives a log line; the file itself is the base64 decoded. Decoding
+        // here rather than in `open` keeps one implementation for both carriers.
         return try {
-            java.util.Base64.getDecoder().decode(opened)
+            java.util.Base64.getMimeDecoder().decode(opened.trim())
         } catch (e: IllegalArgumentException) {
-            // `open` answers a sentence when it cannot open the blob, so reaching here means the
-            // plaintext was not base64 — which is impossible for a file this workflow sealed.
-            throw IllegalStateException(opened)
+            // A log's plaintext is text, not base64, and `openBytes` is never given a log. Reaching
+            // here means the bytes after the marker were not what this workflow writes.
+            throw IllegalStateException(
+                "This artifact is sealed, but what it holds is not the base64 a sealed file " +
+                    "carries. It was not produced by the step that seals one.",
+            )
         }
     }
 
