@@ -1,0 +1,157 @@
+# A watcher: build a commit once, and only when there is a new one.
+#
+# ## Why this exists
+#
+# The operator's request: "a polling loop inside a runner that monitors changes ... on new commit
+# it imports, builds, tests and exports artifacts, that you can then audit and use for next
+# iteration". The goal is that an agent working overnight can push, and find a built APK and a test
+# report waiting, without a person pressing anything.
+#
+# ## Why it is a cron rather than one long job
+#
+# The obvious design — a job that loops for six hours — has the worst failure mode of the options
+# considered. A long job holds a runner, and when it dies it takes with it any knowledge of what it
+# was doing; the "restart" is a second run that has to rediscover the state. A cron is stateless per
+# tick: each run asks "what is the newest commit, and have I built it?", which is answerable in one
+# API call. It also cannot stop silently — a cron that fails is visible in the Actions list, while a
+# dead loop looks like a quiet repository.
+#
+# ## The hazard this file was written around
+#
+# **A `workflow_dispatch` on the same ref CANCELS an in-progress push run.** Measured on 2026-11-05:
+# dispatch 42116224461 cancelled 42116103750, which was the run for the commit being pushed. The
+# build workflow has `concurrency: group: <workflow>-<ref>` with `cancel-in-progress: true`, and the
+# group keys on workflow + ref, not on the event.
+#
+# So this workflow has **its own concurrency group**, and it does not share one with the build. The
+# dispatch it makes still lands in the build's group — that is unavoidable and correct, because two
+# builds of the same ref genuinely should not run at once — but this watcher will not cancel a build
+# that a push started, because it only dispatches when the commit is one the build has not seen.
+#
+# ## What it costs
+#
+# An unchanged tick is one API call and a job that exits in seconds. That is the whole design: the
+# newest-commit check happens **before** anything expensive exists. Measured baseline for the
+# alternative (dispatch and let the build decide) was a full pipeline — two test shards, a release
+# build and Deep checks — about four minutes of wall clock, per tick.
+name: Watch
+
+on:
+  schedule:
+    # **Every ten minutes, not five.** Five is GitHub's minimum, and the minimum interval is where
+    # the scheduler is most congested: a ten-minute tick that actually fires beats a five-minute one
+    # that arrives at eleven.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+# **Its own group.** See "The hazard" above: sharing the build's group would let a tick cancel a
+# real build. A watcher tick that overlaps another tick is pointless, so cancelling *itself* is fine.
+concurrency:
+  group: watch-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write # to dispatch the build
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Is there anything to build? One API call, and the job stops if not.
+  # ---------------------------------------------------------------------------
+  newest:
+    name: Is there a new commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      fresh: ${{ steps.check.outputs.fresh }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Compare the newest commit against the last one built
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The branch to watch. `development` is where work lands; `main` is a release, and a
+          # release is a decision rather than something to discover on a timer.
+          BRANCH=development
+
+          # **The newest commit that has a successful build.** Read from the workflow runs rather
+          # than from a state file: a state file would have to be committed (which touches the
+          # repository and keeps the 60-day inactivity rule from firing, but also puts the
+          # watcher's bookkeeping in the person's project), and it can be wrong — a run that was
+          # cancelled never built anything, so recording "started" would skip that commit for ever.
+          #
+          # A *successful* run is the only honest record of "this commit has been built".
+          built=$(gh run list \
+            --repo "$REPO" \
+            --workflow build-and-release.yml \
+            --branch "$BRANCH" \
+            --status success \
+            --limit 1 \
+            --json headSha \
+            --jq '.[0].headSha // ""')
+
+          newest=$(gh api "repos/$REPO/commits/$BRANCH" --jq '.sha')
+
+          echo "newest: $newest"
+          echo "last built: ${built:-<none>}"
+
+          if [ "$newest" = "$built" ]; then
+            echo "Nothing new — the newest commit is already built. One API call, no pipeline."
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          else
+            # **A run already going for this commit is not a reason to start another.** The
+            # in-progress case is the one a watcher would double-build on: the push that made the
+            # commit also started a build, and this tick fires two minutes later.
+            going=$(gh run list \
+              --repo "$REPO" \
+              --workflow build-and-release.yml \
+              --branch "$BRANCH" \
+              --status in_progress \
+              --limit 10 \
+              --json headSha \
+              --jq "[.[] | select(.headSha == \"$newest\")] | length")
+            if [ "$going" != "0" ]; then
+              echo "A build for $newest is already running — leaving it alone."
+              echo "fresh=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "fresh=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "sha=$newest" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Build it. Only runs when the job above said there is something to build.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build the new commit
+    needs: newest
+    if: needs.newest.outputs.fresh == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Start the build for that commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.newest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # **Dispatched on the branch, not on the sha.** `gh workflow run --ref` takes a branch or
+          # tag, not a commit, so the ref is the branch the watcher read. The build then checks out
+          # that branch's head — which is the commit the check just named, unless somebody pushed in
+          # the seconds between. That race is harmless: the newer commit gets built, and the next
+          # tick sees it as built.
+          #
+          # `version_name` is required by the build workflow, and on a dispatch it would otherwise
+          # become a release. `0.0-watch` is deliberately not a version a person would publish: the
+          # build's own step reads `CHOSEN_VERSION` and, for a development branch, uses the run
+          # number instead — this value only has to be present and obviously not a release.
+          gh workflow run build-and-release.yml \
+            --repo "$REPO" \
+            --ref development \
+            -f version_name=0.0-watch \
+            -f dev_build=false
+          echo "Started a build for $SHA."

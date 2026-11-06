@@ -28,7 +28,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-WORKFLOW = Path(".github/workflows/build-and-release.yml")
+WORKFLOW_DIR = Path(".github/workflows")
 
 # A job key sits at two spaces; the `on:` block's keys sit at the same depth, so
 # everything is scanned after `jobs:` rather than guessing from indentation.
@@ -124,19 +124,16 @@ def check_shell(where: str, line: int, shell: str) -> None:
         fail(f"{where}:{line}", "shell does not parse — " + (detail[0] if detail else "no reason given"))
 
 
-def main() -> int:
-    if not WORKFLOW.exists():
-        print(f"  no workflow at {WORKFLOW}", file=sys.stderr)
-        return 1
-
-    text = WORKFLOW.read_text()
+def check_one(workflow: Path) -> None:
+    """Every check, applied to one workflow file."""
+    text = workflow.read_text()
     lines = text.splitlines()
-    where = str(WORKFLOW)
+    where = str(workflow)
     found = jobs(lines)
 
     if not found:
         fail(where, "no jobs were found at all")
-        return report()
+        return
 
     # needs: must name a job that exists. A dangling one is refused by GitHub for
     # the whole file, so the run does not even start.
@@ -177,6 +174,18 @@ def main() -> int:
         for line, shell in run_blocks(lines, begin, end):
             check_shell(f"{where} (job {name})", line, shell)
 
+
+def main() -> int:
+    # **Every workflow, not one named file.** This checked a hardcoded path while its own docstring
+    # said it checked `.github/workflows/` — so a second workflow was reported clean without being
+    # read at all, which is the silent-pass shape this file exists to catch. Found when `watch.yml`
+    # was added and passed a check that had never opened it.
+    workflows = sorted(WORKFLOW_DIR.glob("*.yml"))
+    if not workflows:
+        print(f"  no workflows in {WORKFLOW_DIR}", file=sys.stderr)
+        return 1
+    for workflow in workflows:
+        check_one(workflow)
     return report()
 
 
