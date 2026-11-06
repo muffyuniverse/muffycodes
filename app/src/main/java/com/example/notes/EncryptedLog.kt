@@ -191,6 +191,49 @@ object EncryptedLog {
     }
 
     /**
+     * The bytes of a sealed file, or the reason there are none.
+     *
+     * **A sealed file and a sealed log are the same bytes** — marker, `Salted__`, salt, ciphertext —
+     * so the format, the derivation and every refusal are shared. What differs is only the carrier: a
+     * log is text with the marker on a line, and an artifact is a byte array whose first bytes are the
+     * marker. One reader, two carriers, because two implementations of "open this" would drift in the
+     * ways that are hardest to notice.
+     *
+     * Returns the plaintext, or throws with a sentence a person can act on. Throwing rather than
+     * returning a `Result` keeps the caller's error handling in one shape — the caller already has a
+     * `refusal(...)` path for every other way an artifact can fail.
+     */
+    fun openBytes(sealed: ByteArray, key: String?): ByteArray {
+        val marker = MARKER.toByteArray(Charsets.US_ASCII)
+        if (sealed.size < marker.size || !sealed.copyOfRange(0, marker.size).contentEquals(marker)) {
+            // **Not sealed is not a failure.** An artifact this app made before the seal existed, or
+            // one a different workflow uploaded, is returned as it arrived.
+            return sealed
+        }
+        if (key.isNullOrBlank()) {
+            throw IllegalStateException(
+                "This artifact is sealed, and the app has no key for it. The key is the one made " +
+                    "when this project's CI was set up.",
+            )
+        }
+        // The blob is base64 text after the marker, and the workflow writes a note file beside it, so
+        // only the first line of the remainder is the ciphertext.
+        val body = String(sealed, marker.size, sealed.size - marker.size, Charsets.US_ASCII)
+        val blobLine = body.lineSequence().map { it.trim() }.firstOrNull { looksLikeBlob(it) }
+            ?: throw IllegalStateException(
+                "This artifact says it is sealed but carries no ciphertext after the marker.",
+            )
+        val opened = open(blobLine, key)
+        return try {
+            java.util.Base64.getDecoder().decode(opened)
+        } catch (e: IllegalArgumentException) {
+            // `open` answers a sentence when it cannot open the blob, so reaching here means the
+            // plaintext was not base64 — which is impossible for a file this workflow sealed.
+            throw IllegalStateException(opened)
+        }
+    }
+
+    /**
      * A fresh 32-byte key, as the text the workflow will hold.
      *
      * Base64 rather than hex or raw bytes, because the value has to survive being put in a secret,

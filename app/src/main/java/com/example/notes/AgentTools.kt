@@ -3295,9 +3295,35 @@ class AgentTools(
         // the file the agent fetches have the same name.
         val name = Release.artifactName(one.name).ifBlank { "artifact-${one.id}" }
         val file = File(dir, name + ".zip")
+
+        // **The bytes are opened before they are filed.** A sealed artifact arrives as a zip holding
+        // `name.zip.enc` and a note; what a person or an agent wants is the zip inside it. Sealing is
+        // what makes the artifact safe to upload to a public repository at all — the JUnit XML carries
+        // the assertion text in plain, measured on a probe run — so this is the step that turns an
+        // unreadable upload back into the report it was.
+        val opened = try {
+            val key = credentials?.secret(EncryptedLog.KEY_NAME)
+            java.util.zip.ZipInputStream(data.inputStream()).use { zip ->
+                var found: ByteArray? = null
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (!entry.name.endsWith(".enc")) continue
+                    found = zip.readBytes()
+                }
+                found?.let { EncryptedLog.openBytes(it, key) } ?: data
+            }
+        } catch (e: Throwable) {
+            // **A refusal, not a silent pass-through.** Filing ciphertext under a `.zip` name would
+            // hand the caller a file that opens as nothing, and the answer would claim success.
+            return refusal(
+                "The artifact \"$wanted\" was downloaded but could not be opened: " +
+                    (e.message ?: Secrets.explain(e, "not opened")),
+            )
+        }
+
         try {
             file.parentFile?.mkdirs()
-            file.writeBytes(data)
+            file.writeBytes(opened)
         } catch (e: Throwable) {
             return refusal("The artifact could not be filed: " + Secrets.explain(e, "not written"))
         }
@@ -3320,7 +3346,10 @@ class AgentTools(
                 if (inside.size == 40) "\n- … and possibly more" else ""
         }
         return success(
-            "Fetched \"${one.name}\" (${data.size} bytes) from run $id into $rel." + listing,
+            // **The size of what was filed, not of what arrived.** The downloaded bytes are the sealed
+            // wrapper; reporting their size would tell the caller the report is 1.4 KB when the report
+            // inside it is 40 KB, and that number is what a model uses to decide whether to read it.
+            "Fetched \"${one.name}\" (${opened.size} bytes) from run $id into $rel." + listing,
         )
     }
 

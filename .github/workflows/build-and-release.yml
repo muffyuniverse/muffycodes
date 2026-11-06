@@ -97,6 +97,12 @@ jobs:
   # -------------------------------------------------------------------------
   test:
     name: Test
+    # **The environment is what makes the key reachable.** GitHub's rule is that environment
+    # secrets are only available to jobs that reference the environment, so without this line the
+    # secret is invisible and the seals would run under an empty password — every log and every
+    # report unreadable, with nothing reporting a problem. `tools/check-workflow.py` refuses that
+    # shape, and refused this very edit the first time.
+    environment: ci
     # The image is named, not floated. `ubuntu-latest` has already moved under
     # this pipeline once, and a run that fails because a runner's toolchain
     # changed is a mystery with no commit behind it. Naming it turns that into a
@@ -540,12 +546,35 @@ jobs:
         # deciding the same budget would disagree, and the quieter one would win.
         run: python3 tools/build-times.py --results . --top 8 --label test --no-budget
 
+      # **Sealed before it leaves the runner.** A screenshot of the app shows whatever the app was
+      # showing, which for a private project is the project's contents. An artifact's *bytes* need a
+      # logged-in account to fetch — measured, 401 anonymous and 200 with a token — but "anybody with
+      # a GitHub account" is not a boundary worth the name, so the bytes are sealed as well.
+      - name: Seal the scenarios
+        if: hashFiles('app/build/outputs/scenarios/**/README.md') != ''
+        env:
+          MUFFY_LOG_KEY: ${{ secrets.MUFFY_LOG_KEY }}
+        run: |
+          mkdir -p /tmp/sealed
+          # **`zip`, not `tar`.** The app has to open this, and `java.util.zip` is on every Android
+          # version while a TAR reader is not — writing one to avoid a format the phone already reads
+          # would be work with no benefit.
+          (cd app/build/outputs && zip -qr /tmp/sealed/scenarios.zip scenarios)
+          printf 'MUFFYLOG1 ' > /tmp/sealed/scenarios.zip.enc
+          openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -pass env:MUFFY_LOG_KEY -base64 -A \
+              -in /tmp/sealed/scenarios.zip >> /tmp/sealed/scenarios.zip.enc
+          # **A note, because a sealed file is unreadable to a person too.** Without it, "this
+          # artifact is sealed" and "this artifact is empty" look exactly the same to whoever
+          # downloads it, and the second is a bug.
+          printf 'This artifact is sealed. The app opens it; a person cannot, and that is the point.\n' \
+              > /tmp/sealed/scenarios.zip.enc.txt
+
       - name: Put the scenarios in the run
         if: hashFiles('app/build/outputs/scenarios/**/README.md') != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scenarios
-          path: app/build/outputs/scenarios/**
+          path: /tmp/sealed/scenarios.zip.enc*
           if-no-files-found: error
           retention-days: 7
 
@@ -556,14 +585,29 @@ jobs:
       #
       # It also carries how long each test class took, which is the honest basis
       # for deciding whether splitting the suite would ever be worth its cost.
+      # **Sealed, because this is the leak the log encryption does not cover.** Measured on a probe
+      # run: the JUnit XML carries the assertion message in plain text — expected value, actual
+      # value, the stack trace and every `file:line` — so sealing the log while uploading the report
+      # would achieve nothing at all.
+      - name: Seal the test report
+        if: failure()
+        env:
+          MUFFY_LOG_KEY: ${{ secrets.MUFFY_LOG_KEY }}
+        run: |
+          mkdir -p /tmp/sealed
+          (cd app/build && zip -qr /tmp/sealed/test-report.zip reports/tests test-results) || true
+          printf 'MUFFYLOG1 ' > /tmp/sealed/test-report.zip.enc
+          openssl enc -aes-256-cbc -pbkdf2 -iter 10000 -pass env:MUFFY_LOG_KEY -base64 -A \
+              -in /tmp/sealed/test-report.zip >> /tmp/sealed/test-report.zip.enc
+          printf 'This artifact is sealed. The app opens it; a person cannot, and that is the point.\n' \
+              > /tmp/sealed/test-report.zip.enc.txt
+
       - name: Keep the test report when something failed
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-report
-          path: |
-            app/build/reports/tests/**
-            app/build/test-results/**
+          path: /tmp/sealed/test-report.zip.enc*
           if-no-files-found: warn
           retention-days: 7
 

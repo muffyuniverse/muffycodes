@@ -280,6 +280,86 @@ class CiToolsTest {
         assertTrue("it names the missing key: $filed", filed.contains("no key"))
     }
 
+    /** An artifact on the fake GitHub, filed the way the real one serves it: a name and bytes. */
+    private fun anArtifact(run: Long, name: String, bytes: ByteArray) {
+        val dir = File(File(github.repoDir(repo), "ci"), "$run/artifacts")
+        dir.mkdirs()
+        File(dir, name).writeBytes(bytes)
+    }
+
+    /** A zip holding one `.enc` entry, which is what a sealed artifact arrives as. */
+    private fun sealedArtifact(inner: String, sealedBytes: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(java.util.zip.ZipEntry(inner + ".enc"))
+            zip.write(sealedBytes)
+            zip.closeEntry()
+            zip.putNextEntry(java.util.zip.ZipEntry(inner + ".enc.txt"))
+            zip.write("This artifact is sealed.\n".toByteArray())
+            zip.closeEntry()
+        }
+        return out.toByteArray()
+    }
+
+    @Test
+    fun `a sealed artifact is opened before it is filed`() {
+        // **The leak the log encryption does not cover.** The JUnit XML carries the assertion text
+        // in plain — measured on a probe run — so the report is sealed before upload. This is the
+        // step that turns that back into a report, and without it the tool would file ciphertext
+        // under a `.zip` name and report success.
+        secrets[EncryptedLog.KEY_NAME] = KEY
+        val inner = "the report's own text, which a public repository must not carry"
+        val sealedBytes = (EncryptedLog.MARKER + sealed(inner)).toByteArray(Charsets.US_ASCII)
+        aRun(100, "failure", "Test (0)" to "ok")
+        anArtifact(100, "test-report", sealedArtifact("test-report.zip", sealedBytes))
+
+        val body = call("artifact", """{"run":100,"name":"test-report"}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        val filed = File(ws.projectDir(repo), "agent/ci/artifacts/test-report.zip")
+        assertTrue("the file is there: ${filed.absolutePath}", filed.isFile)
+        assertEquals(
+            "and what was filed is the plaintext, not the wrapper",
+            inner,
+            filed.readText(),
+        )
+    }
+
+    @Test
+    fun `an artifact that was never sealed is filed as it arrived`() {
+        // **Every artifact this app made before the seal existed**, and every artifact from a
+        // workflow that does not seal. Passing those through unchanged is what keeps them readable.
+        aRun(100, "failure", "Test (0)" to "ok")
+        anArtifact(100, "app-release", "ordinary zip bytes".toByteArray())
+
+        val body = call("artifact", """{"run":100,"name":"app-release"}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals(
+            "the bytes are exactly what arrived",
+            "ordinary zip bytes",
+            File(ws.projectDir(repo), "agent/ci/artifacts/app-release.zip").readText(),
+        )
+    }
+
+    @Test
+    fun `a sealed artifact with no key is refused rather than filed as ciphertext`() {
+        // **The app's own gap must not read as a corrupt download.** Filing the wrapper and calling
+        // it success would hand the caller a file that opens as nothing.
+        val sealedBytes = (EncryptedLog.MARKER + sealed("anything")).toByteArray(Charsets.US_ASCII)
+        aRun(100, "failure", "Test (0)" to "ok")
+        anArtifact(100, "test-report", sealedArtifact("test-report.zip", sealedBytes))
+
+        val body = call("artifact", """{"run":100,"name":"test-report"}""")
+
+        assertTrue("it is a refusal: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it names the missing key: $body", body.contains("no key"))
+        assertFalse(
+            "and nothing was filed",
+            File(ws.projectDir(repo), "agent/ci/artifacts/test-report.zip").exists(),
+        )
+    }
+
     @Test
     fun `grep finds the failure in a log, with line numbers`() {
         val lines = (1..50).joinToString("\n") { "line $it" } + "\nFAILED: something broke"
