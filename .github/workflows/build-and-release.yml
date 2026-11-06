@@ -412,9 +412,9 @@ jobs:
           # It used to name the event itself, and that was one value too many: the flag below is
           # `-Pmuffy.shots` for everything that is not a pull request, so a `push` and a
           # `workflow_dispatch` build the same configuration-cache entry — and with the raw event in
-          # the key they could never share it. Measured against the watcher that dispatches: every
-          # dispatched build started cold while the push build for the same commit had a warm entry
-          # sitting there unused. Two values, because there are two kinds of build.
+          # the key they could never share it. Measured: a dispatched build started cold while the
+          # push build for the same commit had a warm entry sitting there unused. Two values, because
+          # there are two kinds of build.
           key: config-cache-v3-tests-${{ matrix.shard }}-${{ runner.os }}-${{ github.event_name == 'pull_request' && 'pr' || 'build' }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run the tests
         if: steps.shard.outputs.nothing == 'no'

@@ -214,8 +214,12 @@ def check_one(workflow: Path) -> None:
 def main() -> int:
     # **Every workflow, not one named file.** This checked a hardcoded path while its own docstring
     # said it checked `.github/workflows/` — so a second workflow was reported clean without being
-    # read at all, which is the silent-pass shape this file exists to catch. Found when `watch.yml`
-    # was added and passed a check that had never opened it.
+    # read at all, which is the silent-pass shape this file exists to catch. It was found when a
+    # second workflow was added and passed a check that had never opened it.
+    #
+    # **The glob stays, even though there is one workflow now.** The bug was the hardcoded name, not
+    # the number of files; a version that named the only file it expected would come back the moment
+    # somebody added a second one.
     workflows = sorted(WORKFLOW_DIR.glob("*.yml"))
     if not workflows:
         print(f"  no workflows in {WORKFLOW_DIR}", file=sys.stderr)
