@@ -86,10 +86,14 @@ object EncryptedLog {
         // because this workflow does not own the processes that write them. Dropping them would hide
         // the reason a build never got as far as printing a blob.
         val body = trimmed.removePrefix(MARKER)
-        val blobLine = body.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
-        val around = body.lineSequence().drop(1)
-            .filter { it.isNotBlank() && !looksLikeBlob(it) }
-            .joinToString("\n")
+        val lines = body.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+
+        // **The blob is found by its shape, not by its position.** The runner writes its own lines
+        // and this workflow does not control the order they arrive in, so "the first non-blank line"
+        // would mistake a runner message for the blob and then hand a sentence to the decoder. A blob
+        // is one long unbroken run of base64; a runner line has spaces in it.
+        val blobLine = lines.firstOrNull { looksLikeBlob(it) }.orEmpty()
+        val around = lines.filter { !looksLikeBlob(it) }.joinToString("\n")
 
         val opened = open(blobLine, key)
         return if (around.isEmpty()) opened else opened + "\n" + around
@@ -156,13 +160,20 @@ object EncryptedLog {
         }
     }
 
-    /** PBKDF2-HMAC-SHA256, 48 bytes: 32 for the key, 16 for the IV. */
+    /**
+     * PBKDF2-HMAC-SHA256, 48 bytes: 32 for the key, 16 for the IV.
+     *
+     * **`PBEKeySpec`'s last argument is a length in BITS, not bytes.** Passing `KEY + IV` asked for
+     * 48 bits — six bytes — and every derivation then failed with an index out of range rather than
+     * with anything that mentioned a length. `openssl -pbkdf2` derives 48 *bytes*, so the number here
+     * must be `(KEY + IV) * 8`.
+     */
     private fun derive(key: String, salt: ByteArray): ByteArray {
         val spec = javax.crypto.spec.PBEKeySpec(
             key.toCharArray(),
             salt,
             ITERATIONS,
-            KEY + IV,
+            (KEY + IV) * 8,
         )
         return javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             .generateSecret(spec)

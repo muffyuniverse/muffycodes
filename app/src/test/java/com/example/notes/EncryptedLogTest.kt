@@ -31,7 +31,7 @@ class EncryptedLogTest {
     /** Encrypt exactly as `openssl enc -aes-256-cbc -pbkdf2 -base64 -A` does. */
     private fun seal(text: String, key: String, salt: ByteArray = ByteArray(8) { (it + 1).toByte() }): String {
         val material = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            .generateSecret(PBEKeySpec(key.toCharArray(), salt, 10_000, 48)).encoded
+            .generateSecret(PBEKeySpec(key.toCharArray(), salt, 10_000, 48 * 8)).encoded
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(
             Cipher.ENCRYPT_MODE,
@@ -65,7 +65,7 @@ class EncryptedLogTest {
             blob.copyOfRange(0, 8).contentEquals("Salted__".toByteArray(Charsets.US_ASCII)),
         )
         val material = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            .generateSecret(PBEKeySpec(key.toCharArray(), salt, 10_000, 48)).encoded
+            .generateSecret(PBEKeySpec(key.toCharArray(), salt, 10_000, 48 * 8)).encoded
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(
             Cipher.DECRYPT_MODE,
@@ -140,6 +140,21 @@ class EncryptedLogTest {
         val said = EncryptedLog.read(text, key)
         assertTrue("the plaintext is there", said.contains("the build's own output"))
         assertTrue("and so is the runner's line", said.contains("exit code 1"))
+    }
+
+    @Test
+    fun `a runner line before the blob does not become the blob`() {
+        // **The failure this caught in CI, kept as a test.** The blob used to be found by position —
+        // the first non-blank line after the marker — and the runner writes its own lines in an order
+        // this workflow does not control. A message arriving first was handed to the decoder as if it
+        // were ciphertext. It is found by shape now.
+        val text = EncryptedLog.MARKER + "\n" +
+            "Runner version 2.320.0 starting\n" +
+            seal("the build's own output", key) + "\n"
+
+        val said = EncryptedLog.read(text, key)
+        assertTrue("the plaintext is read: $said", said.contains("the build's own output"))
+        assertTrue("and the runner's line is kept: $said", said.contains("Runner version"))
     }
 
     @Test

@@ -124,6 +124,40 @@ def check_shell(where: str, line: int, shell: str) -> None:
         fail(f"{where}:{line}", "shell does not parse — " + (detail[0] if detail else "no reason given"))
 
 
+# The step that encrypts the build's output, and the job it must be in.
+ENCRYPTS = re.compile(r"openssl\s+enc\b")
+LOG_KEY = re.compile(r"\bMUFFY_LOG_KEY\b")
+ENVIRONMENT = re.compile(r"^\s*environment\s*:")
+
+
+def check_encrypted_log(where: str, job: str, body: list[str]) -> None:
+    """A job that encrypts its log must be able to read the key that opens it.
+
+    **The failure this catches is silent in both directions.** A job that reads
+    `secrets.MUFFY_LOG_KEY` without naming an environment gets an empty value —
+    GitHub's rule is that environment secrets are only available to jobs that
+    reference the environment — and the encryption step then encrypts under an
+    empty password. The blob looks fine. Nobody can read it, including the person
+    whose build failed, and nothing reports a problem.
+
+    So: if a job encrypts, it must both name an environment and use the key.
+    """
+    if not any(ENCRYPTS.search(line) for line in body):
+        return
+    if not any(ENVIRONMENT.match(line) for line in body):
+        fail(
+            where,
+            f"job {job!r} encrypts its log but names no environment, so the key secret "
+            f"is unreachable and every run would be unreadable",
+        )
+    if not any(LOG_KEY.search(line) for line in body):
+        fail(
+            where,
+            f"job {job!r} encrypts its log but never reads MUFFY_LOG_KEY, so it would "
+            f"encrypt under an empty password",
+        )
+
+
 def check_one(workflow: Path) -> None:
     """Every check, applied to one workflow file."""
     text = workflow.read_text()
@@ -173,6 +207,8 @@ def check_one(workflow: Path) -> None:
     for name, (begin, end) in found.items():
         for line, shell in run_blocks(lines, begin, end):
             check_shell(f"{where} (job {name})", line, shell)
+
+        check_encrypted_log(f"{where}:{begin + 1}", name, lines[begin:end])
 
 
 def main() -> int:
