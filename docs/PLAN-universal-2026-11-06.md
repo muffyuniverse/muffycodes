@@ -662,6 +662,30 @@ fires after the phone has buffered two gigabytes is not a cap.
 **Parts 1 and 2 are a morning's work and each fixes something that is wrong right now.** That is deliberate:
 the plan starts with the two things that are bugs, not with the two things that are features.
 
+### 12.1 What was built, and what reality contradicted
+
+**Parts 1, 2, 3 and 3b are done and green.** Written down here because the plan is a record of what happened
+rather than of what was intended.
+
+| # | Built | The plan was wrong about |
+|---|---|---|
+| **1** | `f46ab74` — the refresh hook | Nothing. ~30 lines as estimated. |
+| **2** | `56a030c`, `d951ac8` — the host guard | **The proposed fix was wrong.** Widening `isGitHubHost` to "a host we hold a token for" would send a GitHub token to `gitlab.com`, because `tokenKey(login)` is one token per login and the login comes from GitHub's `/user`. The guard was right; its silence was the bug. **A real leak was found while checking:** `pushNow` had no guard at all and attached the key to whatever `origin` said. |
+| **3** | `78b45a6`, `8bd4694`, `cc49c00` — `Fetcher.request` + `http` | The size estimate held (~180 lines + ~20 tests). Two Kotlin facts cost a round each: the schema is built **from the example**, so an example naming three of five arguments leaves two the model cannot know about; and `AgentLog`'s constructor is private, so a test builds one with `open`. |
+| **3b** | `99ad20c`, `62a0e0f`, `2a68d33` — `secret(name, host)` + the screen | **The host binding had to be two-way**, which the plan did not anticipate: `AgentTools` reads `MUFFY_LOG_KEY` to decrypt a CI log, and that key is never sent anywhere. Special-casing the caller would have been wrong; an empty host now means "travels nowhere" and the two kinds cannot be confused in either direction. **Also found: the vault had no door at all** — `setSecret` was called by nothing outside tests. |
+
+**Three CI rounds were spent on test defects rather than product defects**, and each is worth remembering:
+
+1. `hostOf("file:///tmp/x")` answered `file` — a scheme with no authority is not a host. Every signing test
+   failed on it, because the test GitHub on disk clones from a `file:` URL.
+2. `MemoryCredentials` inherited the interface's `null` for `secretHost`, so a refusal that should have named
+   `api.github.com` said "this phone only" — the fake could not produce the sentence the test asserted.
+3. A scrollable `Column` inside an `AlertDialog` never reports idle in Robolectric, so every test that typed
+   into a field waited sixty seconds and the suite ran out of memory.
+
+**The lesson in all three:** a fake that inherits a default is a fake that agrees with nothing, and a test that
+asserts a sentence is only as good as the fake's ability to produce it.
+
 ---
 
 ## 13. Risks and open questions

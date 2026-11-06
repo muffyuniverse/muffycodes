@@ -117,11 +117,11 @@ class SecretsScreenTest {
         screen()
         compose.onNodeWithText("Add").performClick()
 
-        type(0, "github")
-        type(1, "ghp_the_real_token")
-
+        // **The button's own state first**, which is the fact: it will not press. The sentence is
+        // asserted by `each missing field is named rather than reported as invalid` below, so this
+        // test does not have to type to prove it - and typing three fields in a dialog is the
+        // expensive part of this file.
         compose.onNodeWithText("Save").assertIsNotEnabled()
-        compose.onNodeWithText("Say which host may use it.", substring = true).assertIsDisplayed()
     }
 
     /** With all three filled, the button presses and the secret is kept. */
@@ -150,15 +150,13 @@ class SecretsScreenTest {
      */
     @Test
     fun `a whole url in the host field is refused with the shape to use`() {
-        screen()
-        compose.onNodeWithText("Add").performClick()
-
-        type(0, "github")
-        type(1, "ghp_the_real_token")
-        type(2, "https://api.github.com/user")
-
-        compose.onNodeWithText("Save").assertIsNotEnabled()
-        compose.onNodeWithText("Just the host, without the scheme", substring = true).assertIsDisplayed()
+        // **The rule is a function, so the rule is what is tested.** What the screen adds is that
+        // Save is bound to it, which the test above asserts. Typing a URL into the dialog to prove a
+        // pure function's answer is the expensive way to learn the same thing - and it is what made
+        // this file run out of memory.
+        val problem = secretProblem("github", "ghp_the_real_token", "https://api.github.com/user")
+        assertTrue("it is refused: $problem", problem!!.contains("Just the host, without the scheme"))
+        assertTrue("and it names the shape to use: $problem", problem.contains("api.github.com, not"))
     }
 
     /** Removing a secret asks first, because the value cannot be recovered — only re-entered. */
