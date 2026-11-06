@@ -127,21 +127,27 @@ object Secrets {
      * chained calls separately, and a rule with two spellings is a rule that disagrees with itself
      * eventually.
      *
-     * `ssh://` is stripped as well as the two HTTP schemes, because a clone URL may be either and
-     * the host is the host. Empty when the string has no host at all — a bare path — and a caller
-     * that needs one has to handle that rather than being handed a guess.
+     * **A URL with no authority has no host, and that is not the same as having one called
+     * `file`.** `file:///tmp/x` is the case that taught this: taking the first segment after the
+     * scheme answered `file`, which reads as a hostname and is not one — and a `file:` clone, which
+     * has nowhere to send a key, was refused as though it were somebody else's server. So the
+     * scheme is removed **with its `//`**, and what follows is the authority only when it is not
+     * itself empty or a path.
+     *
+     * Empty is the answer for a bare path and for a scheme with no authority, and a caller that
+     * needs a host has to handle it rather than being handed a guess.
      */
-    fun hostOf(url: String): String =
-        stripCredentials(url)
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .removePrefix("git://")
-            .removePrefix("ssh://")
-            .substringBefore('/')
-            .substringAfterLast('@')
-            .substringBefore(':')
-            .trim()
-            .lowercase()
+    fun hostOf(url: String): String {
+        val stripped = stripCredentials(url.trim())
+        // The scheme, if there is one, and the `//` that may or may not follow it.
+        val afterScheme = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:").find(stripped)
+            ?.let { stripped.substring(it.range.last + 1) }
+            ?: stripped
+        val authority = afterScheme.removePrefix("//").substringBefore('/')
+        // **`file:///tmp` has an empty authority**, which is the case this whole branch exists for.
+        if (authority.isEmpty()) return ""
+        return authority.substringAfterLast('@').substringBefore(':').trim().lowercase()
+    }
 
     /** `scheme://userinfo@` — the user info is the part that must not survive. */
     private val URL_USER_INFO = Regex("""([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@""")

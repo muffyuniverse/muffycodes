@@ -58,11 +58,34 @@ class FetchTest {
             askedLimit = limitBytes
             return Result.success(bytes)
         }
+
+        override fun request(
+            url: String,
+            method: String,
+            headers: Map<String, String>,
+            body: ByteArray?,
+            limitBytes: Long,
+        ): Result<Fetcher.Answer> {
+            asked = url
+            askedLimit = limitBytes
+            return Result.success(Fetcher.Answer(200, emptyMap(), bytes))
+        }
     }
 
     /** A fetcher that always fails, for the refusal paths. */
     private fun failing(said: String) = object : Fetcher {
         override fun bytes(url: String, limitBytes: Long): Result<ByteArray> {
+            asked = url
+            return Result.failure(IllegalStateException(said))
+        }
+
+        override fun request(
+            url: String,
+            method: String,
+            headers: Map<String, String>,
+            body: ByteArray?,
+            limitBytes: Long,
+        ): Result<Fetcher.Answer> {
             asked = url
             return Result.failure(IllegalStateException(said))
         }

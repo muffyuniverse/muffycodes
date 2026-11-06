@@ -28,6 +28,53 @@ interface Fetcher {
      */
     fun bytes(url: String, limitBytes: Long): Result<ByteArray>
 
+    /**
+     * **One request, with the verb and the body the caller chose** — and the status, kept.
+     *
+     * [bytes] throws the status away because a download either worked or did not. An API's whole
+     * vocabulary is statuses: `201` means a thing was made, `204` means it was and there is nothing
+     * to read, `404` means the thing is not there, and `422` means the shape was wrong. A tool that
+     * reported "it worked" for all of them would teach the model to stop checking.
+     *
+     * **The same four rules [bytes] follows, because they are what makes a request safe rather than
+     * what makes a download work:**
+     *
+     * 1. the address check runs on **every redirect hop**, not just the URL the caller typed;
+     * 2. the size is counted **while reading**, because `Content-Length` is a claim;
+     * 3. the status is returned rather than thrown, so a 4xx body is a diagnostic and not an error;
+     * 4. `Accept` and `User-Agent` are always set, because an API may require them.
+     *
+     * **A redirect on anything but a GET is returned, not followed.** A `POST` redirected to a `GET`
+     * silently loses its body, and GitHub's API does exactly that when a repository is renamed. The
+     * caller is told the status and where it points, and decides.
+     */
+    fun request(
+        url: String,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        limitBytes: Long,
+    ): Result<Answer>
+
+    /**
+     * What a request came back with: **the number, the headers, and the bytes.**
+     *
+     * The headers are kept because two of them are load-bearing for an API client and neither is in
+     * the body: `Location` (where a redirect points) and the rate-limit headers, which are how a
+     * caller learns it is about to be refused before it is.
+     */
+    data class Answer(
+        val status: Int,
+        val headers: Map<String, String>,
+        val bytes: ByteArray,
+    ) {
+        /** The body as text, for a caller that is going to read it rather than file it. */
+        fun text(): String = String(bytes, Charsets.UTF_8)
+
+        /** True when the server said the request worked. */
+        val ok: Boolean get() = status in 200..299
+    }
+
     companion object {
 
         /** No fetcher, for a tool set built without one — and every test that is not about `fetch`. */
@@ -38,6 +85,18 @@ interface Fetcher {
                         "This app was not given a way to download, so nothing can be fetched.",
                     ),
                 )
+
+            override fun request(
+                url: String,
+                method: String,
+                headers: Map<String, String>,
+                body: ByteArray?,
+                limitBytes: Long,
+            ): Result<Answer> = Result.failure(
+                IllegalStateException(
+                    "This app was not given a way to reach the network, so nothing can be sent.",
+                ),
+            )
         }
 
         /**
@@ -63,6 +122,117 @@ interface Fetcher {
                 read(url, limitBytes, privateAllowed)
             } catch (e: Exception) {
                 Result.failure(IllegalStateException(Secrets.explain(e, "The download failed")))
+            }
+
+            override fun request(
+                url: String,
+                method: String,
+                headers: Map<String, String>,
+                body: ByteArray?,
+                limitBytes: Long,
+            ): Result<Answer> = try {
+                send(url, method, headers, body, limitBytes, privateAllowed)
+            } catch (e: Exception) {
+                Result.failure(IllegalStateException(Secrets.explain(e, "The request failed")))
+            }
+        }
+
+        /**
+         * One request, with [read]'s four rules and one of its own.
+         *
+         * **The address rule runs before anything is opened, on every hop.** That is the same
+         * reason [read] follows redirects by hand: the request is the harm, so a check that ran
+         * after the connection would already have reached the operator's router.
+         *
+         * **A redirect is followed only for a GET or a HEAD.** For anything with a body, a `302` to
+         * a `GET` is a request that silently became a different request — GitHub's API does exactly
+         * that on a rename — so the 3xx is returned with its `Location` and the caller decides.
+         */
+        private fun send(
+            url: String,
+            method: String,
+            headers: Map<String, String>,
+            body: ByteArray?,
+            limitBytes: Long,
+            privateAllowed: () -> Boolean,
+        ): Result<Answer> {
+            val verb = method.trim().uppercase().ifEmpty { "GET" }
+            var target = url.trim()
+            var hops = 0
+            while (true) {
+                Addresses.problem(target, privateAllowed())?.let {
+                    return Result.failure(IllegalStateException(it))
+                }
+                var connection: HttpURLConnection? = null
+                try {
+                    connection = (URL(target).openConnection() as HttpURLConnection).apply {
+                        requestMethod = verb
+                        instanceFollowRedirects = false
+                        connectTimeout = 20_000
+                        readTimeout = 60_000
+                        // **Set first, so a caller's own header wins.** A caller that sends
+                        // `Accept: application/vnd.github+json` must get it, and a caller that
+                        // sends none still gets something an API will accept.
+                        setRequestProperty("Accept", "*/*")
+                        setRequestProperty("User-Agent", "Muffycodes")
+                        for ((name, value) in headers) setRequestProperty(name, value)
+                        if (body != null) {
+                            doOutput = true
+                            setFixedLengthStreamingMode(body.size)
+                        }
+                    }
+                    if (body != null) connection.outputStream.use { it.write(body) }
+                    val code = connection.responseCode
+                    val answer = Answer(
+                        status = code,
+                        headers = connection.headerFields
+                            .filterKeys { it != null }
+                            .mapValues { (_, values) -> values.firstOrNull().orEmpty() },
+                        bytes = ByteArray(0),
+                    )
+                    // **A redirect is followed only when repeating it is free.** A GET or a HEAD has
+                    // no body to lose, so the hop is taken and checked. Anything else is answered
+                    // as it stands: a `POST` that became a `GET` is not the request the caller made.
+                    if (code in 300..399 && (verb == "GET" || verb == "HEAD")) {
+                        val to = connection.getHeaderField("Location")
+                            ?: return Result.failure(
+                                IllegalStateException("The server redirected without saying where."),
+                            )
+                        if (++hops > 5) {
+                            return Result.failure(
+                                IllegalStateException("Too many redirects — five is the limit."),
+                            )
+                        }
+                        target = URL(URL(target), to).toString()
+                        continue
+                    }
+                    // **The body, capped as it arrives.** Read for every status, because an error
+                    // body is the diagnostic — a `422` from an API says which field was wrong, and
+                    // dropping it would leave the caller with a number and no reason.
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val out = java.io.ByteArrayOutputStream()
+                    if (stream != null) {
+                        stream.use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                val got = input.read(buffer)
+                                if (got < 0) break
+                                if (out.size().toLong() + got > limitBytes) {
+                                    return Result.failure(
+                                        IllegalStateException(
+                                            "The answer passed the ${size(limitBytes)} limit and was " +
+                                                "stopped. Nothing was kept.",
+                                        ),
+                                    )
+                                }
+                                out.write(buffer, 0, got)
+                            }
+                        }
+                    }
+                    return Result.success(answer.copy(bytes = out.toByteArray()))
+                } finally {
+                    connection?.disconnect()
+                }
             }
         }
 

