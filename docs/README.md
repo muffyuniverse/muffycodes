@@ -28,6 +28,7 @@ in the app. **None is a work list.** Each now says so at the top, and each item 
 | `PLAN-streaming.md` | Streamed replies | **Complete.** Parser, wiring, timeouts, live footer, `exclude: false`. |
 | `PLAN-bug-reports-v149*.md` | The v1.4.9 report rounds | Historical, kept for the reasoning. |
 | `PLAN-remaining-2026-10-29.md` | What was left on that day | Historical. |
+| `PLAN-universal-2026-11-06.md` | **`http`, git and the layers that stay** — what makes the app portable to any git and any OpenAI-compatible provider, what is deleted, what is kept and why, and the two live bugs found on the way. | **Not started.** Parts 1–2 are a live bug each; parts 3–6 are the feature work. |
 
 ## The design notes
 
