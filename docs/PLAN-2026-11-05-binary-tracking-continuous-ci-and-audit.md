@@ -247,6 +247,29 @@ design that "runs the workflow and lets it decide" costs a full pipeline per tic
 newest-commit check must happen before the build jobs exist**, which is what §3.4's `newest` job is
 for: a tick with nothing new must cost one API call and one short job, not a pipeline.
 
+### 3.3c Measured — the cron cannot live where the work is
+
+**GitHub's own documentation, verbatim: "Scheduled workflows will only run on the default branch."**
+This repository's default branch is `main`; the work happens on `development`. So a `watch.yml`
+committed to `development` **never fires on its schedule** — the file is invisible to the scheduler,
+and `gh workflow run watch.yml` answers `404 Not Found` for the same reason: it resolves workflows
+on the default branch.
+
+This was found by trying it, not by reading: the file was committed and pushed correctly
+(`git ls-tree origin/development` shows it), and the dispatch still 404'd.
+
+**The options, and what each costs:**
+
+| Option | How | Cost |
+|---|---|---|
+| **A. Watch from `main`** | Put `watch.yml` on `main`, have it poll `development` and dispatch the build on `development` | `main` gains one file that is not a release. The build workflow already triggers on `development` pushes, so the dispatch target is unchanged |
+| B. Make `development` the default | One repository setting | Changes what a clone gets, and what the "default" means for every other tool — too large a change for a watcher |
+| C. Poll from outside | A machine somewhere runs `gh workflow run` | Needs a machine that is always on, which this project does not have |
+
+**Recommendation: A.** It is one file on `main` whose job is to look at another branch — which is
+exactly what a watcher is. The plan's earlier assumption ("put it next to the work") was wrong and
+is recorded here rather than quietly corrected.
+
 ### 3.4 What to build
 
 **Phase 1 — measure the baseline (no workflow change).**
