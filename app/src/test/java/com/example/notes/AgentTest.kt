@@ -1168,7 +1168,7 @@ class AgentTest {
     }
 
     @Test
-    fun `lines true answers every matching line with its number, whole`() {
+    fun `numbers true answers every matching line with its line number, whole`() {
         // **The operator asked for this one directly:** *"read should have lines flag that shows
         // line numbers of grepped lines"*. The default answer is the matched text, because a model
         // that pasted `12: …` into `write` wrote the number into the file — but the opposite
@@ -1180,11 +1180,11 @@ class AgentTest {
         val long = "padding " + "x".repeat(300) + " TODO"
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\n$long\nthird TODO\n")
 
-        val body = tool("read", """{"path":"milk.txt","grep":"TODO","lines":true}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"TODO","numbers":true}""")
 
         assertEquals(
             "both lines, both numbers, neither cut short",
-            "0\n2: $long\n4: third TODO",
+            "0\n2: $long\n3: third TODO",
             body,
         )
     }
@@ -1203,8 +1203,8 @@ class AgentTest {
             "id\nidea\nuser_id\nid_x\nthe id here\n",
         )
 
-        val plain = tool("read", """{"path":"milk.txt","grep":"id","lines":true}""")
-        val worded = tool("read", """{"path":"milk.txt","grep":"id","lines":true,"word":true}""")
+        val plain = tool("read", """{"path":"milk.txt","grep":"id","numbers":true}""")
+        val worded = tool("read", """{"path":"milk.txt","grep":"id","numbers":true,"word":true}""")
 
         assertTrue("without word, every line has it: $plain", plain.contains("2: idea"))
         assertTrue("and the underscore lines too: $plain", plain.contains("3: user_id"))
@@ -1222,7 +1222,7 @@ class AgentTest {
         // result that is right about one half of the pattern and silent about the other.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "cat\ndog\ndogma\ncatalog\n")
 
-        val body = tool("read", """{"path":"milk.txt","grep":"cat|dog","lines":true,"word":true}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"cat|dog","numbers":true,"word":true}""")
 
         assertEquals("both words, neither fragment", "0\n1: cat\n2: dog", body)
     }

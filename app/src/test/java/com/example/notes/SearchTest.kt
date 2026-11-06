@@ -171,11 +171,21 @@ class SearchTest {
         // **One line in the message, because CI truncates at a newline.** An assertion that fails
         // with half its evidence missing is one that costs a second CI run to understand.
         val said = answer.replace("\n", " | ")
-        assertTrue("the many file is named once: $said", answer.split("many.txt").size == 2)
-        // **`(+39 more)`, with the plus.** The count is how many *further* matches there are, so the
-        // sign is part of the sentence rather than decoration — and writing the assertion without it
-        // is how this failed once while the answer was right in front of it.
-        assertTrue("and says there is more in it: $said", answer.contains("(+39 more)"))
+        // **One heading per file, not one per match.** The path appears in each of its own rows,
+        // so counting occurrences would be counting lines; what matters is that the file is not
+        // listed as a second answer beside itself.
+        assertTrue("the many file is one answer: $said", answer.split("many.txt").size == 22)
+        // **Twenty rows, then a count of what was left.** The old answer was one row and
+        // `(+39 more)` — a number a model could not act on, which made it search again to find
+        // places the answer had already counted. Twenty is `HITS_PER_FILE`, and the remainder is
+        // still counted so a model knows whether it is looking at a file with twenty matches or two
+        // thousand.
+        assertTrue("twenty rows: $said", answer.contains("many.txt:20: milk 20"))
+        assertFalse("and no twenty-first: $said", answer.contains("many.txt:21:"))
+        assertTrue(
+            "and says how many were left: $said",
+            answer.contains("(+20 more lines match"),
+        )
         assertTrue("and the second file is not crowded out: $said", answer.contains("once.txt"))
     }
 

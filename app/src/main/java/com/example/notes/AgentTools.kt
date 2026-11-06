@@ -511,7 +511,7 @@ class AgentTools(
             // **`path` may carry a version**: `notes.md@a1b2c3d`, the form `search {history}` and
             // `search` answers with. Splitting it is what makes a search hit directly usable
             // instead of requiring the model to move the id into `revision` itself.
-            "read" to setOf("path", "from", "to", "grep", "revision", "multi", "word", "lines"),
+            "read" to setOf("path", "from", "to", "grep", "revision", "multi", "word", "numbers"),
             // **One tool where `create` and `edit` were two.** Report: "merge create and edit into
             // one command 'write' - if path doesn't exist it creates it automatically (folders and
             // files)". So `write` is the only way anything is written, and there is no second name
@@ -695,7 +695,7 @@ class AgentTools(
                     "`number: line` — where it is, for a next call that names a place. A pattern " +
                     "that matches **part of a line** (`\\d+`, `TODO`) answers with the text it " +
                     "matched, every match, no number — for a next call that pastes it into " +
-                    "`write`'s `text`. `lines: true` answers the other way for **every** matching " +
+                    "`write`'s `text`. `numbers: true` answers the other way for **every** matching " +
                     "line: `number: line` as it is, never cut short, which is what you want when " +
                     "you are about to name a place rather than paste a value. " +
                     "**`word: true` matches whole words only** — `id` finds `id` and not `idea` or " +
@@ -718,7 +718,7 @@ class AgentTools(
                     "lines it spans (`12-20: …`). Use `[\\s\\S]` for \"any character, newlines too\".",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"," +
-                    "\"multi\":false,\"word\":false,\"lines\":false}",
+                    "\"multi\":false,\"word\":false,\"numbers\":false}",
             ),
             spec(
                 "write",
@@ -2320,7 +2320,7 @@ class AgentTools(
             // **Every hit on every line**, in both shapes. The old code answered a whole-line match
             // with `excerpt`, which cut a long line to a window and so could not be pasted back;
             // `lines` answers the line entire.
-            val asLines = args.optBoolean("lines", false)
+            val asLines = args.optBoolean("numbers", false)
             val found = ArrayList<String>()
             var any = false
             for ((offset, line) in chosen.withIndex()) {

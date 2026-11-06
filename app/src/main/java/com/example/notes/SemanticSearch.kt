@@ -745,10 +745,20 @@ class SemanticSearch(
             0
         } else {
             val before = candidates.size
+            // **Keyed by `path@commit`, so a version is never hidden behind the file's current
+            // text.** Collapsing on the path alone was wrong in the one case history exists for: a
+            // paragraph that was *deleted* is a version row, and the current file has no such text —
+            // but the current file can still score on the same words, and keeping "the best per
+            // path" would then drop the very save the question was about.
+            //
+            // So the duplicate this removes is the narrow one that is actually a duplicate: the same
+            // path at the same commit, reachable through two different chunks. Different commits are
+            // different answers.
             val best = LinkedHashMap<String, Candidate>()
             for (one in candidates) {
-                val there = best[one.path]
-                if (there == null || one.score > there.score) best[one.path] = one
+                val key = "${one.path}@${one.commit}"
+                val there = best[key]
+                if (there == null || one.score > there.score) best[key] = one
             }
             candidates = best.values.toList()
             before - candidates.size
@@ -775,8 +785,7 @@ class SemanticSearch(
             "$project/$where:$range: ${whole(one.text)}  [${score(one.score)}]"
         }
         if (collapsed > 0) {
-            notes += "$collapsed earlier version(s) of the same files were left out — " +
-                "one row per file, newest of the equally-close ones"
+            notes += "$collapsed duplicate row(s) of the same text were left out"
         }
         return Result.success(compose(rows, notes))
     }
@@ -886,6 +895,11 @@ class SemanticSearch(
     private fun whole(text: String): String =
         text.filterNot { it < ' ' && it != '\n' }
             .replace("\n", " \u23ce ")
+            // **Trimmed after the substitution, not before.** A chunk usually ends with a newline,
+            // which becomes ` ⏎ ` — so trimming first left a marker hanging at the end of every row
+            // with nothing after it.
+            .trim()
+            .removeSuffix("\u23ce")
             .trim()
 
     private fun excerpt(text: String): String {
