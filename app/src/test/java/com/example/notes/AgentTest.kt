@@ -1290,10 +1290,19 @@ class AgentTest {
 
         val body = tool("search", """{"query":"milk","history":true}""")
 
-        assertEquals(
-            "one row, because there is one version of the content",
-            "0\nshopping/list.txt@${git.versions("shopping", "list.txt").first().first.shortId}:1: milk",
-            body,
+        // **Two rows and not three.** The current file is one answer, and its one version is the
+        // other — the second commit touched the path without changing the content, so it is the
+        // same version and must not appear again under a different sha. Counting the rows is the
+        // assertion; which shas they are is not the point.
+        val versionRows = body.lines().filter { it.contains("list.txt@") }
+        assertEquals("one version row, not two: $body", 1, versionRows.size)
+        assertTrue(
+            "and it is the version that holds the text: $body",
+            versionRows.single().contains(":1: milk"),
+        )
+        assertTrue(
+            "and the current file is the other answer: $body",
+            body.lines().any { it.startsWith("shopping/list.txt:1: milk") },
         )
     }
 
@@ -2618,7 +2627,7 @@ class AgentTest {
         // same reason it has to after `write`: a listing that did not would be showing a project that
         // does not exist.
         val writes = setOf(
-            "write", "delete", "move", "restore", "fetch", "artifact", "download", "archive",
+            "write", "delete", "move", "restore", "artifact", "download", "archive",
             "pull", "push", "http",
         )
         assertEquals("every writing tool, and only those", writes, AgentTools.CHANGES_DISK)

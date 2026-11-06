@@ -1277,6 +1277,17 @@ class Workspace(val accountDir: File) {
     fun isAgentLocked(file: File): Boolean {
         if (isLocked(file)) return true
         val path = relative(file)?.let(::pathString) ?: return false
+        // **`assets/` is the person's, and it is a folder rule rather than a lock.**
+        //
+        // It is the one folder whose contents cost money to store — LFS bandwidth and quota are
+        // billed — and whose size is unbounded, so an agent that can write there can spend the
+        // operator's quota without asking. The rule is structural rather than a list of locked
+        // paths because the folder is what the rule is about: a new picture in `assets/` must be
+        // refused without anybody having remembered to lock it.
+        //
+        // **Refused, not hidden.** `read` and `search` still see it, the same as a locked file —
+        // "locked doesnt mean blind, it means readonly".
+        if (path == ASSETS || path.startsWith("$ASSETS/")) return true
         val locked = locked()
         if (locked.isEmpty()) return false
         if (path in locked) return true
@@ -1752,6 +1763,24 @@ class Workspace(val accountDir: File) {
          * noisiest thing in the working tree.
          */
         val APP_IGNORES = listOf("agent/", ".muffy/", "requests/")
+
+        /**
+         * The folder a person keeps binaries in, stored through LFS.
+         *
+         * **The agent may not write here** — see [isAgentLocked] — because it is the one folder whose
+         * contents cost the operator quota and whose size is unbounded. Everything else in the
+         * project is the agent's to change.
+         */
+        const val ASSETS = "assets"
+
+        /**
+         * The folder whose contents never leave this phone.
+         *
+         * **Not a rule the app enforces yet** — a person puts scratch here and it is `.gitignore`d,
+         * the same as any other ignored path. It exists as a name so the two folders can be created
+         * together and described in one place.
+         */
+        const val IGNORED = "ignored"
 
         /**
          * The hidden marker that gives an empty folder a version.

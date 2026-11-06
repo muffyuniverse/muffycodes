@@ -1783,7 +1783,13 @@ class AgentTools(
                     versionRow(path, commit, text, hit) +
                         if (also > 0) " (+$also more in this version)" else ""
                 }
-                if (content.isNotEmpty() && !blobs.add(content)) continue
+                // **Keyed by path and content, not content alone.** A file whose current text
+                // equals its last version is not a duplicate: the current file is one answer
+                // ("it is here now") and the version is another ("this is the save that made it
+                // so"), and `read` reaches them differently — by path and by `path@sha`. Deduping
+                // on content alone would drop the version row whenever nobody had edited since,
+                // which is the commonest case of all.
+                if (content.isNotEmpty() && !blobs.add("$path\u0000$content")) continue
                 found.add(row)
                 seen.add(shown)
                 state.count++
