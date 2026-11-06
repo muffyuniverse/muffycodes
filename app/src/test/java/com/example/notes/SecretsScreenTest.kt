@@ -7,7 +7,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -64,12 +63,6 @@ class SecretsScreenTest {
     @Composable
     private fun Frame(content: @Composable () -> Unit) {
         MaterialTheme { Surface { content() } }
-    }
-
-    private fun screen(onBack: () -> Unit = {}) {
-        compose.setContent {
-            Frame { SecretsScreen(viewModel = scene.viewModel, onBack = onBack) }
-        }
     }
 
     private fun screen(onBack: () -> Unit = {}) {
@@ -136,8 +129,9 @@ class SecretsScreenTest {
     @Test
     fun `a whole url in the host field is refused with the shape to use`() {
         val problem = secretProblem("github", "ghp_the_real_token", "https://api.github.com/user")
-        assertTrue("it is refused: $problem", problem!!.contains("Just the host, without the scheme"))
-        assertTrue("and it names the shape: $problem", problem.contains("api.github.com, not"))
+        val said = problem.orEmpty()
+        assertTrue("it is refused: $said", said.contains("Just the host, without the scheme"))
+        assertTrue("and it names the shape: $said", said.contains("api.github.com, not"))
     }
 
     /**
