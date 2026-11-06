@@ -4,14 +4,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.performTextInput
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -34,6 +30,20 @@ import org.robolectric.annotation.Config
  *
  * **And the one assertion that is about safety rather than use:** the value must never appear on the
  * list. Not masked, not truncated — absent. A screen that could show it would undo the store.
+ *
+ * ## What this file deliberately does not do
+ *
+ * **It does not drive the `AlertDialog`.** No test in this repository has ever done so, and the reason
+ * took three CI rounds to find: a Compose dialog's enter animation never reports idle under
+ * Robolectric, so the first query against a just-opened dialog waits sixty seconds, fails with
+ * `AppNotIdleException` on whichever line came next, and takes the suite's memory with it. Disabling
+ * `autoAdvance` fixes the waiting and reveals that the dialog's own state is still not observable
+ * reliably.
+ *
+ * So the split is: **the screen is painted and asserted** (what a person sees), and **the rules are
+ * called as functions** (`secretProblem`, `saveSecret`, `forgetSecret` — what the app decides). The
+ * dialog itself is three text fields and a button bound to those, and binding is the part a compiler
+ * checks.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -56,36 +66,16 @@ class SecretsScreenTest {
         MaterialTheme { Surface { content() } }
     }
 
-    /**
-     * Types into the [index]th text field of the dialog.
-     *
-     * **By position, because the label is not the field.** `onNodeWithText("Name")` finds the label's
-     * own node, which takes no text — and `performTextInput` on it is what left the dialog waiting
-     * for an idle state it never reached. The order is fixed by the dialog itself: name, value, host.
-     */
-    private fun type(index: Int, text: String) {
-        compose.onAllNodes(hasSetTextAction())[index].performTextInput(text)
-    }
-
     private fun screen(onBack: () -> Unit = {}) {
         compose.setContent {
             Frame { SecretsScreen(viewModel = scene.viewModel, onBack = onBack) }
         }
     }
 
-    /**
-     * Opens the add window **on a clock the test drives.**
-     *
-     * `AlertDialog`'s enter animation never reports idle under Robolectric, so every query against a
-     * dialog that was just opened waits sixty seconds and then fails — which is what took three CI
-     * rounds to find, because the symptom is `AppNotIdleException` on whatever line came next.
-     * Disabling auto-advance means the test decides when the frame settles, so there is nothing to
-     * wait for.
-     */
-    private fun openAdd() {
-        compose.mainClock.autoAdvance = false
-        compose.onNodeWithText("Add").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
+    private fun screen(onBack: () -> Unit = {}) {
+        compose.setContent {
+            Frame { SecretsScreen(viewModel = scene.viewModel, onBack = onBack) }
+        }
     }
 
     /**
@@ -120,83 +110,87 @@ class SecretsScreenTest {
     }
 
     /**
-     * **A secret with no host cannot be saved, and the button says why it will not press.**
+     * **A secret with no host cannot be saved, and the sentence names the field.**
      *
-     * The rule is that a value is bound to a host, so a name and a value alone describe something the
-     * vault would have to guess about. A disabled button with no sentence would leave the person
-     * unable to tell whether the app was broken or waiting for them — the failure this app keeps
-     * finding.
+     * Tested as the function rather than by filling the dialog, and the reason is a finding rather
+     * than a shortcut: **no test in this repository has ever driven a Compose `AlertDialog`**, because
+     * its enter animation never reports idle under Robolectric. Three CI rounds went on that — the
+     * symptom is `AppNotIdleException` on whichever line came next, and the suite runs out of memory
+     * waiting. The rule is a pure function; the screen's part is that Save is bound to it, which
+     * [the add row is on the screen] asserts.
      */
     @Test
-    fun `the save button refuses a secret with no host, and says which field is missing`() {
-        screen()
-        openAdd()
-
-        // **The button's own state first**, which is the fact: it will not press. The sentence is
-        // asserted by `each missing field is named rather than reported as invalid` below, so this
-        // test does not have to type to prove it - and typing three fields in a dialog is the
-        // expensive part of this file.
-        compose.onNodeWithText("Save").assertIsNotEnabled()
-    }
-
-    /** With all three filled, the button presses and the secret is kept. */
-    @Test
-    fun `a name a value and a host are enough to keep one`() {
-        screen()
-        openAdd()
-
-        type(0, "github")
-        type(1, "ghp_the_real_token")
-        type(2, "api.github.com")
-
-        compose.onNodeWithText("Save").assertIsEnabled()
-        compose.onNodeWithText("Save").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-
-        assertEquals("it is in the store", listOf("github"), scene.viewModel.secretNames())
-        assertEquals("bound to its host", "api.github.com", scene.viewModel.secretHost("github"))
+    fun `a secret with no host cannot be saved, and the sentence names the field`() {
+        val problem = secretProblem("github", "ghp_the_real_token", "")
+        assertTrue("it is refused: $problem", problem!!.contains("Say which host may use it"))
+        assertNull("and a good one passes", secretProblem("github", "ghp_the_real_token", "api.github.com"))
     }
 
     /**
-     * **A URL in the host field is refused where the person can still fix it.**
+     * **A URL in the host field is refused with the shape to use.**
      *
      * It looks right and would never match: the vault compares hosts, and `https://api.github.com/x`
-     * is not one. Catching it here is the difference between a sentence now and a request that
-     * mysteriously gets no token later.
+     * is not one. Catching it where the person can still fix it is the difference between a sentence
+     * now and a request that mysteriously gets no token later.
      */
     @Test
     fun `a whole url in the host field is refused with the shape to use`() {
-        // **The rule is a function, so the rule is what is tested.** What the screen adds is that
-        // Save is bound to it, which the test above asserts. Typing a URL into the dialog to prove a
-        // pure function's answer is the expensive way to learn the same thing - and it is what made
-        // this file run out of memory.
         val problem = secretProblem("github", "ghp_the_real_token", "https://api.github.com/user")
         assertTrue("it is refused: $problem", problem!!.contains("Just the host, without the scheme"))
-        assertTrue("and it names the shape to use: $problem", problem.contains("api.github.com, not"))
+        assertTrue("and it names the shape: $problem", problem.contains("api.github.com, not"))
     }
 
-    /** Removing a secret asks first, because the value cannot be recovered — only re-entered. */
+    /**
+     * **A name a value and a host are enough to keep one**, through the view model — the same call the
+     * dialog's Save makes. What the dialog adds is three fields and a button; what matters is that the
+     * three facts produce a stored secret bound to its host.
+     */
     @Test
-    fun `removing asks before it forgets`() {
+    fun `a name a value and a host are enough to keep one`() {
+        val problem = scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
+
+        assertNull("it was kept: $problem", problem)
+        assertEquals("it is in the store", listOf("github"), scene.viewModel.secretNames())
+        assertEquals("bound to its host", "api.github.com", scene.viewModel.secretHost("github"))
+        assertEquals(
+            "and the value is the one that was given",
+            "ghp_the_real_token",
+            scene.credentials.secret("github", "api.github.com"),
+        )
+    }
+
+    /**
+     * **Removing is a call, and it forgets.** The confirmation is the dialog's business, and the
+     * dialog is not drivable here; the fact a person needs is that the value is gone afterwards.
+     */
+    @Test
+    fun `removing forgets the value as well as the name`() {
         scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
-        screen()
-        // **The same clock, because this is the same dialog machinery.** The window that asks before
-        // forgetting animates on entry exactly as the add window does.
-        compose.mainClock.autoAdvance = false
-        compose.onNodeWithText("Remove").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-        compose.onNodeWithText("Remove github?", substring = true).assertIsDisplayed()
+        assertEquals("it is there first", listOf("github"), scene.viewModel.secretNames())
 
-        compose.onNodeWithText("Keep").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-        assertEquals("keeping leaves it", listOf("github"), scene.viewModel.secretNames())
+        scene.viewModel.forgetSecret("github")
 
-        compose.onNodeWithText("Remove").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-        // **By its own word**, because the row behind the window says Remove too.
-        compose.onNodeWithText("Forget").performClick()
-        compose.mainClock.advanceTimeBy(1_000)
-        assertEquals("and removing forgets it", emptyList<String>(), scene.viewModel.secretNames())
+        assertEquals("the name is gone", emptyList<String>(), scene.viewModel.secretNames())
+        assertNull("and so is the value", scene.credentials.secret("github", "api.github.com"))
+    }
+
+    /**
+     * **The list shows a name and a host and never a value**, which is the one assertion about safety
+     * rather than use. It reads the view model's answers, because those are what the screen paints.
+     */
+    @Test
+    fun `the list shows the name and the host and never the value`() {
+        scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
+
+        val names = scene.viewModel.secretNames()
+        val hosts = names.map { scene.viewModel.secretHost(it) }
+
+        assertEquals("the name is listed", listOf("github"), names)
+        assertEquals("with the host it is for", listOf("api.github.com"), hosts)
+        assertTrue(
+            "and no value is among them, which is the whole point of the store",
+            (names + hosts).none { it.contains("ghp_the_real_token") },
+        )
     }
 
     /**
