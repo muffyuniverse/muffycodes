@@ -97,7 +97,6 @@ DownloadsTest app/src/main/java/com/example/notes/Downloads.kt app/src/main/java
 BrowseToolsTest app/src/main/java/com/example/notes/AgentTools.kt
 SearchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-FetchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/Workspace.kt
 ChunkerTest app/src/main/java/com/example/notes/Chunker.kt
 SearchIndexTest app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
 SemanticSearchTest app/src/main/java/com/example/notes/SemanticSearch.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt app/src/main/java/com/example/notes/GitService.kt

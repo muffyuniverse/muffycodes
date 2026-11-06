@@ -145,9 +145,22 @@ object GitService {
      * nothing else. The `-text` is git's own requirement: it stops git from trying to convert line
      * endings in a binary, which would corrupt the bytes before they are ever hashed.
      */
-    private val LFS_ATTRIBUTE: String = Workspace.IMAGE_EXTENSIONS
-        .sorted()
-        .joinToString("") { "*.$it filter=lfs diff=lfs merge=lfs -text\n" }
+    private val LFS_ATTRIBUTE: String =
+        // **The folder first, and it is the rule that matters.**
+        //
+        // `assets/` is where a binary belongs, and it covers every kind at once — a `.zip`, an
+        // `.mp4`, an `.apk`, a format nobody has thought of yet. The extension list below could
+        // only ever cover pictures, so a dependency tarball fetched and unpacked into a project was
+        // committed as a raw blob into ordinary git history, where it stays for ever.
+        //
+        // **Kept alongside rather than replaced**, because the extension list still governs a
+        // picture saved before `assets/` existed: those files are in the repository root and have no
+        // folder rule to cover them. Removing it would change how they are stored on the next save,
+        // which is a silent re-storage of everything a person already has.
+        "assets/** filter=lfs diff=lfs merge=lfs -text\n" +
+            Workspace.IMAGE_EXTENSIONS
+                .sorted()
+                .joinToString("") { "*.$it filter=lfs diff=lfs merge=lfs -text\n" }
 
     /**
      * Makes git store files ending in [extension] through LFS, in [dir].

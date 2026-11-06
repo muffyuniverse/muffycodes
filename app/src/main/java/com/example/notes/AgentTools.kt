@@ -4083,7 +4083,11 @@ class AgentTools(
         }
         if (inside.isEmpty()) return null
         return "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
-            if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else ""
+            (if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else "") +
+            // **The next step, named.** A downloaded archive that stays in `agent/http/` never
+            // reaches the project, and "which files did this produce" is answered by unpacking it.
+            "\n\nTo put it in the project, " +
+            "{\"unpack\":\"${file.relativeTo(projectDir).invariantSeparatorsPath}\",\"into\":\"<folder>\"}."
     }
 
     /**

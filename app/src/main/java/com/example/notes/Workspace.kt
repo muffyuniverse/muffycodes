@@ -505,14 +505,20 @@ class Workspace(val accountDir: File) {
         // write — and a creation that silently skipped half of its own rule is the failure mode
         // this app keeps fixing.
         val rel = relative(file) ?: return
-        // **Locked always, ignored only when the app cannot classify it.**
+        // **Locked always, and ignored when it is not text.**
         //
         // The first version ignored everything a person made, and wiring it up showed what that
         // costs: an ignored file is not committed, so the person's own note had no version and no
-        // undo — and "every change is a version" is the promise this app exists for. Ignoring is
-        // about *not sending to GitHub*, but git cannot commit-and-not-push, so ignoring also means
-        // not versioning. The operator's rule is narrower than it first read: only what the app
-        // cannot open is held back, "same as with pictures", which stay tracked.
+        // undo — and "every change is a version" is the promise this app exists for. So the rule
+        // became "only what the app cannot open", and pictures stayed tracked on the reasoning that
+        // they were understood.
+        //
+        // **The operator widened it, and `assets/` is why.** All files can be tracked; what differs
+        // is the default at the moment of creation. A non-text file is born untracked, so a stray
+        // screenshot in `src/` no longer becomes a repository blob by accident — and a picture the
+        // person means to keep goes in `assets/`, which is the one place a picture is tracked, and
+        // tracked through LFS. The cost is real and accepted: a non-text file outside `assets/` has
+        // no version and no undo.
         //
         // The ignore comes first when it happens, and the order is load-bearing: `ignore` writes
         // `.gitignore` through `write`, which refuses a locked path, so locking first would make
@@ -524,12 +530,16 @@ class Workspace(val accountDir: File) {
     /**
      * Whether a new file should be held back from git until the person says otherwise.
      *
-     * **Only what the app cannot classify.** A text file and a picture are both understood, so both
-     * are tracked and both have a history. A `.zip`, a `.pdf`, a `.mp4` is a file this app can
-     * neither open nor judge, and sending it to GitHub spends storage on something nobody has said
-     * they want there — so it waits, visibly, behind the same switch a picture uses.
+     * **Anything that is not text.** A picture is now included: it used to be tracked on the
+     * reasoning that the app understood it, but `assets/` is a better answer — a picture that is
+     * meant to be kept goes there and is stored through LFS, and one that is not meant to be kept
+     * should not silently become a repository blob.
+     *
+     * **This is the one-line rule the operator asked for**: *"all files can be tracked but nontext
+     * files are born untracked, it already should be default behaviour."* It was not — the rule was
+     * `== UNKNOWN`, and `EntryKind` has a separate `IMAGE`, so pictures were born tracked.
      */
-    fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) == EntryKind.UNKNOWN
+    fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) != EntryKind.TEXT
 
     /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
     fun createdByAgent(file: File) {

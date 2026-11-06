@@ -91,6 +91,52 @@ class HttpToolTest {
     private fun args(vararg pairs: Pair<String, Any>) =
         JSONObject(mapOf(*pairs)).toString()
 
+    // ---- an archive says what is inside it --------------------------------
+
+    /**
+     * **Moved here from `FetchTest` when `fetch` was deleted.** It is the one thing `fetch` did that
+     * `http` did not, so it is the test that proves nothing was lost: a downloaded zip answers with
+     * its entry names and never its bytes, because a zip in a conversation is binary that costs the
+     * whole context to say nothing.
+     */
+    @Test
+    fun `a downloaded zip is reported by its entry names, never its bytes`() {
+        val buffer = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(buffer).use { zip ->
+            for (name in listOf("lib/a.kt", "lib/b.kt")) {
+                zip.putNextEntry(java.util.zip.ZipEntry(name))
+                zip.write("fun x() {}".toByteArray())
+                zip.closeEntry()
+            }
+        }
+        answer = buffer.toByteArray()
+
+        val body = tools().run(
+            Call(id = "c-zip", tool = "http", args = args("method" to "GET", "url" to "https://example.com/lib.zip")),
+        )
+
+        assertTrue("the names are there: $body", body.contains("lib/a.kt"))
+        assertTrue("and the second: $body", body.contains("lib/b.kt"))
+        assertFalse("and the contents are not: $body", body.contains("fun x()"))
+        // **The next step is named**, because a downloaded archive that stays in `agent/http/` never
+        // reaches the project and the agent has to be told how it does.
+        assertTrue("and it says how to unpack: $body", body.contains("unpack"))
+        assertTrue("naming the file it landed in: $body", body.contains("agent/http/"))
+    }
+
+    @Test
+    fun `a file that is not an archive gets no entry list`() {
+        answer = "two litres".toByteArray()
+
+        val body = tools().run(
+            Call(id = "c-txt", tool = "http", args = args("method" to "GET", "url" to "https://example.com/notes.txt")),
+        )
+
+        assertTrue("it worked: $body", body.startsWith("0\n"))
+        assertFalse("and there is no listing: $body", body.contains("It holds:"))
+        assertFalse("nor an unpack suggestion: $body", body.contains("unpack"))
+    }
+
     // ---- what it sends -----------------------------------------------------
 
     /**
