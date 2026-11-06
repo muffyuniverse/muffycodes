@@ -290,6 +290,31 @@ let it decide — was about **4 minutes** of wall clock across six jobs per tick
 short job.** The repository is public, so those minutes are unmetered; the figure matters only if it
 ever goes private, and then it is still small next to one push-triggered pipeline.
 
+### 3.3e Found while testing the watcher — `main` cannot build a release
+
+Pushing the watcher to `main` started `main`'s build, and it failed:
+
+```
+Execution failed for task ':app:packageRelease'
+  KeytoolException: Failed to read key from store "/tmp/muffy-release…jks":
+  Tag number over 30 is not supported
+```
+
+**"Tag number over 30" is not a Kotlin or Gradle message** — it is a DER/JKS parsing error, which
+means the bytes in the `MUFFY_KEYSTORE_BASE64` secret are not a valid keystore. The value is wrong,
+not the code.
+
+**It is pre-existing and unrelated to today's work:** the previous `main` run (`42088683442`) had
+exactly the same shape — `Test (0)` and `Test (1)` **success**, `Build the release` **failure**.
+`development` is green throughout (`42157173047` success), because a development build makes a debug
+APK and needs no release keystore.
+
+**What this means for the watcher, which is the reason it matters here:** the watcher watches
+`development`, and `development` builds fine — so the watcher works. But **`main` cannot produce a
+release until the keystore secret is fixed**, and that is a person's job: it needs the real
+keystore, which is not in this repository by design. It is recorded as an **open defect**, not
+something to work around by changing the workflow.
+
 ### 3.4 What to build
 
 **Phase 1 — measure the baseline (no workflow change).**
