@@ -349,6 +349,15 @@ object Fetched {
     const val DIR: String = "${AgentLog.DIR}/fetched"
 
     /**
+     * Where `http` files its answers.
+     *
+     * **Its own folder, and a name of its own rather than a substitution on [DIR].** `DIR.replace("fetched",
+     * "http")` would work today and would silently follow the next rename of either, which is the kind of
+     * coupling that turns a one-word change into a bug in a folder nobody was thinking about.
+     */
+    const val HTTP_DIR: String = "${AgentLog.DIR}/http"
+
+    /**
      * How large a download may be, **and it is a refusal, never a truncation.**
      *
      * A truncated file is worse than no file: the agent believes it has the archive, `unpack` fails

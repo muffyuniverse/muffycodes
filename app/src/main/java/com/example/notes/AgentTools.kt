@@ -384,6 +384,35 @@ class AgentTools(
         const val FETCHED_SHOWN = 40
 
         /**
+         * The verbs `http` will send.
+         *
+         * **A closed set, because `HttpURLConnection` throws for anything else** and its message names no
+         * alternative — so an unknown verb is refused here, where the refusal can list the real ones.
+         * `PATCH` is in the list because it is how a GitHub file is edited, and `HEAD` because it is how a
+         * caller asks whether a thing exists without paying for the body.
+         */
+        val HTTP_METHODS = listOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
+
+        /**
+         * Headers the agent may not write, because writing them is what the vault is for.
+         *
+         * **The rule that makes `auth:` mean anything.** If a header could carry a token, the model would
+         * put one in the conversation and in the log, and the store would be decorative. These four are the
+         * ways a credential travels.
+         */
+        val SECRET_HEADERS = setOf("authorization", "cookie", "proxy-authorization", "x-api-key")
+
+        /**
+         * The largest answer that is also quoted in the conversation.
+         *
+         * **Small enough to be read, large enough to hold an API's usual answer.** A JSON body from GitHub
+         * is a few kilobytes; a job log or a picture is not, and those are filed with the path named
+         * instead. The file always holds the whole thing either way, so this is a budget decision and not a
+         * data one.
+         */
+        const val HTTP_INLINE = 8 * 1024
+
+        /**
          * What a range may be written with, normalised to `..` before anything is split.
          *
          * A hyphen **between two digits**, so `7-19` and `7 - 19` are one range while `-3` stays a
@@ -425,6 +454,9 @@ class AgentTools(
             "write", "delete", "move", "restore",
             "fetch", "artifact", "download", "archive",
             "pull", "push",
+            // **`http` files its answer**, so a folder listing that did not move would be showing a
+            // project that does not exist - the same bug `write` had.
+            "http",
         )
 
         /**
@@ -523,6 +555,11 @@ class AgentTools(
             // 40 MB. That step works because `outputFolder` sends the output to the project when
             // `agent/` is not writable; without it the documented workflow would be a refusal.
             "fetch" to setOf("url"),
+            // **One request, with the verb and the body the caller chose.** This is what makes the app
+            // reach any API without a typed method per endpoint - the thing that made `CiSetup` take five
+            // compile rounds. `auth` names a secret in the vault and never holds one; the vault refuses it
+            // for any host the secret was not stored for, so naming a secret cannot send it somewhere else.
+            "http" to setOf("method", "url", "headers", "body", "auth"),
             // **One tool, not one tool per remote tool.** The tool list is part of every request's cache
             // prefix, so registering a server's own tools would rewrite that prefix whenever a server
             // changed — and a server going down would do it for every conversation that mentioned it. The
@@ -890,6 +927,25 @@ class AgentTools(
                 "{\"url\":\"https://example.com/data.zip\"}",
             ),
             spec(
+                "http",
+                "**Send one request to any API.** This is how you reach GitHub's REST API, a " +
+                    "webhook, an upload endpoint — anything that answers HTTP — without the app " +
+                    "knowing about it in advance. `method` is GET, POST, PUT, PATCH, DELETE or " +
+                    "HEAD. `headers` is an object of names to values. `body` is the text to send, " +
+                    "or `@path` to post a file from the project. " +
+                    "**`auth` names a secret, and never holds one**: the vault attaches it as a " +
+                    "Bearer token, only for the host that secret was stored for, and never shows " +
+                    "it to you. `authorization`, `cookie`, `proxy-authorization` and `x-api-key` " +
+                    "cannot be set by hand, because a token written into a request is a token in " +
+                    "the log. " +
+                    "**The answer is the status and the body**, and it is filed in `agent/http/` " +
+                    "with the path named. A status that is not 2xx is not a failure of this tool: " +
+                    "the body is the reason, and it is given to you to read. A redirect on " +
+                    "anything but a GET is returned rather than followed, because a POST that " +
+                    "became a GET would silently lose its body.",
+                "{\"method\":\"GET\",\"url\":\"https://api.github.com/user\",\"auth\":\"github\"}",
+            ),
+            spec(
                 "mcp",
                 "Ask a server the person wrote an article about. **`server` alone lists what it " +
                     "offers**; add `tool` and `args` to call one of them. The articles are " +
@@ -1089,6 +1145,14 @@ class AgentTools(
             "download" -> download(args, deadline)
             "upload" -> upload(args)
             "archive" -> archive(args, deadline)
+            "http" -> if (fetchAllowed()) {
+                http(args, deadline)
+            } else {
+                refusal(
+                    "Reaching the network is switched off in this account's settings, so nothing can be " +
+                        "sent. A page can still be read with `browse`.",
+                )
+            }
             "fetch" -> if (fetchAllowed()) {
                 fetch(args, deadline)
             } else {
@@ -3688,6 +3752,225 @@ class AgentTools(
      * because that shape was right: a zip in the conversation is binary that costs the whole context
      * to say nothing.
      */
+    /**
+     * `http` — **one request, to anywhere, with any verb.**
+     *
+     * ## Why this is one tool and not a method per service
+     *
+     * The app has no shell: there is no `curl`, no `gh`, no `sh`. Adding GitHub's API as typed Kotlin
+     * (`createRepo`, `dispatch`, `logs`, …) is what made `CiSetup` take five compile rounds and leaves four
+     * `REPOSITORY:` bindings to keep in step — and every new endpoint would need another round. A request is
+     * a request: `method`, `url`, `headers`, `body`, `auth`. A GitHub endpoint nobody has written yet works
+     * on the first try, and so does every other API on the internet.
+     *
+     * ## The four rules it inherits, and the one it adds
+     *
+     * `Fetcher.request` keeps everything `bytes` does — the address check on **every hop**, the size counted
+     * while reading, the status kept separate from the body, `Accept` and `User-Agent` always set — because
+     * those are what make a request safe rather than what make a download work. It adds one: **a redirect on
+     * anything but a GET is returned rather than followed**, because a `POST` redirected to a `GET` silently
+     * loses its body and GitHub's API does exactly that when a repository is renamed.
+     *
+     * ## What is filed and what is said
+     *
+     * **The body is always filed**, in `agent/http/`, named from the URL plus a short hash of the method and
+     * body so two `POST`s to one endpoint do not overwrite each other. A small text answer is also put in the
+     * conversation, because an API's answer is what the next decision is made from; anything else is filed
+     * only and the path is named. That is the same protocol as `runs`, `shot` and `background`: **the
+     * destination differs, so the result-size rule does not apply** — the agent names the request, the app
+     * names the file, and the app says where it is.
+     *
+     * ## `auth:` names a secret and never holds one
+     *
+     * The value comes from the vault, is never echoed — not in the answer, the trace, the request log or a
+     * `background` result — and **only resolves for the host it was stored for**. Without that last rule the
+     * agent could name the secret and choose the destination, which is a token-exfiltration primitive rather
+     * than an authentication feature.
+     */
+    private fun http(args: JSONObject, deadline: Deadline): String {
+        val url = args.optString("url", "").trim()
+        if (url.isEmpty()) {
+            return refusal("`http` needs a `url`: the address to send the request to.")
+        }
+        val method = args.optString("method", "GET").trim().uppercase().ifEmpty { "GET" }
+        // **A verb the app cannot send is refused here rather than by the connection**, so the refusal can
+        // say which ones it can. `HttpURLConnection` throws for anything outside this set, and its message
+        // does not name the alternatives.
+        if (method !in HTTP_METHODS) {
+            return refusal(
+                "\"$method\" is not a method this app can send. Use one of: " +
+                    HTTP_METHODS.joinToString(", ") + ".",
+            )
+        }
+        val host = Secrets.hostOf(url)
+        // **The address rule before anything else**, and before the secret is even looked at: the request is
+        // the harm, so a check that ran after the connection would already have reached the operator's
+        // router. `Fetcher` checks every hop as well; this one exists so the refusal does not depend on the
+        // connection being attempted first.
+        Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
+
+        // ---- the headers the agent may set, and the ones it may not ----
+        val given = LinkedHashMap<String, String>()
+        args.optJSONObject("headers")?.let { headers ->
+            for (name in headers.keys()) {
+                val value = headers.optString(name, "")
+                if (value.isEmpty()) continue
+                if (name.lowercase() in SECRET_HEADERS) {
+                    return refusal(
+                        "`$name` cannot be set by hand. A token written into a request is a token in the " +
+                            "conversation and in the log; name a secret instead with " +
+                            "{\"auth\":\"<name>\"} and the app attaches it.",
+                    )
+                }
+                given[name] = value
+            }
+        }
+
+        // ---- the secret, if one is named ----
+        val authName = args.optString("auth", "").trim()
+        if (authName.isNotEmpty()) {
+            if (credentials == null) {
+                return refusal("This app has no store for secrets, so \"$authName\" cannot be looked up.")
+            }
+            val value = credentials.secret(authName, host)
+                ?: return refusal(
+                    if (credentials.secretNames().contains(authName)) {
+                        // **The host is the reason, and it is named.** The secret exists and is simply not
+                        // for this host, which is a very different fact from "there is no such secret" —
+                        // and saying "401" instead would send the model to retry the same thing.
+                        "The secret \"$authName\" is not for $host. It is stored for " +
+                            "${credentials.secretHost(authName).orEmpty().ifEmpty { "this phone only" }}, " +
+                            "and the app will not send it anywhere else. Add a secret for $host if one is " +
+                            "needed."
+                    } else {
+                        "There is no secret called \"$authName\" on this phone. Its names are: " +
+                            credentials.secretNames()
+                                .joinToString(", ") { "\"$it\"" }
+                                .ifEmpty { "none" } + "."
+                    },
+                )
+            // **A named secret is a bearer token**, which is what every API this is for accepts. A scheme
+            // the caller needs beyond that can be asked for with `headers` on a non-secret header.
+            given["Authorization"] = "Bearer $value"
+        }
+
+        // ---- the body ----
+        val raw = args.optString("body", "")
+        val body = when {
+            raw.isEmpty() -> null
+            // **`@path` posts a file**, because a JSON body with a picture in it cannot go in a string
+            // argument and an upload is the second thing anyone does with an API.
+            raw.startsWith("@") -> {
+                val path = raw.removePrefix("@").trim()
+                val file = File(projectDir, path)
+                // **Inside the project, and nothing hidden.** A body file is read and sent to a server, so
+                // `@../../other-project/notes.md` must not resolve — the same rule `read` follows, applied
+                // to the one tool that sends what it reads somewhere else.
+                if (!insideWorktreeOrAgent(file)) {
+                    return refusal(
+                        "The body file \"$path\" is outside this project, so it cannot be read. A body " +
+                            "file is inside the project, like \"notes.json\".",
+                    )
+                }
+                if (!file.isFile) {
+                    return refusal("The body file \"$path\" is not there.")
+                }
+                file.readBytes()
+            }
+            else -> raw.toByteArray(Charsets.UTF_8)
+        }
+        if (body != null && (method == "GET" || method == "HEAD")) {
+            return refusal(
+                "A $method cannot carry a body. To send something, use POST or PUT — or put the values in " +
+                    "the query string.",
+            )
+        }
+
+        deadline.check("http")
+        val answer = fetcher.request(url, method, given, body, Fetched.LIMIT_BYTES).getOrElse {
+            return refusal(it.message ?: "The request to $url failed")
+        }
+
+        // ---- file it, then say what happened ----
+        val dir = File(projectDir, Fetched.HTTP_DIR)
+        val file = File(dir, httpNameFor(url, method, body))
+        val rel = try {
+            dir.mkdirs()
+            file.writeBytes(answer.bytes)
+            file.relativeTo(projectDir).invariantSeparatorsPath
+        } catch (e: Throwable) {
+            return refusal("The answer came back and could not be saved: " + Secrets.explain(e, "not written"))
+        }
+        // **The status is the first thing said**, because an API's vocabulary is statuses and a model that
+        // read "done" for a 422 would stop checking. A 4xx is not a failure of the tool: the body is the
+        // diagnostic, and it is filed and quoted like any other.
+        val head = "$method $url → ${answer.status}"
+        val text = answer.text()
+        // **Small text goes in the conversation as well as the file**, because the next decision is made
+        // from it. Binary, or anything large, is filed only — putting a JPEG in the window spends the
+        // budget on something the model cannot read.
+        val inline = answer.bytes.size <= HTTP_INLINE && !looksBinary(answer.bytes)
+        return if (answer.ok) {
+            success(
+                head + "\n\n" + (if (inline) text else "The answer is ${Fetcher.size(answer.bytes.size.toLong())} and is filed, not quoted.") +
+                    "\n\nIt is at $rel." +
+                    rateLimitNote(answer),
+            )
+        } else {
+            refusal(
+                head + "\n\n" + (if (inline) text else "The answer is filed at $rel.") +
+                    if (answer.status in 300..399) {
+                        "\n\nA redirect was returned rather than followed: a $method that became a GET " +
+                            "would lose its body. Location: " + answer.headers["Location"].orEmpty()
+                    } else {
+                        ""
+                    } +
+                    rateLimitNote(answer),
+            )
+        }
+    }
+
+    /**
+     * The rate-limit headers, when there are any.
+     *
+     * **Because a caller that is about to be refused should be told before it is.** GitHub answers `403`
+     * with `X-RateLimit-Remaining: 0` long before it stops answering at all, and a model that knows the
+     * number can wait instead of retrying into the same wall.
+     */
+    private fun rateLimitNote(answer: Fetcher.Answer): String {
+        val left = answer.headers.entries
+            .firstOrNull { it.key.equals("X-RateLimit-Remaining", ignoreCase = true) }?.value
+            ?: return ""
+        val reset = answer.headers.entries
+            .firstOrNull { it.key.equals("X-RateLimit-Reset", ignoreCase = true) }?.value
+        return "\n\n$left requests remain" + if (reset.isNullOrEmpty()) "." else " until $reset."
+    }
+
+    /**
+     * A filename for an answer, **unique per request and readable to a person.**
+     *
+     * `Fetched.nameFor` already answers the readable half — the last path segment, or the host when the URL
+     * is a bare endpoint. The hash is of the **method and the body**, not the URL: two `POST`s to one
+     * endpoint are two different requests, and without it the second would overwrite the first's answer and
+     * a model comparing them would be reading the same file twice.
+     */
+    private fun httpNameFor(url: String, method: String, body: ByteArray?): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest((method + "\n" + (body?.let { String(it, Charsets.UTF_8) } ?: "")).toByteArray())
+        val short = digest.take(3).joinToString("") { "%02x".format(it) }
+        return Fetched.nameFor(url) + "-" + short
+    }
+
+    /**
+     * True when the bytes are not text, by the one test that is cheap and right: **a NUL byte.**
+     *
+     * A more careful check would sniff for UTF-8 validity, which would call a valid JSON body with an
+     * unusual character binary. A NUL is the one byte that text never contains, and every binary format
+     * this app fetches — PNG, JPEG, zip, APK — has one early.
+     */
+    private fun looksBinary(bytes: ByteArray): Boolean =
+        bytes.take(1024).any { it == 0.toByte() }
+
     private fun fetch(args: JSONObject, deadline: Deadline): String {
         val url = args.optString("url", "").trim()
         if (url.isEmpty()) {
