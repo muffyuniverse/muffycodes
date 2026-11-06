@@ -388,6 +388,20 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The number of unsynced changes of each project, from `git status`. */
     var changesByProject: Map<String, Int> by mutableStateOf(emptyMap())
+
+    /**
+     * How many paths in each project are **ignored, so they will never be sent** — per project.
+     *
+     * **The sentence `state` used to carry, moved to where a person reads it.** An ignored file is
+     * not a change and not unsent: it is a file on the phone that will never be on GitHub until
+     * somebody tracks it. Without this a project holding a 40 MB video and one note reports
+     * "up to date", which is true of the note and a lie about the project.
+     *
+     * `state` answered it for the agent and has been removed — its two halves were two different
+     * questions wearing one name. The fact belongs on the row, because it is a fact for the person
+     * rather than a question for the model.
+     */
+    var ignoredByProject: Map<String, Int> by mutableStateOf(emptyMap())
         private set
 
     /** True while a git operation is running. */
@@ -1009,7 +1023,11 @@ class AppViewModel @JvmOverloads constructor(
         val names = ws.projectNames()
         onWorker {
             val counts = names.associateWith { g.changes(it).total }
-            main.post { changesByProject = counts }
+            val ignored = names.associateWith { g.ignoredCount(it) }
+            main.post {
+                changesByProject = counts
+                ignoredByProject = ignored
+            }
         }
     }
 
@@ -1760,6 +1778,9 @@ class AppViewModel @JvmOverloads constructor(
 
     /** How many changes [project] has waiting, as last counted. */
     fun changesOf(project: String): Int = changesByProject[project] ?: 0
+
+    /** How many paths of [project] are ignored, so they will never be sent. */
+    fun ignoredOf(project: String): Int = ignoredByProject[project] ?: 0
 
     /**
      * True when [project] has nowhere to push.

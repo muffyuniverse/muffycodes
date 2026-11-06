@@ -113,6 +113,24 @@ class ProjectGit(
      * history prune renames every commit — a diff between two trees asks about content instead, so
      * neither problem exists.
      */
+    /**
+     * How many paths of [project] are ignored, so they will never be sent.
+     *
+     * **The fact `state` used to report to the agent, now on the project row.** A project holding a
+     * 40 MB video and one note would otherwise say "up to date" — true of the note, a lie about the
+     * project. A project with no repository has nothing ignored, because nothing is tracked.
+     */
+    fun ignoredCount(project: String): Int {
+        val repo = open(project) ?: return 0
+        return repo.use {
+            try {
+                GitService.ignoredPaths(it).size
+            } catch (e: Throwable) {
+                0
+            }
+        }
+    }
+
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
         return repo.use {
@@ -439,7 +457,7 @@ class ProjectGit(
         path: String,
         from: String,
         to: String,
-    ): Result<GitService.Changes> {
+    ): Result<GitService.RevisionDiff> {
         val repo = open(project) ?: return Result.failure(
             IllegalStateException("This project has no repository yet"),
         )

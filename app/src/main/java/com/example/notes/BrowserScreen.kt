@@ -684,7 +684,14 @@ private fun ProjectList(
                         } else {
                             viewModel.changesOf(name).let { if (it > 0) "$it to send" else "up to date" }
                         }
-                        val second = listOfNotNull(sending).joinToString(" · ")
+                        // **And what will never be sent.** An ignored path is not a change and not
+                        // unsent: it is a file on the phone that stays on the phone until somebody
+                        // tracks it. Without this a project holding a 40 MB video and one note says
+                        // "up to date", which is true of the note and a lie about the project.
+                        val held = viewModel.ignoredOf(name).let {
+                            if (it > 0) "$it not sent" else null
+                        }
+                        val second = listOfNotNull(sending, held).joinToString(" · ")
                         if (second.isNotEmpty()) {
                             Text(
                                 text = second,

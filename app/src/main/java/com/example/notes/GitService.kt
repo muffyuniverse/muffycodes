@@ -1274,8 +1274,14 @@ object GitService {
         val notDiffed: String? = null,
     )
 
-    /** What changed between two revisions: the files, and what happened in each. */
-    data class Changes(
+    /**
+     * What changed between two revisions: the files, and what happened in each.
+     *
+     * **Not `Changes`**, which is already taken by the staged/unstaged/untracked counts — a name
+     * collision that compiled in the class file and failed only where both were in scope, which is
+     * exactly the kind of thing a compiler catches and a text search does not.
+     */
+    data class RevisionDiff(
         val from: String,
         val to: String,
         val path: String,
@@ -1299,7 +1305,7 @@ object GitService {
         path: String,
         from: String,
         to: String,
-    ): Result<Changes> {
+    ): Result<RevisionDiff> {
         val old = repo.resolve(from) ?: return Result.failure(
             IllegalArgumentException("There is no version $from"),
         )
@@ -1350,7 +1356,7 @@ object GitService {
                 formatter.close()
             }
         }
-        return Result.success(Changes(from, to, prefix, out, more))
+        return Result.success(RevisionDiff(from, to, prefix, out, more))
     }
 
     /**
