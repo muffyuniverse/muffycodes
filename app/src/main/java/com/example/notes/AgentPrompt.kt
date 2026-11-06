@@ -142,6 +142,11 @@ object AgentPrompt {
           - **`push` is never forced.** If GitHub refuses because it has commits this phone does
             not, that is a conflict: `pull`, resolve what it names, then `push` again. A force
             would discard somebody else's commit, and there is no way to ask for one.
+          - **A file that is ignored is not sent, and `push` will never send it.** `state` counts
+            those separately and names the largest. They are not work waiting to go — they are files
+            the person has not decided about, and most are binaries the app cannot open. Do not
+            describe the project as "on GitHub" while `state` names ignored paths: say which files
+            are held back, so the person can decide. Tracking one is their act, not yours.
           - **A result that would not fit is written to a file and you are told where.** The answer
             gives the path under agent/background_results/ and how many characters it was. Read it in
             ranges — `from`/`to` for lines, `grep` for the ones that match — rather than guessing at

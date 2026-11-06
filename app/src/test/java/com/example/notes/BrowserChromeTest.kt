@@ -326,6 +326,31 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `a binary row offers the switch that would send it`() {
+        // **The row that mattered most was the one that drew no switch.** The marks were gated on
+        // `kind != UNKNOWN`, on the reasoning that a binary has no *lock* to offer — true, and
+        // beside the point. A `.pdf` or a `.zip` now arrives ignored, and the ignore switch is the
+        // only control that can undo that, so excluding unknown rows left the file waiting behind a
+        // door with no handle.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        File(scene.viewModel.currentDir!!, "receipt.pdf").writeBytes(ByteArray(64))
+        scene.viewModel.refresh()
+        browser()
+
+        compose.waitUntil(20_000) { there("receipt.pdf") }
+        // **The exact sentence the glyph carries**, because a description is what a screen reader
+        // says and what this test can assert: the row is either offering the switch or saying the
+        // file is already ignored, and both are only reachable if the row is drawn at all.
+        assertTrue(
+            "the binary's row offers the ignore switch",
+            described("Ignore receipt.pdf, so it is not on GitHub") ||
+                described("receipt.pdf is ignored: it is not on GitHub"),
+        )
+    }
+
+    @Test
     fun `a lock and a sync mark are two shapes, not one shape in two colours`() {
         // **The operator's report**: "dont use just one icon for two states for lock and sync. tell
         // me if it is possible to use open lock icon on unlock and connected icon on sync, so that
