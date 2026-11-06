@@ -99,6 +99,14 @@ fun SettingsScreen(
     /** Asks for the OpenRouter key: a screen that refuses screenshots, like the GitHub one. */
     onSetKey: () -> Unit = {},
     /**
+     * Opens the vault: the list of named secrets, and the way to add one.
+     *
+     * **A door rather than a row of fields**, because a secret is written once and then never shown.
+     * A screen that listed values would be the leak the store exists to prevent, so the list is a
+     * separate place a person goes to deliberately.
+     */
+    onOpenSecrets: () -> Unit = {},
+    /**
      * Whether Android will let an agent poll while the screen is off — **the system's fact, passed
      * in** rather than read here.
      *
@@ -292,6 +300,12 @@ fun SettingsScreen(
             // model rows, so the screen asked a person to choose a model and a provider before
             // telling them the list they were choosing from could not be read at all.
             KeyRow(viewModel = viewModel, onSetKey = onSetKey)
+            RowDivider()
+
+            // **Under the key, because they are the same kind of thing** — a value the app uses
+            // without ever writing it down — and because the agent needs both before its tools can
+            // reach anything: one key talks to the model, the other talks to everything else.
+            SecretRow(viewModel = viewModel, onOpenSecrets = onOpenSecrets)
             RowDivider()
 
             // The model, the provider and the effort: [ModelSection] draws the three rows, each of

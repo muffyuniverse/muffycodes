@@ -1470,6 +1470,62 @@ class AppViewModel @JvmOverloads constructor(
     var modelKeySaved: Int by mutableStateOf(0)
         private set
 
+    // ---- named secrets ------------------------------------------------------
+
+    /**
+     * The names of this account's secrets, **never their values**.
+     *
+     * A name is what an article or a tool holds, so a name is what a screen may show. A value is the
+     * thing the whole store exists to keep out of sight, and a screen that could display one would be
+     * the leak this mechanism is for.
+     */
+    fun secretNames(): List<String> = credentials.secretNames()
+
+    /** The host a secret may be used at, or null when there is no such secret. */
+    fun secretHost(name: String): String? = credentials.secretHost(name)
+
+    /**
+     * Keeps a secret, **and reads it back before saying so**.
+     *
+     * The same rule as [saveModelKey], for the same reason: "kept" is a claim about this phone, and
+     * the only way to know it is true is to ask the store to open the door it was put behind. A write
+     * that a keystore refused (a locked phone is enough) would otherwise be reported as success, and
+     * the person would find out at the moment a request needed the secret.
+     *
+     * @return null when the secret is kept, or the sentence to show when it is not.
+     */
+    fun saveSecret(name: String, value: String, host: String): String? {
+        val login = activeLogin
+            ?: return "There is no account signed in on this phone, so there is nobody to keep a secret for."
+        val problem = secretProblem(name, value, host)
+        if (problem != null) return problem
+        val trimmedHost = Secrets.hostOf(host).ifEmpty { host.trim().lowercase() }
+        credentials.setSecret(name.trim(), value, trimmedHost)
+        return if (credentials.secret(name.trim(), trimmedHost) != null) {
+            Trace.note("secret-kept", "$name for $trimmedHost")
+            Trace.said("The secret $name is kept for $trimmedHost")
+            secretSaved++
+            null
+        } else {
+            Trace.note("secret-not-kept", "$name saved and could not be read back")
+            Trace.said("The secret $name was stored and could not be read back, so it will not work.")
+            "The secret was stored, and this phone could not read it back. Unlock the phone and try " +
+                "again; if it keeps happening, the phone's key has changed and every secret has to be " +
+                "entered again."
+        }
+    }
+
+    /** Forgets a secret, so a value that is no longer wanted cannot be used by anything. */
+    fun forgetSecret(name: String) {
+        credentials.forgetSecret(name)
+        Trace.note("secret-forgotten", name)
+        secretSaved++
+    }
+
+    /** Bumped when a secret changes, so a screen listing them can notice. */
+    var secretSaved: Int by mutableStateOf(0)
+        private set
+
     // ---- links in a document ------------------------------------------------
 
     /**

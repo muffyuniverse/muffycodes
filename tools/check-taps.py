@@ -106,6 +106,10 @@ VOCABULARY = {
     # the agent's model: the three lists, the two ways to change the list of models, and the
     # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
     "reset model config", "set model key", "save key",
+    # **The vault.** One name for opening it, because the screen is one place: adding a secret and
+    # removing one are edits inside it, and a log that called each of them "secrets" could not tell
+    # a person who looked from a person who changed something.
+    "secrets",
     # **Signing in to OpenRouter instead of pasting a key.** Two names because they are two acts:
     # opening the page and spending a code. A log that called both "sign in" could not answer
     # "did the person get as far as OpenRouter", which is the question a failed sign-in asks.

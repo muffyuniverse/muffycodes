@@ -104,6 +104,9 @@ interface Credentials {
 
     /** Forgets [name], so a value that is no longer wanted cannot be used by anything. */
     fun forgetSecret(name: String) {}
+
+    /** The host [name] may be used at, or null when there is no such secret. Never the value. */
+    fun secretHost(name: String): String? = null
 }
 
 /** The three things a store can say about a stored key. */
@@ -347,7 +350,7 @@ class CredentialStore(context: Context) : Credentials {
     }
 
     /** The host a stored secret is bound to, for a screen that shows where a name may be used. */
-    fun secretHost(name: String): String? {
+    override fun secretHost(name: String): String? {
         val login = activeLogin ?: return null
         val stored = prefs.getString(secretKey(login, name), null) ?: return null
         return splitHost(stored)?.first

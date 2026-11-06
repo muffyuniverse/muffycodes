@@ -151,6 +151,10 @@ private sealed interface Pending {
 @Composable
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
+    // **The vault's door**, opened from settings. Its own flag rather than a Pending, because it is a
+    // screen and not a window: the list is edited in place, and a dialog would have to close to show
+    // what the edit did.
+    var showSecrets by remember { mutableStateOf(false) }
     var showTrace by remember { mutableStateOf(false) }
     // **The cost table, opened from the projects screen's bar.** It reads the request logs when it
     // is opened and not while it is open: the log grows on every response, so a table that watched
@@ -288,6 +292,7 @@ private fun AppRoot(viewModel: AppViewModel) {
 
     BackHandler(enabled = showTrace) { showTrace = false }
     BackHandler(enabled = showSettings) { showSettings = false }
+    BackHandler(enabled = showSecrets) { showSecrets = false }
 
     /**
      * The bug button, wired once.
@@ -303,6 +308,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             "report-opened",
             (when {
                 showTrace -> "trace"
+                showSecrets -> "secrets"
                 showSettings -> "settings"
                 historyPath != null -> "history/${historyPath.last()}"
                 editing != null -> "editor/${editing.name}"
@@ -329,6 +335,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         Trace.changed(
             "screen " + when {
                 showTrace -> "trace"
+                showSecrets -> "secrets"
                 showSettings -> "settings"
                 historyPath != null -> "history"
                 editing != null -> "editor"
@@ -423,6 +430,11 @@ private fun AppRoot(viewModel: AppViewModel) {
             },
         )
 
+        showSecrets -> SecretsScreen(
+            viewModel = viewModel,
+            onBack = { showSecrets = false },
+        )
+
         showSettings -> SettingsScreen(
             viewModel = viewModel,
             batteryAsked = batteryAsked,
@@ -439,6 +451,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
+            onOpenSecrets = { tap("secrets"); showSecrets = true },
             onReport = openReport,
         )
 

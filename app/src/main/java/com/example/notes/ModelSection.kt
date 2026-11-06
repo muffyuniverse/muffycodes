@@ -1257,3 +1257,39 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
         }
     }
 }
+
+/**
+ * The vault's row in settings: **how many secrets there are, and the way in.**
+ *
+ * **A count and not a list.** The names belong on the screen behind the button, where they can be
+ * added to and removed; a settings row that listed them would either be a second place to read the
+ * same thing or a place to read values, and one of those is a leak.
+ *
+ * **Says "no secrets" in the error colour**, for the same reason the key row does: a person whose
+ * agent cannot reach anything should not have to guess whether that is the app's fault or their own
+ * unfinished setup.
+ */
+@Composable
+fun SecretRow(viewModel: AppViewModel, onOpenSecrets: () -> Unit) {
+    val changed = viewModel.secretSaved
+    val names = remember(changed) { viewModel.secretNames() }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = when (names.size) {
+                    0 -> "No secrets on this phone, so an article or a tool that names one has " +
+                        "nothing to use."
+                    1 -> "One secret is kept on this phone, for the host it was added for."
+                    else -> "${names.size} secrets are kept on this phone, each for its own host."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (names.isEmpty()) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        TextButton(onClick = onOpenSecrets) { Text("Secrets") }
+    }
+}
