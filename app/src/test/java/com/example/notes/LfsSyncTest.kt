@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.treewalk.TreeWalk
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -88,7 +89,9 @@ class LfsSyncTest {
         val big = File(root, "archive.zip")
         big.writeBytes(ByteArray(8192) { (it % 251).toByte() })
 
-        Git(root).use { git ->
+        // **`Git(repo)`, not `Git(root)`.** JGit's `Git` takes a `Repository`; the `File`
+        // constructor belongs to a much older version, and the shared `repo` is already open.
+        Git(repo).use { git ->
             git.add().addFilepattern("archive.zip").call()
             git.commit().setMessage("a binary").setAuthor("A", "a@b.c").setCommitter("A", "a@b.c").call()
         }
@@ -96,15 +99,18 @@ class LfsSyncTest {
         // **Read back from the commit, not from the working tree.** The working tree holds the real
         // eight kilobytes — the clean filter converts on the way in — so reading the file on disk
         // would prove nothing. What git *stored* is the question.
+        // **`TreeWalk`, because `RevTree` has no `getFile`.** The blob's id comes from walking the
+        // tree; `open` answers an `ObjectLoader`, which is not `Closeable` and has no `use`.
         val bytes = Git(repo).use { git ->
-            val tree = git.repository.parseCommit(git.repository.resolve("HEAD")).tree
-            val entry = tree.getFile("archive.zip")
-            assertTrue("the file is in the tree", entry != null)
-            git.repository.open(entry.oid).use { loader ->
-                val out = java.io.ByteArrayOutputStream()
-                loader.copyTo(out)
-                out.toByteArray()
+            val commit = git.repository.parseCommit(git.repository.resolve("HEAD"))
+            var blob: org.eclipse.jgit.lib.ObjectId? = null
+            TreeWalk(git.repository, commit.tree).use { walk ->
+                while (walk.next()) {
+                    if (walk.pathString == "archive.zip") blob = walk.getObjectId(0)
+                }
             }
+            assertTrue("the file is in the tree", blob != null)
+            git.repository.open(blob!!).bytes
         }
         // **A pointer is about 130 bytes and starts with the LFS version line.** Eight kilobytes in
         // the tree would mean the attribute was written and never applied, which is the failure
