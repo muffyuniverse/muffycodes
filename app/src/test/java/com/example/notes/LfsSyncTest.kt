@@ -89,19 +89,21 @@ class LfsSyncTest {
         val big = File(root, "archive.zip")
         big.writeBytes(ByteArray(8192) { (it % 251).toByte() })
 
+        // **One `Git(repo)` block, because `use` closes the repository.** Two blocks would leave
+        // the second working on a closed one, which fails as something else entirely.
+        //
         // **`Git(repo)`, not `Git(root)`.** JGit's `Git` takes a `Repository`; the `File`
-        // constructor belongs to a much older version, and the shared `repo` is already open.
-        Git(repo).use { git ->
-            git.add().addFilepattern("archive.zip").call()
-            git.commit().setMessage("a binary").setAuthor("A", "a@b.c").setCommitter("A", "a@b.c").call()
-        }
-
+        // constructor belongs to a much older version.
+        //
         // **Read back from the commit, not from the working tree.** The working tree holds the real
         // eight kilobytes — the clean filter converts on the way in — so reading the file on disk
         // would prove nothing. What git *stored* is the question.
-        // **`TreeWalk`, because `RevTree` has no `getFile`.** The blob's id comes from walking the
-        // tree; `open` answers an `ObjectLoader`, which is not `Closeable` and has no `use`.
+        //
+        // **`TreeWalk`, because `RevTree` has no `getFile`.** `open` answers an `ObjectLoader`,
+        // which is not `Closeable` and has no `use`.
         val bytes = Git(repo).use { git ->
+            git.add().addFilepattern("archive.zip").call()
+            git.commit().setMessage("a binary").setAuthor("A", "a@b.c").setCommitter("A", "a@b.c").call()
             val commit = git.repository.parseCommit(git.repository.resolve("HEAD"))
             var blob: org.eclipse.jgit.lib.ObjectId? = null
             TreeWalk(git.repository, commit.tree).use { walk ->
