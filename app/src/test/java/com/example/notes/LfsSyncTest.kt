@@ -53,6 +53,70 @@ class LfsSyncTest {
     }
 
     @Test
+    fun `a binary the person chooses to track gets an LFS line, once`() {
+        // **The choice to send a binary is only safe if it becomes a pointer.** A `.pdf` is not in
+        // `IMAGE_EXTENSIONS`, so no attribute covers it — and a tracked binary with no attribute is
+        // committed whole, into ordinary history, where it stays for ever. This app never rewrites
+        // history, so there is no later fix.
+        val attributes = File(root, ".gitattributes")
+
+        GitService.ensureLfsAttribute(root, "pdf")
+
+        assertTrue(
+            "the extension is named as a pointer",
+            attributes.readText().lines().any { it.trim() == "*.pdf filter=lfs diff=lfs merge=lfs -text" },
+        )
+        val once = attributes.readText()
+
+        // **Asking twice must not write twice.** A second line for the same pattern is two rules
+        // that happen to agree today, and the file grows every time somebody toggles the switch.
+        GitService.ensureLfsAttribute(root, "pdf")
+        GitService.ensureLfsAttribute(root, "PDF")
+        assertEquals("and asking again changes nothing", once, attributes.readText())
+        assertEquals(
+            "exactly one line names pdf",
+            once.lines().count { it.trim().startsWith("*.pdf ") },
+            1,
+        )
+    }
+
+    @Test
+    fun `a binary with an LFS line is stored as a pointer, not as its bytes`() {
+        // **The end that matters: git actually stores a pointer.** A line in `.gitattributes` is a
+        // claim; this proves the claim is true by committing a file and reading the tree back.
+        GitService.ensureLfsAttribute(root, "zip")
+        val big = File(root, "archive.zip")
+        big.writeBytes(ByteArray(8192) { (it % 251).toByte() })
+
+        Git(root).use { git ->
+            git.add().addFilepattern("archive.zip").call()
+            git.commit().setMessage("a binary").setAuthor("A", "a@b.c").setCommitter("A", "a@b.c").call()
+        }
+
+        // **Read back from the commit, not from the working tree.** The working tree holds the real
+        // eight kilobytes — the clean filter converts on the way in — so reading the file on disk
+        // would prove nothing. What git *stored* is the question.
+        val bytes = Git(repo).use { git ->
+            val tree = git.repository.parseCommit(git.repository.resolve("HEAD")).tree
+            val entry = tree.getFile("archive.zip")
+            assertTrue("the file is in the tree", entry != null)
+            git.repository.open(entry.oid).use { loader ->
+                val out = java.io.ByteArrayOutputStream()
+                loader.copyTo(out)
+                out.toByteArray()
+            }
+        }
+        // **A pointer is about 130 bytes and starts with the LFS version line.** Eight kilobytes in
+        // the tree would mean the attribute was written and never applied, which is the failure
+        // this test exists to catch — a `.gitattributes` line is a claim, not a mechanism.
+        val text = String(bytes)
+        assertTrue(
+            "what git holds is a pointer, not the eight kilobytes: ${bytes.size} bytes",
+            bytes.size < 300 && text.startsWith("version https://git-lfs.github.com/spec/v1"),
+        )
+    }
+
+    @Test
     fun `a picture is known by the tree even before its bytes arrive`() {
         // **The fact `missing` rests on.** A clone writes the pointer into the working tree and has
         // no bytes for it; the project still has to know the picture exists, or nothing can ever
