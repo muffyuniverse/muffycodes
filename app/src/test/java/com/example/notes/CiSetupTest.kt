@@ -33,14 +33,21 @@ class CiSetupTest {
         override fun identity(token: String) = no("identity")
         override fun listRepos(token: String) = no("listRepos")
         override fun licences(token: String) = no("licences")
-        override fun createRepo(token: String, name: String, licence: String, private: Boolean) =
-            no("createRepo")
-        override fun renameRepo(token: String, ref: RepoRef, name: String) = no("renameRepo")
-        override fun deleteRepo(token: String, ref: RepoRef) = no("deleteRepo")
+        override fun createRepo(
+            token: String,
+            name: String,
+            licence: String,
+            description: String,
+            private: Boolean,
+        ) = no("createRepo")
+        override fun renameRepo(token: String, owner: String, name: String, newName: String) =
+            no("renameRepo")
+        override fun deleteRepo(token: String, owner: String, name: String) = no("deleteRepo")
         override fun cloneUrlFor(owner: String, name: String) = no("cloneUrlFor")
-        override fun webUrl(owner: String, name: String) = no("webUrl")
-        override fun owns(token: String, owner: String, name: String) = no("owns")
-        override fun runs(token: String, ref: RepoRef, branch: String?) = no("runs")
+        override fun webUrl(cloneUrl: String) = no("webUrl")
+        override fun owns(remoteUrl: String) = no("owns")
+        override fun runs(token: String, ref: RepoRef, workflow: String, branch: String, limit: Int) =
+            no("runs")
         override fun jobs(token: String, ref: RepoRef, run: Long) = no("jobs")
         override fun logs(token: String, ref: RepoRef, run: Long) = no("logs")
         override fun artifacts(token: String, ref: RepoRef, run: Long) = no("artifacts")
@@ -83,7 +90,7 @@ class CiSetupTest {
             token: String,
             ref: RepoRef,
             environment: String,
-            branch: String,
+            branches: List<String>,
         ) = no("restrictEnvironmentTo")
     }
 
