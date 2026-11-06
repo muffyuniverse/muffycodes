@@ -3480,23 +3480,6 @@ class AppViewModel @JvmOverloads constructor(
      * Replaces a project with what GitHub holds (§5.2). An existing project is
      * asked about first by the screen; this is the act.
      */
-    fun replaceWithRemote(project: String) {
-        val g = git ?: return
-        busy = true
-        onWorker {
-            val result = g.replaceWithRemote(project)
-            main.post {
-                busy = false
-                message = result.message
-                refresh()
-                // The row's count comes from the working tree, which has just been
-                // replaced wholesale; reading it once, afterwards, is the only way
-                // the number can be right.
-                refreshChanges()
-            }
-        }
-    }
-
     /** What went wrong the last time a sync was asked for, for a screen that asks. */
     var lastSyncError: String? by mutableStateOf(null)
         private set
@@ -3944,6 +3927,18 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Says a project of this name is already here, and stops.
+     *
+     * **The whole answer, because there is no second act.** This used to offer "replace the copy",
+     * which was a second way to destroy a project and a second set of rules about what survives.
+     * Deleting it and importing again is one act the person already knows.
+     */
+    fun saidProjectAlreadyHere(name: String) {
+        message = "\"$name\" is already a project on this phone. Delete it first if you want a " +
+            "fresh copy from GitHub."
+    }
+
     /** Pulls a repository in from GitHub, cloning it as a new project (§5.2). */
     fun pullRepository(repo: Repo) {
         val ws = workspace ?: return
@@ -3951,7 +3946,11 @@ class AppViewModel @JvmOverloads constructor(
         val login = activeLogin ?: return
         val existing = ws.projectNames().firstOrNull { it.equals(repo.name, ignoreCase = true) }
         if (existing != null) {
-            replaceWithRemote(existing)
+            // **No replace.** A project with this name is already here, and the honest answer is to
+            // say so — deleting it and importing again is one act the person already knows, and a
+            // second way to destroy a project would be a second set of rules about what survives.
+            message = "\"${repo.name}\" is already a project on this phone. Delete it first if " +
+                "you want a fresh copy from GitHub."
             return
         }
         busy = true

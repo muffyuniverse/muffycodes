@@ -407,15 +407,15 @@ class SettingsScreenTest {
     // ---- the two capabilities that can be turned off ------------------------
 
     @Test
-    fun `downloading is on by default, and turning it off says what changes`() {
+    fun `the network is on by default, and turning it off says what changes`() {
         // **On by default, unlike the private-network switch**, because the direction of the risk is different:
         // a download writes a file a person can see and delete. The test asserts the default *and* the act,
         // because a switch whose default is wrong is the harder bug to notice.
-        assertTrue("a fresh account may download", scene.settings.httpAllowed)
+        assertTrue("a fresh account may use the network", scene.settings.httpAllowed)
         settings()
 
-        compose.onNodeWithText("Let it download files").performScrollTo()
-        compose.onNodeWithText("Let it download files").performClick()
+        compose.onNodeWithText("Let it use the network").performScrollTo()
+        compose.onNodeWithText("Let it use the network").performClick()
 
         assertEquals("and one tap turns it off", false, scene.settings.httpAllowed)
     }

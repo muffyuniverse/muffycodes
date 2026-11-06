@@ -19,7 +19,7 @@ import java.io.File
  *
  * A project that never saved a picture has nothing to reclaim, and walking every tree to find out is
  * pure cost. So the things that strand content **say so** — a save that touched a picture, and
- * [ProjectGit.replaceWithRemote] — by writing a marker into the project's `agent/` folder, and this
+ * `pull` — by writing a marker into the project's `agent/` folder, and this
  * pass runs only where one is waiting. The marker is deleted only when the pass finished, so a crash
  * or a killed process re-runs it on the next start. Both halves are idempotent: a sweep deletes rows,
  * the store sweep deletes files, and doing either twice is doing it once.

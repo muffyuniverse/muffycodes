@@ -1789,7 +1789,12 @@ class AgentTools(
                 // so"), and `read` reaches them differently — by path and by `path@sha`. Deduping
                 // on content alone would drop the version row whenever nobody had edited since,
                 // which is the commonest case of all.
-                if (content.isNotEmpty() && !blobs.add("$path\u0000$content")) continue
+                // **Only when a query was given.** With no query every version in scope is the
+                // answer, and two saves with identical text are two versions a person may want to
+                // see — the dedupe exists for a *search* that would otherwise repeat a hit, not for
+                // a listing. It is also what keeps a just-created file from losing the version that
+                // created it, since its current text and that version's text are the same.
+                if (query != null && content.isNotEmpty() && !blobs.add("$path\u0000$content")) continue
                 found.add(row)
                 seen.add(shown)
                 state.count++

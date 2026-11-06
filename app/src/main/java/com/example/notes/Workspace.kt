@@ -539,7 +539,15 @@ class Workspace(val accountDir: File) {
      * files are born untracked, it already should be default behaviour."* It was not — the rule was
      * `== UNKNOWN`, and `EntryKind` has a separate `IMAGE`, so pictures were born tracked.
      */
-    fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) != EntryKind.TEXT
+    fun shouldIgnoreOnCreate(file: File): Boolean {
+        // **A folder is not a file kind.** `kindOf` answers FOLDER for a directory, and FOLDER is
+        // not TEXT — so the one-line form ignored every folder a person made, which made
+        // `createFolder` refuse and took a whole screen's worth of behaviour with it. A folder holds
+        // what its files are, and those decide for themselves.
+        val kind = kindOf(file)
+        if (kind == EntryKind.FOLDER) return false
+        return kind != EntryKind.TEXT
+    }
 
     /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
     fun createdByAgent(file: File) {

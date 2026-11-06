@@ -394,8 +394,8 @@ class SearchIndex private constructor(
     // ---- versions ----------------------------------------------------------
     //
     // **A version row is keyed by the blob, not by the commit that saved it.** A commit id is the
-    // wrong key: a force-pushed remote rewrites local commits, and `replaceWithRemote` can replace
-    // this phone's history outright — so a commit-keyed row dangles, and it dangles in bulk. A blob is
+    // wrong key: a force-pushed remote rewrites local commits, and a pull that fast-forwards over
+    // them can replace this phone's history — so a commit-keyed row dangles, and it dangles in bulk. A blob is
     // the content, which is what an index is about and what does not move. The commit is resolved at
     // read time instead ([commitsFor]), because "when" is the one thing worth not storing.
 

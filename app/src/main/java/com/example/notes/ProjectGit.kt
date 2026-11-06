@@ -463,50 +463,6 @@ class ProjectGit(
     }
 
 
-    /** Replaces the project's files with what the remote holds. */
-    fun replaceWithRemote(project: String): GitService.RemoteResult {
-        val repo = open(project) ?: return GitService.RemoteResult(
-            "This project has no repository yet", false
-        )
-        // The files are now GitHub's, and nothing has to be noted down: the row's count is a diff
-        // against that same remote-tracking ref.
-        //
-        // **The pictures are fetched before the checkout, not after.** JGit's smudge reads
-        // `.git/lfs/objects` and asks the network for what is missing — but over HTTPS on a private
-        // repository it cannot authenticate, so it asks, is refused, and **leaves the pointer in the
-        // working tree without an error**. Downloading first means the smudge finds the bytes already
-        // there and never needs the connection it cannot make.
-        val remote = repo.config.getString("remote", "origin", "url")
-        val fetched = LfsSync.pull(repo, tokenProvider(), remote)
-        val result = GitService.resetToRemote(repo, tokenProvider())
-        // **And whatever is still a pointer is said out loud.** A picture that did not arrive must
-        // never be shown as one that did.
-        val stillPointers = if (result.success) LfsSync.missing(repo) else emptyList()
-        // **Closed once, here, and never by `use`** — the three calls above share one repository and
-        // the last of them is what the answer is built from.
-        repo.close()
-        // **A pull is a change with no commit**, which is the second case the commit hook cannot
-        // see — the working tree is replaced by the remote's and no local version is written. Left to
-        // the search guard it would be indexed when somebody next searched, which is to say the one
-        // search that most needs to be fast pays for the whole diff. Asked for here instead, and only
-        // when it worked: a failed reset changed nothing worth indexing.
-        if (result.success) {
-            index(project, "the remote replaced the files")
-            // **A reset strands commits too, and no prune sees it.** A force-pushed or rebased remote
-            // makes this phone's old commits unreachable; nothing shortened the history, so the only
-            // place that can notice is here, where the reset happened.
-            Maintenance.mark(repoDir(project), "the remote replaced the history")
-        }
-        return if (stillPointers.isEmpty()) result else result.copy(
-            message = result.message +
-                "; ${stillPointers.size} picture(s) did not arrive: " +
-                stillPointers.take(5).joinToString(", ") +
-                (if (stillPointers.size > 5) " and ${stillPointers.size - 5} more" else "") +
-                (fetched.why?.let { " ($it)" } ?: ""),
-            success = false,
-        )
-    }
-
     /**
      * Clones a remote into the project's folder — which becomes the repository.
      *

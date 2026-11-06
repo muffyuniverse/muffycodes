@@ -151,7 +151,7 @@ VOCABULARY = {
     # called both "project" could not answer "when did this project stop being an Android app".
     "project type",
     # replacing a copy that is already here
-    "replace", "confirm replace",
+    "replace", "confirm replace", "already here",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
     # **A bubble is what the conversation is made of now**, so opening one is its own act - and the

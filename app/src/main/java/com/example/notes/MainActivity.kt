@@ -137,7 +137,6 @@ private sealed interface Pending {
     data object DeleteSelected : Pending
     data class RestoreDeleted(val folder: File) : Pending
     data class DeleteEntry(val entry: Entry) : Pending
-    data class ReplaceProject(val project: String) : Pending
     /** What the project is: the one-word caption in the bar, tapped. */
 }
 
@@ -590,7 +589,6 @@ private fun AppRoot(viewModel: AppViewModel) {
         pending = pending,
         dismiss = { pending = Pending.None },
         newProject = { pending = Pending.NewProject },
-        askReplace = { project -> pending = Pending.ReplaceProject(project) },
     )
 }
 
@@ -601,7 +599,6 @@ private fun Dialogs(
     pending: Pending,
     dismiss: () -> Unit,
     newProject: () -> Unit,
-    askReplace: (String) -> Unit,
 ) {
     // **This composable's own context**, for the two places that leave the app: the OpenRouter
     // sign-in and a link in a document. The parent has one too, and they are different scopes —
@@ -753,10 +750,12 @@ private fun Dialogs(
                 onPick = { repo ->
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
-                        // Already here: replacing the copy is a question (§5.2). The choice that
-                        // started it is "replace"; the question's button is its confirm.
-                        tap("replace", repo.name)
-                        askReplace(repo.name)
+                        // **Already here, and that is the whole answer.** There used to be a
+                        // "replace this copy?" question here, which was a second way to destroy a
+                        // project. Deleting it and importing again is one act the person already
+                        // knows, so this says what is true and stops.
+                        tap("already here", repo.name)
+                        viewModel.saidProjectAlreadyHere(repo.name)
                     } else {
                         tap("confirm add project", repo.name)
                         viewModel.pullRepository(repo)
@@ -947,17 +946,6 @@ private fun Dialogs(
             },
         )
 
-        is Pending.ReplaceProject -> ConfirmDialog(
-            title = "Replace ${pending.project}?",
-            text = "The files on this phone are replaced with what GitHub holds. " +
-                "Your local files beside the repository are kept.",
-            confirm = "Replace",
-            onDismiss = dismiss,
-            onConfirm = {
-                tap("confirm replace", pending.project)
-                viewModel.replaceWithRemote(pending.project)
-            },
-        )
     }
 }
 

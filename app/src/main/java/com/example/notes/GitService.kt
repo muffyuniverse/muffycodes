@@ -545,9 +545,8 @@ object GitService {
     /**
      * Fetches `origin`, leaving the working tree alone.
      *
-     * Separate from [resetToRemote] because the two questions differ: that one replaces this phone's
-     * files with GitHub's, this one only learns what GitHub has. A pull needs the second — deciding
-     * what to do with the answer is the merge's job, not the fetch's.
+     * It only learns what GitHub has. A pull needs exactly that — deciding what to do with the
+     * answer is the merge's job, not the fetch's.
      */
     fun fetch(repo: Repository, token: String?) {
         Git(repo).use { git ->
@@ -1159,67 +1158,6 @@ object GitService {
      * Makes the working tree match the remote branch exactly: fetch, reset hard
      * onto it, then remove everything the remote does not have.
      */
-    fun resetToRemote(repo: Repository, token: String?): RemoteResult {
-        // Named outside the block below so that the answer can say which branch the
-        // phone is on now — the half of a replace that is otherwise invisible.
-        var landedOn: String? = null
-        return try {
-            val branch = currentBranch(repo)
-            Git(repo).use { git ->
-                val fetch = git.fetch().setRemote("origin")
-                credentials(remoteOf(repo), token)?.let { fetch.setCredentialsProvider(it) }
-                fetch.call()
-
-                // **Which branch is the project's?** Not necessarily the one this
-                // phone is on. A repository made before GitHub's own default changed
-                // has `master`, and one this app created but never synced has no
-                // remote branch at all — both used to reach
-                // `ResetCommand`/`RevWalk` with a ref that does not exist and answer
-                // with `RefNotFoundException: Ref origin/main not found`, which reads
-                // as the app being broken rather than as a different branch name.
-                val remote = remoteBranch(repo, branch)
-                    ?: return RemoteResult(
-                        "GitHub has nothing on this project yet, so there is no copy to " +
-                            "replace it with. Sync this phone's copy to put it there.",
-                        false,
-                    )
-
-                // **The branch is renamed to GitHub's.** Replacing the files is the
-                // visible half; the other half is that the phone and GitHub must
-                // agree about which branch this project is. A phone left on `main`
-                // after taking a `master` repository would push a branch GitHub does
-                // not show, and the history on GitHub would stay as long — and as
-                // old — as it was.
-                if (remote != branch) {
-                    val exists = repo.exactRef("refs/heads/$remote") != null
-                    git.checkout()
-                        .setName(remote)
-                        .setCreateBranch(!exists)
-                        .setStartPoint(ORIGIN + remote)
-                        .call()
-                }
-
-                landedOn = remote
-                git.reset()
-                    .setMode(ResetCommand.ResetType.HARD)
-                    .setRef(ORIGIN + remote)
-                    .call()
-
-                // Anything the remote does not have goes, so the folder really
-                // matches what GitHub holds.
-                val status = git.status().call()
-                (status.untracked + status.untrackedFolders + status.missing)
-                    .forEach { path -> File(repo.workTree, path).deleteRecursively() }
-            }
-            RemoteResult("Replaced with what GitHub has (on ${landedOn ?: "its own branch"})", true)
-        } catch (e: Throwable) {
-            // `Throwable`, not `Exception`: what JGit can throw on a phone includes
-            // errors rather than exceptions, and an error that escapes here ends the
-            // app instead of saying what went wrong.
-            RemoteResult(Secrets.describe(e), false)
-        }
-    }
-
     /**
      * The remote branch that stands for this project.
      *
