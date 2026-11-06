@@ -69,10 +69,44 @@ class CiToolsTest {
     /** What `upload` was asked to export, so a test can see the call rather than the store. */
     private val exported = mutableListOf<File>()
 
+    /** A key and a seal, so these tests exercise the real reader rather than a stub of it. */
+    private val KEY = "Zm9yLXRlc3Rpbmctb25seS0zMi1ieXRlLWtleSE="
+
+    private fun sealed(text: String): String {
+        val salt = ByteArray(8) { (it + 1).toByte() }
+        val material = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(javax.crypto.spec.PBEKeySpec(KEY.toCharArray(), salt, 10_000, 48 * 8))
+            .encoded
+        val cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(
+            javax.crypto.Cipher.ENCRYPT_MODE,
+            javax.crypto.spec.SecretKeySpec(material.copyOfRange(0, 32), "AES"),
+            javax.crypto.spec.IvParameterSpec(material.copyOfRange(32, 48)),
+        )
+        val body = "Salted__".toByteArray(Charsets.US_ASCII) + salt +
+            cipher.doFinal(text.toByteArray(Charsets.UTF_8))
+        return java.util.Base64.getEncoder().encodeToString(body)
+    }
+
+    /** The account's secrets, so a test can see whether the log reader was given the key. */
+    private val secrets = mutableMapOf<String, String>()
+
+    private val credentials = object : Credentials {
+        override var activeLogin: String? = "dev"
+        override fun logins() = listOf("dev")
+        override fun token(login: String) = "a-key"
+        override fun setToken(login: String, token: String) {}
+        override fun forget(login: String) {}
+        override fun hasToken(login: String) = true
+        override fun secret(name: String) = secrets[name]
+        override fun setSecret(name: String, value: String) { secrets[name] = value }
+    }
+
     private fun tools(withGitHub: Boolean = true, withDownloads: Boolean = false) = AgentTools(
         ws, repo, git, log,
         github = { if (withGitHub) github else null },
         githubToken = { if (withGitHub) "a-key" else null },
+        credentials = credentials,
         // **Injected rather than reached for**, because `MediaStore` needs a `Context` and this test
         // has no phone. What is being tested here is the tool's decision — what it hands over — and
         // the real folder is `MediaStoreDownloads`.
@@ -213,6 +247,35 @@ class CiToolsTest {
         // **Not the whole log in the answer.** A tool that files a result and then pastes it back has
         // done the work of filing for nothing.
         assertFalse("the answer is not the log: $body", body.contains("step 400"))
+    }
+
+    @Test
+    fun `an encrypted log is opened with the account's key before it is filed`() {
+        // **Without this the tool files base64**, which reads exactly like a broken build. The build
+        // encrypts its own output; the key is the account's, in the same store as every other secret.
+        val plain = "EncryptedLogTest > something FAILED\n  AssertionError: unlocked"
+        secrets[EncryptedLog.KEY_NAME] = KEY
+        aRun(100, "failure", "Test (0)" to EncryptedLog.MARKER + "\n" + sealed(plain))
+
+        val body = call("runs", """{"run":100}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        val filed = File(ws.projectDir(repo), "agent/ci/run-100.log").readText()
+        assertTrue("the filed log is the plaintext: $filed", filed.contains("AssertionError: unlocked"))
+        assertFalse("and never the ciphertext: $filed", filed.contains(EncryptedLog.MARKER))
+    }
+
+    @Test
+    fun `an encrypted log with no key says so rather than filing base64`() {
+        // **The app's own gap must not read as the build's failure.** With no key stored the honest
+        // answer is that the app has none — not a page of ciphertext, and not a refusal that blames
+        // the run.
+        aRun(100, "failure", "Test (0)" to EncryptedLog.MARKER + "\n" + sealed("anything"))
+
+        val body = call("runs", """{"run":100}""")
+
+        val filed = File(ws.projectDir(repo), "agent/ci/run-100.log").readText()
+        assertTrue("it names the missing key: $filed", filed.contains("no key"))
     }
 
     @Test

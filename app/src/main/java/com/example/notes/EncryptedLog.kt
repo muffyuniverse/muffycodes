@@ -58,6 +58,16 @@ object EncryptedLog {
     /** What an encrypted log starts with. The trailing space is part of it. */
     const val MARKER = "MUFFYLOG1 "
 
+    /**
+     * The name the key is kept under, in two places that must agree: the account's secret store on
+     * this phone, and the repository's **environment** secret that the workflow reads.
+     *
+     * One constant rather than a literal in each place, because a mismatch between the two is
+     * invisible: the workflow would encrypt under an empty value and every run would be unreadable,
+     * with nothing reporting a problem.
+     */
+    const val KEY_NAME = "MUFFY_LOG_KEY"
+
     /** The eight bytes openssl puts in front of the salt. */
     private val SALTED = "Salted__".toByteArray(Charsets.US_ASCII)
 

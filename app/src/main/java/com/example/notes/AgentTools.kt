@@ -3175,7 +3175,12 @@ class AgentTools(
         if (found.error != null) {
             return refusal(ciSaid(found.error, found.status))
         }
-        val all = found.value.orEmpty()
+        // **The log is opened here, at the one place that reads one.** A build that encrypts its
+        // output prints only ciphertext, so without this every failing run would answer a page of
+        // base64 that reads exactly like a broken build. The key is the account's, kept in the same
+        // store as every other secret.
+        val key = credentials?.secret(EncryptedLog.KEY_NAME)
+        val all = found.value.orEmpty().mapValues { (_, text) -> EncryptedLog.read(text, key) }
         val wanted = args.optString("job").trim()
         val chosen = if (wanted.isBlank()) {
             all
