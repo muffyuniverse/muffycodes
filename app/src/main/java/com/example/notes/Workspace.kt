@@ -1295,7 +1295,12 @@ class Workspace(val accountDir: File) {
         //
         // **Refused, not hidden.** `read` and `search` still see it, the same as a locked file —
         // "locked doesnt mean blind, it means readonly".
-        if (path == ASSETS || path.startsWith("$ASSETS/")) return true
+        //
+        // **The path is account-relative**, so it is `Shopping/assets/milk.png` rather than
+        // `assets/milk.png`. The folder name is matched as a whole segment anywhere in the path,
+        // which is what makes it a rule about a folder rather than about a string: `assets-old/` is
+        // not `assets/`, and a project *named* `assets` is not a folder inside one.
+        if (path.split('/').any { it == ASSETS }) return true
         val locked = locked()
         if (locked.isEmpty()) return false
         if (path in locked) return true

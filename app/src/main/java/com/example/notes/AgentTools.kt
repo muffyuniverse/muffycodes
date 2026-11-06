@@ -681,10 +681,13 @@ class AgentTools(
                     "`word: true` matches whole words only. " +
                     "**`count: true` answers `path: N` per file** — how many lines match, not which " +
                     "ones — for a question about where something is used most. " +
-                    "**`history: true` searches saved versions too, newest first**, so the newest " +
-                    "version that matches is the first row. In text mode every version that changed " +
-                    "the file is a row; in semantic mode there is one row per file (the closest " +
-                    "version), because a question about meaning is a question about places. " +
+                    "**`history: true` searches saved versions too**, so a hit in a version is " +
+                    "answered as `path@sha7` — which `read {revision}` takes directly. In text mode " +
+                    "every version that changed the file is a row, newest first, so the newest " +
+                    "version that matches is the first. In semantic mode a file's current text and " +
+                    "its saves are separate rows, because 'it is here now' and 'this is the save " +
+                    "that said it' are different answers — but the same text twice under one commit " +
+                    "is one row. " +
                     "**`paths`** is how many paths to answer with: 10 by default when a `query` " +
                     "filters, 100 (the most) when nothing does, because a listing is read whole. " +
                     "It says when it stopped.",
