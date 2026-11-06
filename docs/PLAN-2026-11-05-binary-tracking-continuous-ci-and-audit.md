@@ -654,6 +654,66 @@ build log unreadable, so the order is: the reader first (live now, harmless), th
 encryption. That is the reverse of the usual "turn it on and see", and it is the reverse because the
 failure mode of getting it wrong is a log nobody can read.
 
+### 3c.7c Done by hand, and what it proved
+
+A throwaway branch, a deliberate failing test, and a real dispatch. The test asserted:
+
+```kotlin
+assertEquals(
+    "the probe's expected sentence, which must never appear in a public log",
+    "expected-value-that-must-stay-private",
+    "actual-value-also-private",
+)
+```
+
+**The log.** The step redirected the build's output to a file, sealed it, and printed only:
+
+```
+MUFFYLOG1 U2FsdGVkX19S1D9GGSTB…
+```
+
+`grep -c "expected-value-that-must-stay-private"` over the **whole public log** → **0**. The blob was
+23 KB; decrypting it with the environment key printed the build's output, including
+`EncryptedLogTest > PROBE a deliberate failure … FAILED`. **So the scheme works exactly as designed.**
+
+**The artifacts — and this is the part that changes the design.** The `test-report` artifact from the
+same run contains:
+
+```xml
+message="org.junit.ComparisonFailure: the probe's expected sentence, which must never appear in a
+public log expected:&lt;[expected-value-that-must-stay]-private&gt; but was:&lt;[actual-value-also]-private&gt;"
+```
+
+**The private sentence is in the artifact, in plain text.** Encrypting the log while uploading the
+report achieves nothing at all.
+
+And the artifact is not private: **download requires any logged-in GitHub account** —
+`401` anonymous, `200` with a token. Not anonymous, but "anybody with a GitHub account" is not a
+boundary worth the name. Measured, and corroborated by `actions/upload-artifact#51`.
+
+**A third leak the probe found by accident.** The blob was 23 KB, and most of it was Gradle's own
+download chatter. That is harmless — but it proves the redirect covers *everything* the step prints,
+which is the property the scheme depends on.
+
+### 3c.7d What this means: the log is the smaller half
+
+| What leaks | Encrypted by the log scheme? | Fix |
+|---|---|---|
+| The build's stdout/stderr | **Yes** — measured, 0 occurrences in the public log | the redirect + seal, done by hand and working |
+| The JUnit XML report | **No** | seal the report before `upload-artifact`; the app unseals it |
+| Stack traces and `file:line` in that report | **No** | same |
+| `system-out` captured by JUnit | **No** | same |
+| Artifact **names** and sizes | **No** — public metadata | already a rule: never a file name |
+| Job and step names, branch, commit title | **No** | already a rule |
+
+So `artifacts` must unseal too, and the report must be sealed before it is uploaded. **The same
+`EncryptedLog` reader serves both**, because a sealed file and a sealed log are the same bytes: marker,
+`Salted__`, salt, ciphertext.
+
+**The report needs a marker in its own right.** A sealed `.zip` is not readable by a person either, so
+the artifact carries `report.zip.enc` alongside a one-line `report.zip.enc.txt` saying it is sealed —
+otherwise "the report is encrypted" and "the report is empty" look the same to whoever downloads it.
+
 ### 3c.8 What not to do
 
 - **Do not encrypt the artifacts.** Their bytes already need authentication (401 measured); only their
