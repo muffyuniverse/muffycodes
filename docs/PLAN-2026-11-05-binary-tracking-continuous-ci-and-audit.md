@@ -315,6 +315,12 @@ release until the keystore secret is fixed**, and that is a person's job: it nee
 keystore, which is not in this repository by design. It is recorded as an **open defect**, not
 something to work around by changing the workflow.
 
+> **THE WATCHER WAS SCRAPPED on the operator's call, 2026-11-06.** Everything below in §3.3–§3.3f is
+> the record of what it did and why it was built; §3d is the measurement that showed it was not worth
+> it, and `watch.yml` is deleted from both `main` and `development`. The reasoning is kept because it
+> is the reasoning that would be repeated by anybody who proposed it again — and because §3d.1's
+> five-second measurement is the answer.
+
 ### 3.3f Measured — both halves of the watcher
 
 **Half one, nothing new** (run `42158094877`): 8 seconds, `Build the new commit` **skipped**, log says
@@ -963,6 +969,30 @@ self-hosted runner     →  long poll, 50-second connection, told within millise
 **The one case where polling is genuinely the only way:** a machine that cannot receive an inbound
 connection *and* cannot run the runner agent — for example a build that must be started by something
 outside GitHub entirely. That is not this project.
+
+### 3d.9 Scrapped, and what survives
+
+`watch.yml` is deleted from `main` and `development`; GitHub no longer lists a `Watch` workflow.
+**Removed rather than disabled**, because a workflow that does not run is a thing somebody has to keep
+reading and eventually re-enabling.
+
+**Three things were kept on purpose, and each is a lesson rather than machinery:**
+
+1. **`tools/check-workflow.py`'s directory glob.** The bug that file fixed was the *hardcoded name*, not
+   the number of files — so a version that named the only file it expected would come back the moment a
+   second workflow was added. The comment now says that instead of naming the deleted watcher.
+2. **The cache key's two-value form** (`pr` / `build`), with the measurement that produced it. The
+   watcher is gone; the fact that a dispatched build and a pushed build run the same configuration is
+   not.
+3. **§3d in this document.** The measurement that decided it — a push builds in 5–6 seconds, the cron
+   fired three times in three hours, a 2-second poll would exhaust the API budget in 33 minutes, and the
+   runner is *told* over a 50-second held connection rather than polling.
+
+**What this cost, honestly:** the watcher was built, measured, documented in two sections, and deleted
+within the same day. The measurement that would have prevented it — §3d.1's five seconds — took one
+command. **The lesson is that the trigger was already doing the job, and asking "what does this add over
+what already happens" before building would have answered it.** That is recorded here rather than
+quietly dropped, because a plan that only records the wins teaches nothing.
 
 ## 4. Part four — the audit of today's work
 
