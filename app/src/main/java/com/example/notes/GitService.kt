@@ -1319,9 +1319,11 @@ object GitService {
             val a = walk.parseCommit(old).tree
             val b = walk.parseCommit(new).tree
             // **`DiffFormatter` implements `AutoCloseable`, not `Closeable`**, so `use` reaches it
-            // through the Kotlin extension. `NullOutputStream` because the entry list is what this
-            // needs — the formatted patch text would be a second representation of the same facts.
-            val formatter = DiffFormatter(NullOutputStream())
+            // through the Kotlin extension. `NullOutputStream.INSTANCE` because that class has a
+            // **private constructor** — it is a singleton, and `NullOutputStream()` does not compile.
+            // The entry list is what this needs; the formatted patch text would be a second
+            // representation of the same facts, computed and thrown away.
+            val formatter = DiffFormatter(NullOutputStream.INSTANCE)
             try {
                 formatter.setRepository(repo)
                 val entries = formatter.scan(a, b)
