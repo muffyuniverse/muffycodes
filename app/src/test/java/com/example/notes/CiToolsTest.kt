@@ -98,6 +98,8 @@ class CiToolsTest {
         override fun setToken(login: String, token: String) {}
         override fun forget(login: String) {}
         override fun hasToken(login: String) = true
+        override fun modelKey(login: String): String? = null
+        override fun setModelKey(login: String, key: String) {}
         override fun secret(name: String) = secrets[name]
         override fun setSecret(name: String, value: String) { secrets[name] = value }
     }
