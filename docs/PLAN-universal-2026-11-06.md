@@ -708,6 +708,51 @@ leaving the screen. Fails today.
 
 ---
 
+## 8b. The audit: every tool, its tests, and the gaps that remain
+
+**Run at `57fe7f1`, after Parts 4 and D landed.** 21 tools. The count below is mentions in the test
+sources, which is a proxy — the real question is asked per tool afterwards.
+
+| Tool | Tests | Verdict |
+|---|---|---|
+| `search` | 110 | **The strongest tool in the set.** Text mode, semantic mode, history in both, scope/depth/paths, `word`, `count`, the per-file cap, the per-project refusal, and the "no model" refusal all have a test that fails if the behaviour breaks. |
+| `read` | 118 | Strong. `grep` in both shapes, `numbers`, `word`, ranges, revisions, `multi`, binary refusal. |
+| `write` | 40 | Strong: three shapes, the stale-read check, locked paths, `multi`. |
+| `http` | 30 | Every behaviour reasoned; **the network is faked everywhere except `LiveHttpTest`**, which is skipped unless `MUFFY_LIVE_HTTP=1`. That is the largest remaining risk and it is now measurable rather than unknown. |
+| `query`, `browse`, `look`, `ci`, `artifact`, `download`, `downloads`, `upload`, `archive`, `mcp` | 6–35 | Covered, including their refusals. |
+| **`pull`, `push`** | **2, 4** | **The thinnest.** Both refusals are tested (no remote; uncommitted change) and both are the cases an agent meets offline. **Neither has ever run against a real remote** — the offline suite cannot, and that is unchanged. |
+| **`shot`** | 6 | The engine is tested through `browse`; a real capture needs a device. |
+| **`git`** | 4 | New, and every path is tested: counts, folder prefix, binary by name, one-revision refusal, unknown op, unknown revision, and the schema/KEYS agreement. |
+
+### The semantic-search audit, which was asked for specifically
+
+**No silent incompleteness.** `caughtNotes` is added to the answer *before* the empty case is
+decided, so "nothing matches" always arrives with the reason its index may be short. The comment
+records that this was a real bug: the first version added the notes after the search and skipped them
+on the way out, so a pass that ran out of time answered "nothing is indexed yet" with no reason.
+
+**No silent no-op on a misconfigured model.** A model chosen after the index was built is **refused by
+name**, not obeyed and not ignored — same dimensions do not rescue it, because two 1024-dimension
+models are still two coordinate systems and a cosine between them lands in [-1, 1] and looks like a
+score.
+
+**No silent stale row.** A version whose commits no longer reach it is dropped and counted, rather
+than answered with an id `read` cannot use.
+
+**What the audit changed.** Two real defects, both from showing a fifth of what had been paid for:
+a row showed `excerpt(one.text)` — 160 characters of an 800-character chunk, so the embedding and the
+reranker both worked on text the answer then threw away; and semantic `history` filled `paths` with
+thirteen rows about one paragraph, because every version of a file scores the same. Rows now carry the
+whole chunk with its line range, and collapse only genuinely duplicate rows.
+
+### The gaps that remain, stated rather than hidden
+
+1. **`http` has made no real request in CI.** `LiveHttpTest` exists and is skipped by default. Run it
+   with `MUFFY_LIVE_HTTP=1` before relying on `http` for anything that matters.
+2. **`pull`/`push` have never run against a real remote.**
+3. **`MediaStore` has never run on a device.**
+4. **`CiSetup` has no UI door** — a tested function nothing calls.
+
 ## 9. What is kept, and the evidence for each
 
 These were each considered for removal and each has a reason that is a *measurement*, not a preference.
