@@ -174,7 +174,8 @@ class SecretsScreenTest {
         assertEquals("keeping leaves it", listOf("github"), scene.viewModel.secretNames())
 
         compose.onNodeWithText("Remove").performClick()
-        compose.onAllNodesWithText("Remove")[1].performClick()
+        // **By its own word**, because the row behind the window says Remove too.
+        compose.onNodeWithText("Forget").performClick()
         assertEquals("and removing forgets it", emptyList<String>(), scene.viewModel.secretNames())
     }
 

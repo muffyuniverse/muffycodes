@@ -126,7 +126,12 @@ fun SecretsScreen(
                         names = viewModel.secretNames()
                         removing = null
                     },
-                ) { Text("Remove") }
+                ) {
+                    // **"Forget", not "Remove".** The row behind the window already has a Remove,
+                    // so two buttons reading the same word in one frame is a test that has to
+                    // count them — and a person who cannot tell which one they are about to press.
+                    Text("Forget")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { removing = null }) { Text("Keep") }
@@ -156,7 +161,11 @@ fun AddSecretDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add a secret") },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            // **No scroll here, deliberately.** Three fields fit, and a scrollable Column inside an
+            // AlertDialog never reports idle in a Robolectric test — the scroll state animates while
+            // the dialog settles, so a test that types into it waits for a quiescence that does not
+            // come. The list behind the dialog scrolls, because that one grows.
+            Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
