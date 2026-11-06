@@ -714,6 +714,42 @@ So `artifacts` must unseal too, and the report must be sealed before it is uploa
 the artifact carries `report.zip.enc` alongside a one-line `report.zip.enc.txt` saying it is sealed —
 otherwise "the report is encrypted" and "the report is empty" look the same to whoever downloads it.
 
+### 3c.7e Built and proven, end to end
+
+Run `42180308449`, all five jobs green:
+
+```
+Test (0): success   Test (1): success   Build the release: success
+Deep Checks: skipped                Deliver: success
+artifacts: build-bundle 18.4 MB · scenarios 850 KB · dev-apk 17.5 MB
+```
+
+- **The `scenarios` artifact is sealed** — it downloads as `scenarios.zip.enc` + `.enc.txt`, and
+  `find -name "*.png"` inside it returns nothing. The screenshots are not in the clear.
+- **The bundle `Deliver` assembled holds real pictures** — `scenarios/01-first-open/after.png` and so
+  on, because that job opens the seal. So the sealing costs the person nothing: what they download is
+  the report they always got.
+- **The log is sealed** — `MUFFYLOG1 U2FsdGVkX1+…`, and the private sentence appeared zero times in the
+  whole public log on the probe run.
+
+**Five bugs, all caught by CI rather than by reading.** Three are worth naming because each was
+invisible in the code that produced it:
+
+1. **`PBEKeySpec` takes BITS.** `KEY + IV` asked for 48 *bits* — six bytes — and every derivation threw
+   while every constant read as though it were right.
+2. **`zip.readBytes()` reads the whole stream, not the entry.** A `ZipInputStream` runs past the end of
+   the current entry into the rest of the archive, so the note file came back glued to the ciphertext.
+   The limit is the entry's declared size; `read()` also overruns, so stopping at the stream's end is
+   not the same thing.
+3. **A sealed file's plaintext is base64 of its bytes.** `openssl -base64` writes base64 and the file is
+   that base64 decoded — so `openBytes` decrypted correctly and then decoded a second time. **Found by
+   decrypting the test-report artifact of my own failing run with the key**, which is the scheme
+   working as intended: the failure was readable only to someone holding the key.
+
+**Two jobs needed `environment: ci` and the checker refused both edits** — `test` and `deliver`. Each
+time the shape was the same: the seal would have run under an empty password, every artifact unreadable,
+and nothing reporting a problem. The rule written in §3c.6 paid for itself twice within the hour.
+
 ### 3c.8 What not to do
 
 - **Do not encrypt the artifacts.** Their bytes already need authentication (401 measured); only their
