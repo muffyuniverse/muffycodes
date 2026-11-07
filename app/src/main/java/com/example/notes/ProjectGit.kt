@@ -38,11 +38,43 @@ class ProjectGit(
      * thread, and a test that wants to see *that a commit asks for an index* passes a recorder. The
      * app passes `IndexQueue::want` at the places that also configure the queue.
      */
-    private val index: (String, String) -> Unit = { _, _ -> },
+    /**
+     * How to ask for a background index pass: **(project, branch, why)**, or a no-op.
+     *
+     * The branch is in the call because the index is per worktree (§13d): a commit in `feature`'s tree
+     * asks for `feature`'s index, and asking for the project alone would have the pass walk main's
+     * files and leave the branch's index describing the wrong tree.
+     */
+    private val index: (String, String, String) -> Unit = { _, _, _ -> },
+
+    /**
+     * **The branch this view of the repository is on** (§13d), and therefore which working tree it
+     * opens, locks and commits in.
+     *
+     * `main` by default, because a project's own folder is main's tree — so every caller that does not
+     * care keeps exactly the behaviour it had. [onBranch] is how the agent gets a view of the branch it
+     * is actually standing in: without it, an agent on `feature` wrote files into `feature`'s worktree
+     * and then committed **main's** tree, which is a commit that records nothing and says nothing.
+     */
+    private val branch: String = AgentSession.MAIN,
 ) {
 
-    /** The worktree of a project — **which is the project's own folder.** */
-    fun repoDir(project: String): File = workspace.projectDir(project)
+    /**
+     * **The same repository, seen from another branch's working tree.**
+     *
+     * One method rather than a branch parameter on all thirty: the providers are the same lambdas, the
+     * lock is keyed by the common directory (so both views share it), and only the directory each
+     * operation opens changes.
+     */
+    fun onBranch(branch: String): ProjectGit =
+        if (branch == this.branch) this
+        else ProjectGit(workspace, tokenProvider, authorProvider, index, branch)
+
+    /**
+     * The working tree of a project on **this view's branch** — the project's own folder on `main`, the
+     * branch's worktree otherwise.
+     */
+    fun repoDir(project: String): File = workspace.treeOf(project, branch)
 
     /** True when the project has a repository. */
     fun isRepository(project: String): Boolean = GitService.isRepository(repoDir(project))
@@ -223,7 +255,7 @@ class ProjectGit(
                     //
                     // A commit that wrote nothing asks for nothing: `written` is false, and a pass
                     // would answer "nothing had changed" at the cost of a walk.
-                    index(project, "a change was saved")
+                    index(project, branch, "a change was saved")
                 }
                 outcome
             }
@@ -564,7 +596,7 @@ class ProjectGit(
             // fires for it — and a project that arrived from GitHub is exactly the case where the
             // whole index is stale at once. The queue makes it background work with a result, rather
             // than the first search paying for it while somebody waits.
-            index(project, "the project was added")
+            index(project, branch, "the project was added")
         }
         return result
     }

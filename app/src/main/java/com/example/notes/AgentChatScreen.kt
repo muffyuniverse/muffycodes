@@ -114,7 +114,9 @@ fun AgentChatScreen(
     onReport: () -> Unit = {},
 ) {
     val project = viewModel.chatProject ?: return
-    val session = viewModel.sessionOf(project)
+    // **This conversation's session**, which is the project's on the branch the chat was opened
+    // from (§13d) — not "the first session for this project".
+    val session = viewModel.sessionOf(project, viewModel.chatBranch)
     // Read the generation so a fresh read of an identical-looking conversation still redraws;
     // it is also the key that follows a new turn's arrival.
     val generation = viewModel.chatGeneration
@@ -367,7 +369,7 @@ fun AgentChatScreen(
                     // one thing a person needs to know afterwards is said in the sentence under
                     // the screen.
                     TextButton(
-                        onClick = { viewModel.resetAgent(project) },
+                        onClick = { viewModel.resetAgent(project, viewModel.chatBranch) },
                         enabled = !viewModel.chatWorking,
                     ) {
                         Text("Reset")

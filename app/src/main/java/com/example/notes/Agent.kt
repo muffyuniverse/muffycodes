@@ -246,6 +246,15 @@ class Agent(
      * config", which [SemanticSearch] turns into the refusal that names the setting.
      */
     private val models: () -> ModelConfig? = { null },
+    /**
+     * **The branch this conversation is on** — and therefore the working tree it can reach (§13d).
+     *
+     * Passed straight to [AgentTools], where the reasoning lives. It is on `Agent` as well because a
+     * turn's own identity is the worktree's: the log it appends to, the paths it writes and the files
+     * it reads are all one branch's, and a branch that could be reached from the tools but not from the
+     * record would be two answers to one question.
+     */
+    private val branch: String = AgentSession.MAIN,
 ) {
 
     private val tools = AgentTools(
@@ -258,11 +267,13 @@ class Agent(
         github = github, githubToken = githubToken, phone = phone,
         modelSees = modelSees,
         onDiskChanged = onDiskChanged,
-        // **One engine per agent, because one agent is one project.** That is also the extent of a
+        branch = branch,
+        // **One engine per agent, because one agent is one worktree.** That is also the extent of a
         // semantic search — see [SemanticSearch] — so the two facts are the same fact here.
         semantic = SemanticSearch(
             ws = ws,
             project = project,
+            branch = branch,
             embedder = embedder,
             embedding = { models()?.embedding },
             rerank = { models()?.rerank },

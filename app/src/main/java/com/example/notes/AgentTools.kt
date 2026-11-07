@@ -186,6 +186,20 @@ class AgentTools(
      * intention. Defaults to nothing, so a tool set built in a test needs no screen at all.
      */
     private val onDiskChanged: () -> Unit = {},
+    /**
+     * **The branch this agent is on (§13d)**, which is the same thing as the working tree it stands in.
+     *
+     * The operator's rule: *"each branch should have its own agent because branch is a separate worktree
+     * and agent is worktree scoped."* Every path below is answered from [projectDir], so this one value
+     * is what makes the whole tool set worktree-scoped — a `write` on `feature` lands in `feature`'s
+     * tree, a `read` sees `feature`'s files, and `main` is untouched while it works.
+     *
+     * **`main` by default, and that is exact rather than a fallback**: a project's own folder *is* main's
+     * working tree, so a tool set built without a decision behaves exactly as one with `main` said out
+     * loud. It is the ambient [Workspace.activeBranch] that must never be used here — an agent runs in a
+     * service, and the person may be looking at another branch while it works.
+     */
+    private val branch: String = AgentSession.MAIN,
 ) {
 
     /**
@@ -215,8 +229,29 @@ class AgentTools(
      */
     private data class ReadMark(val size: Long, val at: Long)
 
-    /** The project's own folder: what the agent stands in. */
-    val projectDir: File get() = ws.projectDir(project)
+    /**
+     * **The working tree this agent stands in** — the project's own folder on `main`, its branch's
+     * worktree otherwise.
+     *
+     * **One line, and it is the whole of "the agent is worktree-scoped".** Nothing else in this file
+     * resolves a path from the account root: every tool composes `File(projectDir, path)`, and every
+     * relative answer is `file.relativeTo(projectDir)`. So this is the single place the branch has to
+     * be known — and until it was, an agent on `feature` read and wrote **main's files** while its
+     * session, its notification and its diary were all correctly per-branch. That is worse than having
+     * no branches, because the screen said `feature`.
+     */
+    val projectDir: File get() = ws.treeOf(project, branch)
+
+    /**
+     * **The repository as this branch sees it** — the commit, the status, the log and the push all
+     * happen in the tree the agent is standing in.
+     *
+     * A view rather than a second object: `ProjectGit.onBranch` shares the token and author providers
+     * and the lock (which is keyed by the common directory, so two branches really do exclude each
+     * other). Without it an agent on `feature` wrote its files into `feature`'s worktree and then
+     * committed main's — a commit that records nothing, on the wrong branch, and reports success.
+     */
+    private val repo: ProjectGit get() = git.onBranch(branch)
 
     /**
      * One picture that was read: where it came from, and what it became.
@@ -1749,7 +1784,7 @@ class AgentTools(
         // them would read as "this file was never saved" — which is true, but for a reason the person
         // can act on and deserves to be told.
         val repo = try {
-            git.open(project)
+            repo.open(project)
         } catch (e: Throwable) {
             null
         } ?: return Versions(noRepository = true)
@@ -2259,7 +2294,7 @@ class AgentTools(
                 )
             }
         } else {
-            val bytes = git.bytesAt(project, rel(file), revision)
+            val bytes = repo.bytesAt(project, rel(file), revision)
                 ?: return Result.failure(
                     IllegalArgumentException("There is no version $revision of ${rel(file)}"),
                 )
@@ -3000,7 +3035,7 @@ class AgentTools(
         if (revision.length < 7) return refusal("Give the version id that history showed you")
         // The lock is `mayWrite`'s now, so the second check that used to be here is gone - it was
         // asking the same question with a weaker answer (`isLocked` misses a person's lock).
-        val restored = git.restore(project, rel(file), revision, deadline)
+        val restored = repo.restore(project, rel(file), revision, deadline)
         return restored.fold(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
             onFailure = { refusal(it.message ?: "it could not be restored") },
@@ -3310,7 +3345,7 @@ class AgentTools(
         val token = githubToken()?.takeIf { it.isNotBlank() } ?: return Where.Refused(
             "Nobody is signed in, so GitHub cannot be asked.",
         )
-        val ref = RepoRef.of(git.remoteUrl(project)) ?: return Where.Refused(
+        val ref = RepoRef.of(repo.remoteUrl(project)) ?: return Where.Refused(
             "This project's remote is not a GitHub repository, so there is no CI to read.",
         )
         return Where.Found(gh, ref, token)
@@ -4882,7 +4917,7 @@ class AgentTools(
             )
         }
         deadline.check("git")
-        val result = git.diffBetween(project, path, from, to).getOrElse {
+        val result = repo.diffBetween(project, path, from, to).getOrElse {
             // **`describe`, not `message`.** A JGit failure arrives as a wrapper whose `message` is
             // often null or the class name; `describe` unwraps the cause, so the refusal names
             // something the caller can act on rather than saying "the difference could not be read"
@@ -4939,7 +4974,7 @@ class AgentTools(
 
     /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */    /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */
     private fun pull(): String {
-        val result = git.pull(project)
+        val result = repo.pull(project)
         // **A pull can change the files under the agent's feet**, so it is in the log: a model that
         // read a file, pulled, and then wrote would overwrite what arrived, and the trace is the
         // only place that shows the order those two things happened in.
@@ -4980,12 +5015,15 @@ class AgentTools(
      * fails the same way forever. Naming it a conflict points at `pull`.
      */
     private fun push(): String {
-        val repo = git.open(project)
+        // **`repository`, not `repo`**, because [repo] is the branch's view of the project and a local
+        // of the same name would shadow it — which Kotlin reports as a self-reference rather than as a
+        // shadowing mistake, so the message names the wrong problem.
+        val repository = repo.open(project)
             ?: return refusal("This project has no repository yet")
         // **Committed first, so what is sent is a thing you can point at.** A push carrying
         // uncommitted work would send something the model never chose, and the app's own rule is
         // that every change is a version.
-        val dirty = repo.use {
+        val dirty = repository.use {
             try {
                 val status = GitService.status(it)
                 status.staged + status.unstaged
@@ -5002,7 +5040,7 @@ class AgentTools(
         }
         if (dirty < 0) return refusal("This project's repository could not be read")
 
-        val result = git.push(project)
+        val result = repo.push(project)
         // **A push is the one act that leaves the phone**, so the log says so whether it worked or
         // not. Without it a person reading the trace could not tell that the agent had sent
         // anything to GitHub at all — the trace would show the writes and then stop, and "the
@@ -5026,7 +5064,7 @@ class AgentTools(
      * in its history, which is the one state this app exists to make impossible to miss.
      */
     private fun commit(what: String, done: String): String {
-        val outcome = git.commitOutcome(project, what)
+        val outcome = repo.commitOutcome(project, what)
         return if (outcome.ok) {
             success(done)
         } else {

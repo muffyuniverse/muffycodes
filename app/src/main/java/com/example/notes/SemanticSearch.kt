@@ -61,6 +61,14 @@ class SemanticSearch(
     private val embedding: () -> PickedModel? = { null },
     /** The chosen rerank model, read per call, or null when the person has not chosen one. */
     private val rerank: () -> PickedModel? = { null },
+    /**
+     * **The branch this search is for** (§13d), and therefore which working tree it walks.
+     *
+     * The index is per project *and per worktree*, which is the same rule as the agent's: the root it
+     * walks is the tree, its relative paths describe that tree, and a branch's files are not main's.
+     * `main` by default, because a project's own folder is main's tree.
+     */
+    private val branch: String = AgentSession.MAIN,
 ) {
 
     /**
@@ -138,7 +146,7 @@ class SemanticSearch(
 
     private fun ready(): Result<Ready> {
         val pick = embedding()
-        val root = ws.projectDir(project)
+        val root = ws.treeOf(project, branch)
         val index = try {
             SearchIndex.open(root)
         } catch (e: Throwable) {
@@ -254,7 +262,7 @@ class SemanticSearch(
         dims: Int,
         deadline: Deadline,
     ): Indexed {
-        val root = ws.projectDir(project)
+        val root = ws.treeOf(project, branch)
         val files = mutableListOf<File>()
         var stopped: String? = null
         // **One canonical root, used for both halves.** `relativeTo` compares paths textually, so a
@@ -381,7 +389,7 @@ class SemanticSearch(
         dims: Int,
         deadline: Deadline,
     ): Triple<Int, Int, String?> {
-        val dir = ws.projectDir(project)
+        val dir = ws.treeOf(project, branch)
         // **`openExisting`, never `initOrOpen`.** The index is derived data and must never be the
         // thing that creates a repository: an initialised repo here would make a project with no
         // history report one, and it would commit whatever the index walk happened to find. A project
@@ -636,7 +644,7 @@ class SemanticSearch(
         deadline: Deadline,
         history: Boolean,
     ): Result<String> {
-        val root = ws.projectDir(project)
+        val root = ws.treeOf(project, branch)
         val notes = mutableListOf<String>()
         // **The extent, in every answer.** A person reading "nothing matches" cannot tell an empty
         // project from a search that only looked in one folder, and the second is this tool's design.

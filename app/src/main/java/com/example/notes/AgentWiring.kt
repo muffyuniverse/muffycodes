@@ -56,7 +56,13 @@ object AgentWiring {
         },
         notify: (AgentSession) -> Unit = {},
         changed: (List<AgentSession>) -> Unit = {},
-        /** What the agent is doing, page by page, while it works. See `Agent.onPage`. */
+        /**
+         * What the agent is doing, page by page — **[session key]** (`project/branch`), not the project.
+         *
+         * The key rather than the name because two branches of one project are two conversations with
+         * two logs (§13d): a page from `feature`'s agent landing in main's chat would show work that
+         * is not happening in the conversation the person is reading.
+         */
         onPage: (String, Agent.Live) -> Unit = { _, _ -> },
         /**
          * Called when a command has changed a project on disk, so the file list can be re-read.
@@ -97,7 +103,7 @@ object AgentWiring {
             workspace = ws,
             tokenProvider = { credentials.token(login) },
             authorProvider = { author },
-            index = { project, why -> IndexQueue.want(project, why) },
+            index = { project, branch, why -> IndexQueue.want(project, why, branch) },
         )
         // **The indexer, wired before anything can commit.** Both the runner and the screen build a
         // `ProjectGit`, and either of them can be the first to save something, so both wire this —

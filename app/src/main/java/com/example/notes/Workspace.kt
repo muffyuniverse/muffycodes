@@ -885,13 +885,20 @@ class Workspace(val accountDir: File) {
      */
     var activeBranch: String = AgentSession.MAIN
 
-    /** True when [project]'s open branch is not `main`, i.e. its files are somewhere other than its root. */
-    fun onBranch(project: String): Boolean =
-        activeBranch != AgentSession.MAIN && projectAt(listOf(project)) != null
+    /**
+     * True when [project] on [branch] keeps its files somewhere other than the project's own root.
+     *
+     * **The branch is a parameter with the ambient one as its default**, and that default is the whole
+     * of the design: a screen asking about the tree it is showing gets the answer without saying which
+     * branch, while an agent — which runs in a service, possibly while the person is looking at another
+     * branch — must say. [AgentTools] therefore passes its own branch on every call.
+     */
+    fun onBranch(project: String, branch: String = activeBranch): Boolean =
+        branch != AgentSession.MAIN && projectAt(listOf(project)) != null
 
-    /** The working tree of [project] on the branch that is open. */
-    fun treeOf(project: String): File =
-        Worktrees(this).dirOf(project, activeBranch)
+    /** The working tree of [project] on [branch] — its own folder for `main`, a worktree otherwise. */
+    fun treeOf(project: String, branch: String = activeBranch): File =
+        Worktrees(this).dirOf(project, branch)
 
     /**
      * The path of [file] from the account root, **or the branch path it stands for**, or null when it is

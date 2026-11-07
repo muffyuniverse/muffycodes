@@ -188,7 +188,8 @@ class AgentRunner(
      * directly: the mistake would be silent, and the screen would think an agent was idle while it
      * worked.
      */
-    fun isBusy(project: String): Boolean = agentId(project) in polling()
+    fun isBusy(project: String, branch: String = AgentSession.MAIN): Boolean =
+        agentId(project, branch) in polling()
 
     /**
      * Says "a turn is being taken for [agent]" until the returned function is called.
@@ -208,7 +209,8 @@ class AgentRunner(
      * or checks work asks this, so the answer is one line to change rather than a search for every
      * place a project name was used as a key.
      */
-    fun agentId(project: String): String = project
+    fun agentId(project: String, branch: String = AgentSession.MAIN): String =
+        AgentSession.keyOf(project, branch)
 
     /** How often a waiting conversation is kept warm, from Settings — the person's number. */
     private val pollMs: Long get() = settings.pollMs
@@ -240,9 +242,12 @@ class AgentRunner(
             // folder it was for, and the screen kept offering a conversation with nothing behind it.
             // It is not a poll and does not wait for one: the person may delete the folder, another
             // app may, and the phone may tidy it away.
-            if (!ws.projectDir(session.project).isDirectory) {
-                Trace.note("agent-gone", session.project)
-                sessions.remove(session.project)
+            // **The tree the session is on, not the project's root.** A branch's session whose worktree
+            // was removed is gone just as surely as a deleted project — and asking for `projectDir`
+            // instead would keep it alive for ever, polling a folder it never writes to.
+            if (!ws.treeOf(session.project, session.branch).isDirectory) {
+                Trace.note("agent-gone", AgentSession.keyOf(session.project, session.branch))
+                sessions.remove(session.project, session.branch)
                 continue
             }
             var current = session
@@ -260,7 +265,7 @@ class AgentRunner(
             // ago, and a ping now would buy four minutes of warmth for someone who is not here.
             val missed = current.missedBy(now, pollMs)
             if (missed > 0) {
-                noteGap(current.project, missed)
+                noteGap(current.project, missed, current.branch)
                 current = current.polled(now)
                 put(current, speak = false)
             }
@@ -283,11 +288,11 @@ class AgentRunner(
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
-            if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
+            if (finished.isNotEmpty() && agentId(current.project, current.branch) !in polling()) {
                 wake(current, now, finished)
             } else if (
                 current.warmDue(now, keepAlive, pollMs, warmMs) &&
-                agentId(current.project) !in polling()
+                agentId(current.project, current.branch) !in polling()
             ) {
                 warm(current, now)
             }
@@ -341,15 +346,18 @@ class AgentRunner(
      */
     private fun dispatch(session: AgentSession, now: Long, waking: String?) {
         val project = session.project
-        if (!ws.projectDir(project).isDirectory) {
+        // **The branch, in one place** (§13d): the tree to check, the log to open, the tool set to build
+        // and the claim to take are all this conversation's worktree's.
+        val branch = session.branch
+        if (!ws.treeOf(project, branch).isDirectory) {
             // A project that is gone takes its session with it, rather than polling a folder that
             // does not exist for ever.
-            Trace.note("agent-gone", project)
-            sessions.remove(project)
+            Trace.note("agent-gone", AgentSession.keyOf(project, branch))
+            sessions.remove(project, branch)
             changed(sessions.read())
             return
         }
-        synchronized(inFlight) { inFlight += agentId(project) }
+        synchronized(inFlight) { inFlight += agentId(project, branch) }
         // **The claim, written before the work goes out, and it names which kind of work it was.** A
         // wake also moves the watermark, so the same finished file cannot wake the agent twice.
         put(if (waking == null) session.polled(now) else session.woken(now), speak = false)
@@ -370,7 +378,9 @@ class AgentRunner(
         val doorFor = door(active)
         worker.execute {
             val warmth = try {
-                val log = AgentLog.open(ws.projectDir(project))
+                // **The worktree's own diary.** Each branch has its own `agent/` inside its own tree,
+                // which is what "agent is worktree scoped" means for the record as well as the files.
+                val log = AgentLog.open(ws.treeOf(project, branch))
                 val agent = Agent(
                     ws.accountDir,
                     project,
@@ -395,7 +405,9 @@ class AgentRunner(
                     // a second reading of the settings.
                     triggerTokens = { limits.triggerAt },
                     sessionTokens = settings.sessionLimit,
-                    onPage = { live -> onPage(project, live) },
+                    // **Keyed by the worktree**, so a page from `feature`'s agent is applied to
+                    // `feature`'s conversation rather than to whatever chat happens to be open.
+                    onPage = { live -> onPage(AgentSession.keyOf(project, branch), live) },
                     browser = browser,
                     fetcher = fetcher,
                     mcp = mcp,
@@ -413,6 +425,7 @@ class AgentRunner(
                     embedder = embedder,
                     models = models,
                     onDiskChanged = onDiskChanged,
+                    branch = branch,
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()
@@ -430,7 +443,7 @@ class AgentRunner(
             // **The tick's clock, not the wall's.** The whole point of `now` being a parameter is
             // that a session's timing is one number; mixing a test's clock with the phone's made
             // the retry ladder land an hour away from where the state machine had put it.
-            val current = sessionOf(project) ?: session
+            val current = sessionOf(project, branch) ?: session
             // **A wake is a turn; a ping is a check**, and the difference is the work that was done.
             // A turn's ending moves the session — ask, conclude, stopped, or a blip onto the ladder —
             // and it may speak. A ping's may only move the clock: the session already needed the
@@ -471,7 +484,7 @@ class AgentRunner(
             // string today, so this line looks like a no-op either way - and the day they differ, a
             // release that named the project would leave the claim standing and wedge the agent for
             // ever. The pair is what makes the guard correct, not either line alone.
-            synchronized(inFlight) { inFlight -= agentId(project) }
+            synchronized(inFlight) { inFlight -= agentId(project, branch) }
         }
     }
 
@@ -526,7 +539,9 @@ class AgentRunner(
         // → `layers()`), so this drops the conversation and not the brief; and `agent/` is readable,
         // so the agent can read back what mattered and re-forget deliberately. That is the whole
         // argument: a stop is not a judgement, and `forget` is.
-        AgentStops.resetIfStopped(ws, session, was = sessionOf(session.project))
+        // **The session's own branch**, because a stopped agent's context is its worktree's: resetting
+        // the wrong branch's would have thrown away a conversation that was still running.
+        AgentStops.resetIfStopped(ws, session, was = sessionOf(session.project, session.branch))
         sessions.put(session)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
@@ -551,7 +566,7 @@ class AgentRunner(
         project: String,
         rows: List<AgentLog.Row>,
     ): List<AgentLog.Row> = try {
-        val record = AgentLog.open(ws.projectDir(project))
+        val record = AgentLog.open(ws.treeOf(project, session.branch))
         record.bookkeeping(
             AgentLog.NOTE,
             "retry",
@@ -572,9 +587,9 @@ class AgentRunner(
      * happened; it can see the clock, and a row is how a hole becomes visible instead of looking
      * like a check that took no time.
      */
-    private fun noteGap(project: String, missed: Long) {
+    private fun noteGap(project: String, missed: Long, branch: String = AgentSession.MAIN) {
         try {
-            AgentLog.open(ws.projectDir(project)).bookkeeping(
+            AgentLog.open(ws.treeOf(project, branch)).bookkeeping(
                 AgentLog.NOTE,
                 "gap",
                 "the phone did not run the agent for ${howLong(missed)}",

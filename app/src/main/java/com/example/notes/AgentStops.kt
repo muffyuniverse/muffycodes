@@ -44,7 +44,10 @@ object AgentStops {
         if (was?.state == AgentSession.State.STOPPED) return
         val project = session.project
         try {
-            val log = AgentLog.open(ws.projectDir(project))
+            // **The session's own worktree** (§13d): resetting main's context when a branch's agent was
+            // stopped would clear a conversation that is still running, and leave the stopped one's
+            // context in place.
+            val log = AgentLog.open(ws.treeOf(project, session.branch))
             val id = log.reset(
                 "the agent was stopped (${why(session)}) — the working context was cleared. " +
                     "What it did is still in ${AgentLog.DIR}/${AgentLog.SESSION}",

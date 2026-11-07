@@ -392,7 +392,9 @@ fun BrowserScreen(
                         // files, had no way to reach the agent working on them. Reported from the
                         // live log: "where is chat icon within the project?"
                         ChatButton(
-                            onClick = { adding = false; viewModel.currentProject?.let(onRowChat) },
+                            // **The branch the person is in**, which is a different conversation from
+                            // the project's own (§13d) — see [AppViewModel.openChatHere].
+                            onClick = { adding = false; viewModel.currentProject?.let(viewModel::openChatHere) },
                         )
                         // Search is scoped to the project (§7): it exists because a
                         // project's tree nests and what you remember is a name.

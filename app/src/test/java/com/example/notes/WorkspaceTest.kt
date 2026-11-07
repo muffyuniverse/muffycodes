@@ -573,11 +573,13 @@ class WorkspaceTest {
         assertEquals("the project is the repository folder", project, workspace.repoOf("Shopping"))
         assertEquals("and it is at the account root", workspace.accountDir, project.parentFile)
         assertEquals(
-            // **Three now, and the third is the request log.** It is written on every response,
-            // including the keepalives sent while nobody is looking, so left unignored it would be
-            // the noisiest thing in the working tree.
+            // **Four, and the fourth has no trailing slash on purpose.** `requests/` is written on
+            // every response, including the keepalives sent while nobody is looking, so left
+            // unignored it would be the noisiest thing in the working tree. `system` is the link to
+            // the account's own folder (§13f) - and `system/` would match nothing, because a symlink
+            // is not a directory. Measured: with the slash the link stayed untracked.
             "the app's own lines, and nothing else",
-            listOf("agent/", ".muffy/", "requests/"),
+            listOf("agent/", ".muffy/", "requests/", "system"),
             File(project, ".git/info/exclude")
                 .readLines()
                 .filter { it.isNotBlank() && !it.startsWith("#") },

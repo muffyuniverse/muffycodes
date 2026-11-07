@@ -123,10 +123,15 @@ object IndexQueue {
      * ask for a handful of passes rather than a hundred: the map is the coalescer, and [why] is
      * only there so the row in the log can say what prompted the first ask.
      */
-    fun want(project: String, why: String) {
+    fun want(project: String, why: String, branch: String = AgentSession.MAIN) {
+        // **Keyed by the worktree, not by the project** (§13d). Two branches of one project are two
+        // indexes over two trees; coalescing them by project would make the second branch's pass a
+        // duplicate of the first's request and leave its index stale — a `search` that answers with
+        // files from the other branch.
+        val key = AgentSession.keyOf(project, branch)
         val start = synchronized(lock) {
             if (wiring == null) return
-            waiting.putIfAbsent(project, why)
+            waiting.putIfAbsent(key, why)
             if (worker != null) return
             val mine = generation
             val thread = Thread({ drain(mine) }, "index-queue")
@@ -163,8 +168,10 @@ object IndexQueue {
                 wiring?.let { it to next.key to next.value }
             } ?: return
             val (pair, why) = job
-            val (wire, project) = pair
-            val done = run(wire, project, why)
+            val (wire, key) = pair
+            val project = AgentSession.projectOf(key)
+            val branch = AgentSession.branchOf(key)
+            val done = run(wire, project, branch, why)
             passes++
             try {
                 wire.onDone(done)
@@ -175,14 +182,15 @@ object IndexQueue {
     }
 
     /** One pass, its log row, and its notification. */
-    private fun run(wire: Wiring, project: String, why: String): Done {
-        val dir = wire.ws.projectDir(project)
+    private fun run(wire: Wiring, project: String, branch: String, why: String): Done {
+        val dir = wire.ws.treeOf(project, branch)
         if (!dir.isDirectory) {
             return Done(project, why, "there is no folder called \"$project\" any more", false)
         }
         val engine = SemanticSearch(
             ws = wire.ws,
             project = project,
+            branch = branch,
             embedder = wire.embedder,
             embedding = { wire.models()?.embedding },
             rerank = { wire.models()?.rerank },

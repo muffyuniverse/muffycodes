@@ -591,7 +591,7 @@ class AppViewModel @JvmOverloads constructor(
             models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             context = app,
         )
-        return { project, why -> IndexQueue.want(project, why) }
+        return { project, branch, why -> IndexQueue.want(project, why, branch) }
     }
 
 
@@ -4097,6 +4097,21 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The project whose conversation is on the screen, or null when none is. */
     var chatProject: String? by mutableStateOf(null)
+
+    /**
+     * **Which branch's conversation is open** (§13d), beside the project it belongs to.
+     *
+     * A conversation is a session's — `agent/` lives inside a working tree, so main's diary and
+     * `feature`'s are two files in two folders. The screen followed only the project, which meant
+     * opening a chat from a branch showed **main's** turns while the agent wrote to the branch's log:
+     * the person would answer yesterday's question and the agent would never see it.
+     *
+     * `main` by default because opening a chat from the project screen is opening main's.
+     */
+    var chatBranch: String by mutableStateOf(AgentSession.MAIN)
+
+    /** The open conversation as a session is keyed: `project/branch`. */
+    val openChatKey: String get() = AgentSession.keyOf(chatProject.orEmpty(), chatBranch)
         private set
 
     /**
@@ -4112,7 +4127,7 @@ class AppViewModel @JvmOverloads constructor(
             val project = chatProject ?: return AgentLog.Fate()
             val ws = workspace ?: return AgentLog.Fate()
             return try {
-                AgentLog.open(ws.projectDir(project)).fate()
+                AgentLog.open(ws.treeOf(project, chatBranch)).fate()
             } catch (t: Throwable) {
                 // A record that will not parse is a record with nothing to report, not a crash on
                 // the settings screen.
@@ -4178,7 +4193,7 @@ class AppViewModel @JvmOverloads constructor(
         val project = chatProject ?: return
         val ws = workspace ?: return
         val size = try {
-            AgentLog.open(ws.projectDir(project)).contextTokens()
+            AgentLog.open(ws.treeOf(project, chatBranch)).contextTokens()
         } catch (t: Throwable) {
             return
         }
@@ -4241,10 +4256,24 @@ class AppViewModel @JvmOverloads constructor(
      */
     var chatDoor: ((ActiveModel) -> Door)? = null
 
-    /** Opens [project]'s conversation and lands on its newest turn. */
-    fun openChat(project: String) {
+    /** Opens [project]'s conversation on [branch] and lands on its newest turn. */
+    /**
+     * Opens the chat for **the tree the person is looking at**.
+     *
+     * Two doors reach the chat and they mean two different conversations: the project's row at the
+     * account root is the project, whose own folder is main's tree; the chat button inside a project is
+     * the branch the person walked into. This is the second door, so it reads [currentProject] and
+     * [activeBranch] rather than assuming — and it reads them here rather than in the screen, because a
+     * screen that decided which session it was talking to would be a second answer to that question.
+     */
+    fun openChatHere(project: String) {
+        openChat(project, if (currentProject != null) activeBranch else AgentSession.MAIN)
+    }
+
+    fun openChat(project: String, branch: String = AgentSession.MAIN) {
         Trace.tap("chat", project)
         chatProject = project
+        chatBranch = branch
         chatBox = null
         measureChatContext()
         readChat(follow = true)
@@ -4273,7 +4302,8 @@ class AppViewModel @JvmOverloads constructor(
     fun readChat(follow: Boolean = false) {
         val project = chatProject ?: return
         val ws = workspace ?: return
-        val dir = ws.projectDir(project)
+        // **The open conversation's tree**, not the project's root (§13d).
+        val dir = ws.treeOf(project, chatBranch)
         onWorker {
             val rows = try {
                 AgentLog.open(dir).rows()
@@ -4306,6 +4336,7 @@ class AppViewModel @JvmOverloads constructor(
         val said = text.trim()
         if (said.isEmpty()) return
         val project = chatProject ?: return
+        val branch = chatBranch
         if (workspace == null || git == null) return
         Trace.tap("send", said.take(60))
         // **A message during a turn cuts it short instead of being dropped.** v1's C8: the person
@@ -4323,17 +4354,17 @@ class AppViewModel @JvmOverloads constructor(
         // **Speaking to a stopped agent turns it on again**, because the person is the switch:
         // there is no other control they would have used, and a message that vanished into a
         // stopped session would look like the app ignoring them.
-        sessionOf(project)?.let {
+        sessionOf(project, branch)?.let {
             if (!it.running) putSession(it.resumed(System.currentTimeMillis()))
         }
-        speak(project, said)
+        speak(project, branch, said)
     }
 
     /** One turn said out loud, and what to do when it ends. */
-    private fun speak(project: String, said: String) {
+    private fun speak(project: String, branch: String, said: String) {
         chatWorking = true
         interrupt = null
-        runTurn(project, said) { rows, end ->
+        runTurn(project, branch, said) { rows, end ->
             applyChat(rows, follow = true)
             chatWorking = false
             // **The footer goes when the answer does.** It described an answer in flight; once the
@@ -4354,7 +4385,7 @@ class AppViewModel @JvmOverloads constructor(
             // before the results were written: the record has to be legal in between.
             val next = pendingChat
             pendingChat = null
-            if (next != null && end is Agent.End.Interrupted) speak(project, next)
+            if (next != null && end is Agent.End.Interrupted) speak(project, branch, next)
         }
     }
 
@@ -4392,7 +4423,12 @@ class AppViewModel @JvmOverloads constructor(
      * the screen mid-flight. Sharing this function with it would have meant a redraw path nobody
      * waits for and a `said` that can be null — which is exactly the null branch this used to carry.
      */
-    private fun runTurn(project: String, said: String, then: (List<AgentLog.Row>, Agent.End) -> Unit) {
+    private fun runTurn(
+        project: String,
+        branch: String,
+        said: String,
+        then: (List<AgentLog.Row>, Agent.End) -> Unit,
+    ) {
         val ws = workspace ?: return
         // **A turn that cannot start must say so.** This was `git ?: return`, and it returned into
         // nothing: no row, no message, `chatWorking` left true — a screen that waits for ever and a
@@ -4428,10 +4464,13 @@ class AppViewModel @JvmOverloads constructor(
         // **The tick must not wake this session while the person's turn is running.** One request on
         // one conversation at a time: a wake landing beside this turn would write a second ending and
         // a second set of results, and the person would read the mixture of the two.
-        val release = runner?.hold(project)
+        // **Held by the worktree's key**, because the same conversation is what the tick must not
+        // wake: `feature`'s agent and `main`'s are two turns, and one holding the other's claim would
+        // be a turn nobody can start.
+        val release = runner?.hold(AgentSession.keyOf(project, branch))
         onWorker {
             try {
-                val log = AgentLog.open(ws.projectDir(project))
+                val log = AgentLog.open(ws.treeOf(project, branch))
                 val agent = Agent(
                     ws.accountDir, project, ws, g, log, door, model,
                     // How much of one result may enter the conversation, clamped by the model's input
@@ -4469,6 +4508,9 @@ class AppViewModel @JvmOverloads constructor(
                     // Read at every boundary rather than captured: the person may speak or stop while
                     // this turn is waiting for an answer, and the loop has to see that when it comes.
                     cut = { interrupt },
+                    // **The tools work in this branch's tree** (§13d). Without it a person typing in a
+                    // branch's chat would watch the agent write main's files.
+                    branch = branch,
                 )
                 val end = try {
                     // **The screen only ever speaks.** The tick's own pings come from the runner, where
@@ -4553,7 +4595,8 @@ class AppViewModel @JvmOverloads constructor(
      * equals one today and will not when a project can have more than one agent. The comparison
      * lives with the ids, so the day they differ the screen is right without being changed.
      */
-    internal fun agentBusy(project: String): Boolean = runner?.isBusy(project) ?: false
+    internal fun agentBusy(project: String, branch: String = AgentSession.MAIN): Boolean =
+        runner?.isBusy(project, branch) ?: false
 
     /**
      * The last answer to "does a clock need to exist?", or null before this process asked.
@@ -4599,11 +4642,22 @@ class AppViewModel @JvmOverloads constructor(
      * person has asked for something — an agent switched on at 09:00 and asked at 09:03 should not
      * have spent three requests warming an empty one.
      */
-    fun startAgent(project: String, now: Long = System.currentTimeMillis()) {
+    fun startAgent(
+        project: String,
+        branch: String = AgentSession.MAIN,
+        now: Long = System.currentTimeMillis(),
+    ) {
         Trace.tap("start agent", project)
-        if (sessionOf(project)?.running == true) return
+        // **This branch's session, or none.** Without the branch this found main's and decided the
+        // branch's agent was already on — or turned main's on again under the branch's name.
+        if (sessionOf(project, branch)?.running == true) return
         putSession(
-            AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = now)
+            AgentSession(
+                project = project,
+                branch = branch,
+                state = AgentSession.State.IDLE,
+                lastPollAt = now,
+            )
                 // **The interval in force when it started.** A tick reads this copy, so a session
                 // written now keeps answering after a reboot without the settings file in hand.
                 .withInterval(settings.pollMs)
@@ -4622,7 +4676,7 @@ class AppViewModel @JvmOverloads constructor(
         val on = agentSessions.filter { it.running }
         if (on.isEmpty()) return
         Trace.tap("stop all agents", "${on.size}")
-        for (session in on) stopAgent(session.project)
+        for (session in on) stopAgent(session.project, session.branch)
     }
 
     /**
@@ -4638,12 +4692,12 @@ class AppViewModel @JvmOverloads constructor(
      * Refused while a turn is running: a context replaced under a reply being written would
      * leave the record half in each file.
      */
-    fun resetAgent(project: String) {
+    fun resetAgent(project: String, branch: String = AgentSession.MAIN) {
         val ws = workspace ?: return
-        if (chatWorking || agentBusy(project)) return
+        if (chatWorking || agentBusy(project, branch)) return
         Trace.tap("reset agent", project)
         onWorker {
-            val log = AgentLog.open(ws.projectDir(project))
+            val log = AgentLog.open(ws.treeOf(project, branch))
             val id = log.reset()
             val rows = log.rows()
             Trace.note("agent-reset", "$project · row $id")
@@ -4655,14 +4709,14 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** Switches it off. The reason is recorded, because "why did it stop" is the question later. */
-    fun stopAgent(project: String) {
-        val session = sessionOf(project) ?: return
+    fun stopAgent(project: String, branch: String = AgentSession.MAIN) {
+        val session = sessionOf(project, branch) ?: return
         Trace.tap("stop agent", project)
         // **The request in flight is abandoned** (v1: "in-flight generations are cancelled in that
         // case, right order"). The loop is told at its next boundary; the calls the reply carried
         // are answered `1 interrupted` so the record stays a conversation, and the session is
         // already stopped so the ending cannot switch it back on.
-        if (chatWorking || agentBusy(project)) {
+        if (chatWorking || agentBusy(project, branch)) {
             interrupt = Agent.BY_OPERATOR
             pendingChat = null
         }
@@ -4765,9 +4819,11 @@ class AppViewModel @JvmOverloads constructor(
             notify = { session -> agentNotifier?.invoke(session) },
             // **A page, as it happens.** A call is published when the model asks and filled in
             // when the tool returns, so the bubble shows the work rather than only its result.
-            onPage = { project, live ->
+            onPage = { key, live ->
                 main.post {
-                    if (project == chatProject) {
+                    // **The worktree's key**, compared with the one the open chat is showing. A page
+                    // from `feature`'s agent must not appear in main's conversation.
+                    if (key == openChatKey) {
                         chatPages = chatPages + (live.id to live)
                     }
                 }
@@ -4788,7 +4844,7 @@ class AppViewModel @JvmOverloads constructor(
                     // rows come from the record the same way every other refresh gets them: one
                     // path from the file to the screen rather than two.
                     chatProject?.let { project ->
-                        val dir = ws.projectDir(project)
+                        val dir = ws.treeOf(project, chatBranch)
                         if (dir.isDirectory) applyChat(AgentLog.open(dir).rows(), follow = true)
                     }
                 }
@@ -4825,7 +4881,7 @@ class AppViewModel @JvmOverloads constructor(
      * [AgentRunner]. What is here is the screen's half: writing it down and redrawing.
      */
     private fun applyEnd(project: String, end: Agent.End, now: Long) {
-        val current = sessionOf(project) ?: return
+        val current = sessionOf(project, chatBranch) ?: return
         // **The window in force for this turn**, not the one in Settings now: a person changing it
         // mid-turn should not have the turn it started with reinterpreted.
         val next = end.onto(current, now, reconnectMs = settings.reconnectMs)
