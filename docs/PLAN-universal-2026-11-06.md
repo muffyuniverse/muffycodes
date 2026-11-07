@@ -1928,9 +1928,10 @@ how git already behaves.
 
 | # | step | why this order |
 |---|---|---|
-| 1 | **`RepoLocks` → `getCommonDirectory()`; `LfsStore` → `commonDirectory`** | Two one-line changes that are **correct even with one worktree**, and the two that would corrupt a repository if forgotten. Do them first, alone. |
+| 0 | **`openExisting` → `findGitDir`; `currentBranch` → nullable** | Two silent bugs that worktrees make live: a branch would index nothing, and a push would guess `main`. Both are correct with one worktree too, and neither needs the layout decided. **Done.** |
+| 1 | **`RepoLocks` → `getCommonDirectory()`; `LfsStore` → `commonDirectory`** | Two one-line changes that are **correct even with one worktree**, and the two that would corrupt a repository if forgotten. **Done** (`d05c780`, `a7e4291`). |
 | 2 | **The branches screen** — list `refs/heads`, `+` to create from `main`, remove | Read-only against refs; no worktrees yet. A project still opens its single worktree. |
-| 3 | **`activeBranch` + the worktree folder** — one worktree per branch, entered by tapping a row | The identity change; ambient, like the account |
+| 3 | **`activeBranch` + the agent's worktree scope** — `AgentSessions`/`AgentService` keyed by project **and** branch, plus the worktree folder | The identity change; ambient, like the account. `push`/`commit` already follow the worktree (measured), so this is the three keying sites and the folder. |
 | 4 | **Worktree creation** (the four files) + the CI test that `git` accepts it | The risky part, and it is testable in CI where `git` exists |
 | 5 | **The merge/publish split in the sync slot** | Smallest; `GitService.merge` already does the work |
 
@@ -1962,6 +1963,76 @@ than remembered. `activeBranch` is then purely "the branch you entered", the sam
 
 **The back path is therefore three levels**, and each is one gesture: files → branches → projects →
 accounts.
+
+### 13d.4 The agent is worktree-scoped — the operator's rule, and what it settles
+
+**The operator, 2026-11-07:** *"each branch should have its own agent because branch is a separate
+worktree and agent is worktree scoped — he doesn't have and doesn't need checkout."*
+
+**This is the missing piece, and it dissolves what §13d.3 was worried about.** The draft above assumed
+**one agent roaming across branches**, which is why `agent/` looked like it had contradictory
+requirements: the diary should survive a branch switch, while the search index must not. **That question
+only exists for a roaming agent.** A worktree-scoped agent never switches, so:
+
+- **One `agent/` per worktree is correct, not a bug** — the diary, the context, `requests/` and
+  `ci/artifacts` all belong to the work tree they describe.
+- **The search index is correct where it already is.** `SearchIndex.open(projectDir)` puts `search.db`
+  in `agent/`, and because the root is the worktree, its relative paths always describe *that* tree.
+  Shared across branches it would have returned files that do not exist; per worktree it cannot.
+- **There is no `checkout` to build.** Measured: the agent tool surface already has no checkout and no
+  branch-switch verb (`AgentTools.kt:492`, `:1041–1052`, `:609–610`), so the surface is worktree-shaped
+  already.
+
+#### What JGit already gives us, measured on 7.8.1
+
+| fact | value inside `branches/feature` |
+|---|---|
+| `repo.getBranch()` | **`feature`** — the worktree's own HEAD, not the common one |
+| `repo.getIndexFile()` | `…/.git/worktrees/feature/index` — per worktree |
+| `repo.getCommonDirectory()` | `…/Shopping/.git` |
+
+**So `push`, `pull` and `commit` need no change**: `GitService.currentBranch` → `pushNow` already sends
+`refs/heads/feature`. That is most of the "identity change" §13d.3 predicted, and it is free.
+
+#### What does have to change: the agent's identity
+
+The agent is keyed `(account, project)`, and a project now holds several worktrees. Three sites, all
+keyed by project alone:
+
+| where | today | must become |
+|---|---|---|
+| `AgentSessions` (`agents.json`) | keyed by project | keyed by project + branch |
+| `AgentService.idFor(project)` (`:197`) | one notification id per project | per worktree, or two agents share one notification |
+| `AgentService.EXTRA_PROJECT` (`:240`) | no branch | needs one, or "stop" stops the wrong agent |
+
+`agents.json` already documents that a renamed or deleted project "simply loses its key"; with branches,
+a project whose *branch* is deleted must lose that key and not the other one.
+
+#### Two bugs this rule made live, both fixed
+
+1. **`GitService.openExisting` was silently empty on a worktree.** It used
+   `setGitDir(File(dir, ".git"))`, and a worktree's `.git` is a **file**. Measured on 7.8.1: `getBranch()`
+   null, `resolve("HEAD")` null, **zero branches, and no exception** — it answered a repository, so
+   `SemanticSearch` (3 call sites) and `Maintenance` believed it. **Every branch would have indexed
+   nothing and said nothing.** It is `findGitDir` now, the same as `initOrOpen` has been since `c52d0c6`.
+2. **`currentBranch` answered `?: "main"`.** That is a guess, and with worktrees it becomes *"push
+   `feature` onto `main`"* — the one wrong answer that cannot be walked back. It returns `null` now and
+   `pushNow` refuses with a sentence. "Could not tell" and "main" are different facts.
+
+Both are tested in `ProjectGitTest` against a hand-built worktree (JGit has **no** `worktree add` — the
+7.8.1 jar contains no such command, which is also why step 4 writes git's four files itself).
+
+#### The one thing that stays project-scoped
+
+**The release key.** A per-branch key means every branch signs differently and Play rejects the update,
+so `ReleaseKey.FILE` is one per project. It is the only exception to the worktree rule found so far.
+
+#### And it settles the merge question
+
+**A worktree can only merge into the branch it has checked out**, so an agent on `feature` cannot merge
+into `main` — that merge has to happen in main's worktree, which is a different agent's space. So
+**merge is the person's act, not an agent tool**: the agent proposes, the person lands it. That is
+exactly the merge/publish split step 5 was heading for, arrived at from the other direction.
 
 ## 13e. Downloads as a folder in the worktree — the measurements, and the one fact that decides it
 

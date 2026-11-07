@@ -1074,4 +1074,83 @@ class ProjectGitTest {
         }
     }
 
+    // ---- linked worktrees (§13d) ------------------------------------------
+
+    /**
+     * Makes a linked worktree the way git does, and hands back its folder.
+     *
+     * **git's own four files, written by hand**, because JGit has no `worktree add` — measured: the
+     * 7.8.1 jar contains no worktree command at all. That is also why §13d step 4 writes these four
+     * files from the app rather than calling a library.
+     *
+     * `commondir` is the one that makes the shared refs and objects reachable; `gitdir` points back at
+     * the pointer; `HEAD` says which branch this tree is checked out on.
+     */
+    private fun linkedWorktree(branch: String): File {
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val main = workspace.repoOf("Shopping")
+        val common = File(main, ".git")
+        val worktree = File(root, "Shopping-$branch").apply { mkdirs() }
+        val private = File(common, "worktrees/Shopping-$branch").apply { mkdirs() }
+        File(worktree, ".git").writeText("gitdir: " + private.absolutePath + "\n")
+        File(private, "commondir").writeText("../..\n")
+        File(private, "gitdir").writeText(File(worktree, ".git").absolutePath + "\n")
+        File(private, "HEAD").writeText("ref: refs/heads/$branch\n")
+        // The branch has to exist before a worktree can be checked out on it.
+        File(common, "refs/heads").mkdirs()
+        File(common, "refs/heads/$branch").writeText(File(common, "refs/heads/main").readText())
+        return worktree
+    }
+
+    @Test
+    fun `a worktree opens with its branches, not as an empty repository`() {
+        // **The bug that would have made every branch index nothing.** `openExisting` used
+        // `setGitDir(File(dir, ".git"))`, and a worktree's `.git` is a FILE — measured on 7.8.1:
+        // `getBranch()` null, `resolve("HEAD")` null, zero branches, **and no exception thrown**. It
+        // answered a repository, so SemanticSearch believed it and indexed nothing, silently.
+        val worktree = linkedWorktree("feature")
+
+        val repo = GitService.openExisting(worktree)
+
+        assertNotNull("it opens", repo)
+        repo!!.use {
+            assertNotNull("HEAD resolves", it.resolve("HEAD"))
+            assertEquals("and it is the worktree's own branch", "feature", GitService.currentBranch(it))
+            assertTrue(
+                "and the shared branches are reachable",
+                it.branchList().call().any { r -> r.name == "refs/heads/main" },
+            )
+        }
+    }
+
+    @Test
+    fun `a worktree's branch is the one pushed, and it is not main`() {
+        // **The wrong answer that cannot be walked back.** `currentBranch` used to fall back to
+        // `"main"`, so a repository whose HEAD was unreadable pushed `refs/heads/feature` onto
+        // `refs/heads/main`. On 7.8.1 a worktree reports its own HEAD, which is what makes a branch
+        // pushable at all — asserted against the library rather than trusted.
+        val worktree = linkedWorktree("feature")
+
+        GitService.openExisting(worktree)!!.use { repo ->
+            assertEquals("the worktree's branch", "feature", GitService.currentBranch(repo))
+            assertNotEquals("and emphatically not main", "main", GitService.currentBranch(repo))
+        }
+    }
+
+    @Test
+    fun `an unreadable HEAD is refused rather than answered as main`() {
+        // **Rebuilt broken on purpose**, by opening the way the old code did: `setGitDir` pointed at a
+        // `.git` FILE. That is a repository JGit builds happily and cannot read — exactly the state
+        // the old `?: "main"` turned into a push onto main.
+        val worktree = linkedWorktree("feature")
+        val broken = org.eclipse.jgit.storage.file.FileRepositoryBuilder()
+            .setGitDir(File(worktree, ".git"))
+            .setWorkTree(worktree)
+            .build()
+
+        broken.use {
+            assertNull("no branch can be read from it", GitService.currentBranch(it))
+        }
+    }
 }

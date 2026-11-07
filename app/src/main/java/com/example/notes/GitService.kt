@@ -301,14 +301,17 @@ object GitService {
      * The read-only half of [initOrOpen], for a caller that must not change the project it is looking
      * at — the index walk above all: an index pass that initialised a repository would give a project
      * with no history a history, and commit whatever it found while looking.
+     *
+     * **`findGitDir`, for the same reason [initOrOpen] uses it.** A linked worktree's `.git` is a file
+     * holding `gitdir: …`, and `setGitDir` pointed at that file builds a repository that is silently
+     * empty — measured on 7.8.1: `getBranch()` null, `resolve("HEAD")` null, zero branches, and **no
+     * exception thrown**. It answered a repository, so callers believed it. [SemanticSearch] is where
+     * that would have hurt: every branch would have indexed nothing and said nothing.
      */
     fun openExisting(dir: File): Repository? {
         if (!isRepository(dir)) return null
         return try {
-            FileRepositoryBuilder()
-                .setGitDir(File(dir, ".git"))
-                .setWorkTree(dir)
-                .build()
+            FileRepositoryBuilder().findGitDir(dir).setWorkTree(dir).build()
         } catch (e: Throwable) {
             null
         }
@@ -1897,6 +1900,13 @@ object GitService {
     private fun pushNow(repo: Repository, token: String?, force: Boolean): RemoteResult {
         return try {
             val local = currentBranch(repo)
+                // **Refused, because the alternative is pushing onto the wrong branch.** A repository
+                // whose HEAD cannot be read is a repository where "which branch am I sending?" has no
+                // answer, and this used to answer `main` and send.
+                ?: return RemoteResult(
+                    "Could not tell which branch this project is on, so nothing was sent.",
+                    false,
+                )
             // **Push to the branch GitHub calls this project.** Sending
             // `refs/heads/main` to a repository whose default is `master` leaves the
             // branch GitHub shows — and the history a person reads there — untouched,
@@ -1986,14 +1996,24 @@ object GitService {
      */
     private val BAD_BRANCH_CHARS = setOf('~', '^', ':', '?', '*', '[', '\\', '\u007F')
 
-    /** The name of the branch that is currently checked out. */
-    fun currentBranch(repo: Repository): String {
-        val branch = try {
-            repo.branch
-        } catch (e: Throwable) {
-            null
-        }
-        return branch?.removePrefix("refs/heads/") ?: "main"
+    /**
+     * The name of the branch checked out **in this repository**, or null when it cannot be read.
+     *
+     * **This answers null rather than `"main"`, and that is a fix, not a tidy-up.** It used to fall
+     * back to `"main"`, which reads as a helpful default on a repository with no commits — but §13d
+     * makes a project a set of worktrees, and the fallback then answers *"main"* for a repository
+     * whose HEAD is unreadable while a worktree is checked out on `feature`. The caller pushes
+     * `refs/heads/feature:refs/heads/main` and a branch's commits land on main, silently, which is
+     * the one wrong answer that cannot be walked back. "Could not tell" and "main" are different
+     * facts and a push must treat them differently.
+     *
+     * On 7.8.1 a linked worktree reports **its own** branch here (`getBranch()` reads the worktree's
+     * HEAD, not the common one), which is what makes pushing from a branch work at all.
+     */
+    fun currentBranch(repo: Repository): String? = try {
+        repo.branch?.removePrefix("refs/heads/")
+    } catch (e: Throwable) {
+        null
     }
 
     /**
