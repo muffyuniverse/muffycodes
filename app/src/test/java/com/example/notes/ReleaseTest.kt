@@ -12,9 +12,11 @@ import java.io.File
 /**
  * The release lane: what it dispatches, and the one thing it must never do.
  *
- * **The rule under test is that this lane is unreachable from the agent's.** `Release.BRANCH` and
- * `AgentTools.AGENT_BRANCH` are two constants on purpose, and a test that asserted only "a release goes
- * to main" would pass just as well if they were one.
+ * **There is one branch now, and both actors are on it.** The two-lane split (person to `main`, agent to
+ * `development`) is ended by the operator's decision — see plan §13b.1. What separates a build from a
+ * published version is the workflow's own `ref == 'refs/heads/main'` guard, not two constants in the
+ * app. This test asserts the single branch, because a stale "they are different" assertion would be a
+ * test that documents a design nobody holds any more.
  */
 class ReleaseTest {
 
@@ -49,15 +51,17 @@ class ReleaseTest {
     }
 
     @Test
-    fun `the release lane and the agent's lane are two different branches`() {
-        // **The separation is the design, not an inconvenience.** A single shared `dispatch(branch)`
-        // helper would be one refactor away from the agent reaching main, and the rule would then be a
-        // convention in a call site rather than a constant.
+    fun `the release lane and the agent are on the same branch`() {
+        // **One branch, one actor, as the operator decided.** The separation between "a build ran" and
+        // "a version was published" is `ref == 'refs/heads/main'` in the workflow — a guard on an act,
+        // not two constants in the app that a refactor could collapse. Asserting they are EQUAL is the
+        // point: if someone reintroduces a second branch, this fails and says why.
         assertEquals("main", Release.BRANCH)
-        assertEquals("development", AgentTools.AGENT_BRANCH)
-        assertFalse(
-            "and they are not the same branch",
-            Release.BRANCH == AgentTools.AGENT_BRANCH,
+        assertEquals("the agent pushes the same branch", "main", AgentTools.BRANCH)
+        assertEquals(
+            "and the agent's ci dispatch names it too",
+            "main",
+            AgentTools.BRANCH,
         )
     }
 

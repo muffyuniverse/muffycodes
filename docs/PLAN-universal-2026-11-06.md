@@ -983,6 +983,32 @@ and it is ended: *"lets keep only main"*.
   operator wants the agent able to make releases, and `Release.start` publishes through
   `workflow_dispatch`. Adding the condition would have broken the app's own release button.
 
+#### Corrected twice, and the operator settled it
+
+**This repository and a user's project are two different things, and I conflated them twice.**
+
+1. **First mistake:** I narrowed *this* repo's trigger to `[main]`, on the reasoning that one branch is
+   the model. But muffycodes develops on `development` and releases from `main`, so **three commits got
+   no CI at all** before the silent watcher gave it away. Fixed in `2a3b6ee`: trigger restored to
+   `[main, development]`, and the file now says at the top which branch is which and why.
+2. **Second mistake:** having been corrected, I over-corrected and reported that the operator's "one
+   main branch" instruction must mean the app's rule for *user* projects, not this repository. **The
+   operator's ruling, 2026-11-07:** *"muffy (WHICH WAS RENAMED INTO pechka-ai) should follow the same
+   one main branch logic as everything so your first understanding was COMPLETELY RIGHT."*
+
+**So the position, stated once and final:**
+
+| repository | branches | why |
+|---|---|---|
+| **a user's project** | **`main` only** — person and agent both push there | `AGENT_BRANCH` → `BRANCH = "main"`, `ReleaseKey.BRANCHES = ["main"]`, workflow trigger `[main]` |
+| **pechka-ai** (this app's own repository, formerly muffycodes) | **`main` only** | The same rule, for the same reason: one actor, one branch, no lane split |
+| **the `development` branch that exists today** | **to be collapsed into `main`** | 805 commits ahead, 11 behind. Merging it and deleting it is the work; it is *this* repo's tidy-up, not a rule for user projects |
+
+**The lesson, and it is the same one that keeps recurring in this session:** I answered a question about
+the app's model by editing the repository I was standing in. The two share words — "branch", "main",
+"release" — and nothing about the sentence distinguishes them. **When the subject is a user's project,
+the file to change is `AgentTools`/`ReleaseKey`, never `.github/`.**
+
 ### 13b.2 The workflow lock gate is deleted
 
 `start()` refuses to dispatch a workflow that names an environment unless a person has **locked** the
@@ -1049,6 +1075,36 @@ Three designs were considered and all are rejected:
 **The decision: open or private is the user's choice at project creation, and nothing is encrypted.**
 That choice already exists — `PRIVATE_LICENCE` is the default in the licence window (`Dialogs.kt:490`),
 and a licensed repository is public. No work needed.
+
+#### What `EncryptedLog` is, and what it is not — corrected
+
+**The operator asked, and the answer matters because I described it badly:** *"what is this encrypted
+log? we dont encrypt artifacts or logs, right? those are just workflow examples that can be dispatched
+by everyone - those are example files, not built-in parts of the application, RIGHT!?"*
+
+**Right, and the wording above overstated it.** The measured facts:
+
+| claim | true? | evidence |
+|---|---|---|
+| The app encrypts logs or artifacts | **No** | `EncryptedLog` is a **reader** (`openBytes`, `read`) plus, as of this session, a **writer** (`sealBytes`). Nothing in the app calls the writer on its own output. |
+| The app forces a user's project to seal anything | **No** | `CiSetup` **writes no workflow file at all** — it only sets an environment secret. `Workflows.kt` only *detects* sealing (`text.contains("openssl enc")`) to describe what a workflow can reach. |
+| Sealing happens by default | **No** | It happens only in **this repository's own** `.github/workflows/build-and-release.yml`, which is muffycodes' CI, not a template shipped to users. |
+| An unsealed artifact is mishandled | **No** | `openBytes` returns it **as it arrived**: *"Not sealed is not a failure."* The reader is a pass-through for anything it did not seal. |
+| A user's workflow can seal | **Yes, optionally** | Sealing is a **shell command in a workflow file** — `openssl enc`, or `gpg --encrypt`. Whoever writes the workflow chooses it. It is a technique the app can read, not a feature it imposes. |
+
+**So the honest one-sentence version: sealing is a thing a workflow author may do, and the app can read
+it. The app never does it to you, and never requires it.**
+
+**Why it exists at all, since §13b.5 says "no encryption anywhere":** those are different questions.
+§13b.5 rejects encrypting **git history at rest or in transit** — a project's bytes. `EncryptedLog` is
+about **a public runner's log**, where a failing test prints the expected and actual values and a
+stranger reads them. That is the one place encryption is both possible (the plaintext never has to
+leave the runner) and pointed (the leak is real, in public, and permanent). It is a **CI hygiene
+option**, not a storage model, and the app works identically for a project that never uses it.
+
+**`seal`/`unseal` on `archive` (added this session)** is the same idea in the agent's hands: the agent
+may seal a file before putting it somewhere a stranger can see, and open one it was given the key for.
+Nothing about it is automatic.
 
 ### 13b.6 Token separation: app token and agent token
 
@@ -1130,8 +1186,11 @@ for this client's system" it is not.
 | scope | key shape | who can read it | why it exists |
 |---|---|---|---|
 | **app** | `token_$login`, `modelKeyKey(login)` — **a separate pref namespace** | the app only | The agent must never be able to name these, and it cannot: `secret()` reads `secret_` keys, so **no `auth:` value resolves to a token**. Unreachable by construction, not by policy. |
-| **account** | `secret_${login}_$name` | every agent, on every project | A key several projects share |
-| **project** | `secret_${login}_${project}_$name` | agents in **this project only** | A key that belongs to one project |
+| **account** → **general** | `secret_general_$name` | every agent, on every project, whatever the account | A key several projects share |
+| **project** | `secret_project_${project}_$name` | agents in **this project only** | A key that belongs to one project |
+
+> **SUPERSEDED BY §13c.4.** The middle scope is **general**, not per-account, and the login leaves the
+> secret key. This section's reasoning about *why* three scopes exist stands; its key shapes do not.
 
 **The app scope does not move into the vault.** It stays a separate namespace, because the fact that
 `http {auth: …}` cannot reach the GitHub token is worth more than the tidiness of one model. That
@@ -1224,9 +1283,155 @@ commits.
 | 2 | Delete the workflow lock gate | Deletion; nothing depends on it once it is gone |
 | 3 | Drop `delete_repo` from `TokenScopes.REQUIRED` and `DeviceFlow.SCOPE` | Two constants and one message; independent of everything |
 | 4 | Size limit in Settings | Independent; one pref and six reads |
-| 5 | Project-scoped secrets | The largest; touches `CredentialStore`, `AppViewModel`, `AgentTools`, `SecretsScreen`, project deletion |
+| 5 | Project-scoped secrets | The largest; touches `CredentialStore`, `AppViewModel`, `AgentTools`, `SecretsScreen`, project deletion. **See §13c.5 — the key shapes are settled there first** |
 | 6 | The publish button in the sync slot | Needs nothing from 1–5, but it is the one that changes a screen, so it goes last |
 | 7 | `unseal`, so `http` covers artifacts | Optional; only worth it if `artifact` proves redundant |
+
+## 13c. The app is about projects, not about a selected account
+
+**The operator's decision, 2026-11-07:** *"main menu is about projects listed on the app, not just one
+account. There should be no selected account, but a list of added accounts to the app. and main menu
+should show projects from all accounts, and when you add a project you select to what account from
+added. Settings should apply to the app and all of its projects independent of their accounts.
+Therefore secret scopes are app/general/project, so that general secrets are accessible from all
+projects."*
+
+This **replaces** the account-scoped model the app was built on, and it supersedes the `account` scope
+in §13b.8.
+
+### 13c.1 What is true today, measured
+
+| thing | today | where |
+|---|---|---|
+| **Settings** | **already app-wide.** One `SharedPreferences("settings")`, constructed once with no account in it | `SettingsStore.kt:24`, `AppViewModel.kt:38` |
+| **Vault** | **already app-wide.** One `SharedPreferences`, keys carry the login — `token_$login`, `secret_${login}_$name` | `CredentialStore.kt:221` |
+| **Projects** | **per account, on disk.** `accounts/<login>/<project>/` is the repository | `Workspace.kt:92` |
+| **The project list** | `Workspace.projectNames()` lists **one account's** folders | `Workspace.kt:1362` |
+| **Which account is active** | one `activeLogin`, chosen in a picker, and everything hangs off it | `AppViewModel.kt:151`, `:518` |
+| **Model key** | `modelKeyKey(login)` — **per account**, so each account needs its own OpenRouter key | `CredentialStore.kt:292` |
+
+**So Settings already does what the operator asked.** The change is not to settings; it is to the
+**project list** and to the **vault's middle scope**.
+
+### 13c.2 The model
+
+**There is no selected account.** There is a list of added accounts, and a list of projects that spans
+all of them. A project's account is a **property of the project**, decided when it is made and stored
+beside it — not a mode the whole app is in.
+
+**Why the account cannot simply be dropped.** A repository is pushed as an identity, and the commit
+author is a person. So each project must remember which account it belongs to:
+
+- the **push credential** (whose token)
+- the **commit author** (name and email)
+- the **remote URL's owner**, which is usually that account
+
+That is a project fact. Today it is implied by "whichever account is selected", which is why selecting
+one is necessary at all.
+
+**What "a list of added accounts" means:** `AccountStore.accounts()` already returns every added
+account. Today it feeds a picker; it will feed a **screen** — add, remove, see which projects each one
+holds. The accounts themselves, their tokens and their author details do not change.
+
+### 13c.3 The identity key
+
+**Every project is addressed by `(account, name)`.** The menu shows `account/name` where it matters and
+`name` where it does not.
+
+**Project names can collide across accounts** — `acme-site` on two accounts is two different
+repositories. So a bare name is ambiguous the moment a second account exists, and the ambiguity must be
+resolved where the project is *chosen*, not where it is used.
+
+#### The options, and the costs
+
+| option | what it costs |
+|---|---|
+| **A. `ProjectRef(account, name)` everywhere** | ~100 signatures change (`grep "project: String"` finds 102 across 23 files), plus every call site and every test fixture. **Type-safe**: the compiler finds every one. |
+| **B. Flatten to `"account/name"` strings** | No signature changes, and it looks cheap — but `Workspace.projectDir` joins with `File`, so a `/` becomes a nested folder, and **a project named `a/b` would escape or collide**. Every `File(projectDir, …)` becomes a parse. The cheapness is an illusion and the failure is silent. |
+| **C. One active account at a time, switched by opening a project** | Smallest diff: keep `activeLogin`, but set it *from* the chosen project instead of from a picker. The menu is the union; opening a project re-binds the workspace. |
+
+**Decision: A, and C as the mechanism that makes it cheap.**
+
+`activeLogin` stays — as **the account of the project you are in**, derived from the project rather than
+chosen up front. So `Workspace`, `ProjectGit`, `AgentTools` and the 102 `project: String` signatures are
+**untouched**: they keep meaning "this account's project", and the account is set correctly before they
+are called. What changes is **where the menu's list comes from** — a scan across accounts — and **where
+`activeLogin` is set** — when a project is opened, not from a picker.
+
+That is one new data type at the edge (`ProjectRef`) and a list that spans accounts, rather than a
+refactor of the whole tree. **The 102 signatures are the thing to avoid touching, and this avoids them.**
+
+#### What it costs
+
+| place | change |
+|---|---|
+| `AppViewModel` | a `projects` list of `ProjectRef` scanned from every account; `projectNames` becomes the current account's view of it; opening a project sets `activeLogin` |
+| `ProjectList` / `BrowserScreen` | rows show the account; the "no projects" state spans accounts |
+| add-project dialogs | one account selector, defaulting to the last used |
+| `AccountStore` | no change — `accounts()` already lists them |
+| deletion | must name the account, because the folder is under it |
+
+**No migration.** Project folders stay where they are; the account is already the parent folder.
+
+### 13c.4 The vault: three scopes, app / general / project
+
+This **renames and redefines** §13b.8's middle scope. The `app` and `project` scopes are unchanged; the
+middle one stops being per-account and becomes **general**.
+
+| scope | key shape | who can read it | why |
+|---|---|---|---|
+| **app** | `token_$login`, `modelKeyKey(login)` | the app only | Still a **separate namespace**, so `http {auth:}` can never reach a token. That guarantee is structural and stays. |
+| **general** | `secret_general_$name` | **every agent, on every project, whatever the account** | A key several projects share. **This is the operator's point**: a shared service key is a fact about the app, not about the account you happened to be signed in to. |
+| **project** | `secret_project_${project}_$name` | agents in **this project only** | A key that belongs to one project |
+
+**The login leaves the secret key.** Today's `secret_${login}_$name` made the same service key
+invisible from a project under another account — which is exactly the problem the operator is naming.
+A general secret is general.
+
+**Project scope is keyed by project name alone**, not `account/project`. Two accounts may hold projects
+of the same name; their secrets are then the same scope. That is a real ambiguity and it is accepted
+deliberately: **a secret is a blast-radius control, not a secrecy control** (§13b.8's own closing
+sentence), and adding the account to the key would mean renaming every existing key for a distinction
+that only matters in the one case where two same-named projects both use the same secret name for
+different values. If that case ever appears, the fix is a fourth scope, not a re-keying.
+
+#### Resolution order
+
+`http {auth: "x"}` asks **project first, then general**:
+
+1. `secret_project_${project}_x`
+2. `secret_general_x`
+3. neither → the refusal names **both** places it looked
+
+**A project secret shadows a general one of the same name**, unchanged from §13b.8: a project needing a
+different key for the same service says so without renaming.
+
+#### Migration, and it is free
+
+**No general or project secrets exist yet.** §13b.8 landed `secret_${login}_project_${project}_$name`
+this session and nothing has been stored under it. The key shapes change now, before anything is in
+them.
+
+**Old account-scoped secrets** — if a build has any `secret_${login}_$name` — are **not** migrated
+automatically. They are read once at startup, offered in the window as "found under the old scope,
+keep it as general?" and then removed. That is a person's decision, because the scope *is* the decision.
+
+### 13c.5 The order, revised
+
+**13c lands before §13b.10's step 5**, because both touch the same key shapes and doing 13b.8 first
+means writing keys that 13c then renames.
+
+| # | Step | Why here |
+|---|---|---|
+| 1 | Vault: `general`/`project` key shapes, resolution order, migration prompt | Nothing else reads secrets yet; the shapes are cheapest to settle now |
+| 2 | The project list spans accounts; `ProjectRef` at the menu; `activeLogin` set by opening a project | The visible change; independent of the agent |
+| 3 | Add-project asks which account; deletion names the account | Follows from 2 |
+| 4 | Settings: **verify it is already app-wide** and say so in the window | Measured above; it may need only a sentence, not code |
+| 5 | The accounts screen: add, remove, see each one's projects | The picker's replacement; largest UI change, goes last |
+
+**The agent is untouched by 13c**, which is the point of choosing A+C: `AgentTools` keeps taking the
+project it is in, and the account is already right by then.
+
 
 ## 14. What this does not solve
 

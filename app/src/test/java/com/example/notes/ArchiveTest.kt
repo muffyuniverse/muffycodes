@@ -82,7 +82,7 @@ class ArchiveTest {
         write("src/util/Text.kt", "fun text() {}")
         write("README.md", "# readme")
 
-        val answer = tools().run(tools().run(call("""{"path":"src/"}"""))
+        val answer = tools().run(call("""{"path":"src/"}"""))
 
         assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
         // **Beside the input, same name, other suffix** — the whole of report 38.
@@ -395,7 +395,7 @@ class ArchiveTest {
     @Test
     fun `a sealed file does not contain the plaintext`() {
         write("notes.txt", "the milk went sour")
-        call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}"""))
+        tools().run(call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}"""))
 
         val enc = File(project(), "notes.txt.enc").readText()
         assertFalse("the sentence is not in it", enc.contains("milk went sour"))
