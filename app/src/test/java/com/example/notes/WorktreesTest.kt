@@ -224,7 +224,7 @@ class WorktreesTest {
             "they are under the new name",
             trees.exists("Groceries", "feature"),
         )
-        assertFalse("and not the old one", File(File(trees.worktreesRoot(), "Shopping")).isDirectory)
+        assertFalse("and not the old one", File(trees.worktreesRoot(), "Shopping").isDirectory)
     }
 
     @Test
