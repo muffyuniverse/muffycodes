@@ -316,8 +316,11 @@ class BranchesScreenTest {
         // The branch was made from main, so it already *contains* `notes.txt`; there is nothing to
         // create. What a worktree changes is where an edit lands: the same path, two copies on disk.
         val onBranch = File(scene.viewModel.currentDir, "notes.txt")
-        scene.viewModel.openEditor(onBranch)
-        scene.viewModel.saveEditor("the branch's copy")
+        // **Through the harness helpers, which WAIT.** Calling `viewModel.saveEditor` directly asserted
+        // before the write landed, so the branch still read "main's copy" and the test blamed the
+        // worktree. `scene.saveEditor` waits for the file to hold the text.
+        scene.openEditor(onBranch)
+        scene.saveEditor("the branch's copy")
 
         assertNotEquals("two different files", onMain.absolutePath, onBranch.absolutePath)
         assertEquals("main keeps its text", "main's copy", onMain.readText())
