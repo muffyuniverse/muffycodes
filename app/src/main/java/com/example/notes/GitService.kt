@@ -277,7 +277,18 @@ object GitService {
     // ---- repository lifecycle ---------------------------------------------
 
     /** True when [dir] holds a git repository. */
-    fun isRepository(dir: File): Boolean = File(dir, ".git").isDirectory
+    /**
+     * True when [dir] has a repository — **including a linked worktree, whose `.git` is a file.**
+     *
+     * `git worktree add` writes `gitdir: …` into a plain file where a normal repository has a
+     * directory. Testing only `isDirectory` answered "no" for every worktree, which made
+     * [RepoLocks.keyOf] fall back to the worktree's own path — and so the lock that is supposed to be
+     * shared would have been one per branch, the exact bug §13d is about.
+     */
+    fun isRepository(dir: File): Boolean {
+        val dotGit = File(dir, ".git")
+        return dotGit.isDirectory || dotGit.isFile
+    }
 
     /**
      * Creates a repository in [dir] (or opens the one already there).
@@ -307,10 +318,14 @@ object GitService {
         dir.mkdirs()
         val gitDir = File(dir, ".git")
 
-        // A repository has to be created with Git.init, because that is what
-        // writes the HEAD reference; a bare builder would leave the repository
-        // without one and the first commit would fail.
-        if (!gitDir.isDirectory) {
+        // **A `.git` FILE means this is a linked worktree, and it must not be initialised.**
+        // `git worktree add` writes `gitdir: <common>/.git/worktrees/<id>` into a plain file where a
+        // normal repository has a directory. `Git.init()` on such a folder fails with "Creating
+        // directories for …/.git failed" — measured — and the old `!gitDir.isDirectory` test sent
+        // every worktree down exactly that path. §13d is why this matters: a project's branches are
+        // about to be worktrees.
+        val linked = gitDir.isFile
+        if (!gitDir.isDirectory && !linked) {
             Git.init()
                 .setDirectory(dir)
                 .setInitialBranch("main")
@@ -318,10 +333,15 @@ object GitService {
                 .close()
         }
 
-        val repo = FileRepositoryBuilder()
-            .setGitDir(gitDir)
-            .setWorkTree(dir)
-            .build()
+        // **`findGitDir` for a worktree**, because it is what reads the `commondir` file and so
+        // reaches the shared refs and objects. Setting the git dir to the private
+        // `.git/worktrees/<id>` would build a repository with no branches at all — that is the
+        // 6.10.1 behaviour, and it is still wrong to ask for even on 7.x.
+        val repo = if (linked) {
+            FileRepositoryBuilder().findGitDir(dir).setWorkTree(dir).build()
+        } else {
+            FileRepositoryBuilder().setGitDir(gitDir).setWorkTree(dir).build()
+        }
         try {
             // A repository that has never been committed to has no HEAD yet.
             // (HEAD is a symbolic reference, so it only shows up once there is
