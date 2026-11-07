@@ -202,7 +202,9 @@ class AgentSessionsTest {
         // **The whole point of the keying change.** Before this, `agents.json` was keyed by project, so
         // starting an agent on `feature` would have replaced main's session — and main's agent would
         // have disappeared with no message. The second write is the one that used to win.
-        store.put(AgentSession("Shopping", state = AgentSession.State.RUNNING))
+        // **Two different states on purpose.** With both the same, "main's state survived" would pass
+        // even if feature had overwritten main — the assertion has to be able to fail.
+        store.put(AgentSession("Shopping", state = AgentSession.State.STOPPED))
         store.put(AgentSession("Shopping", branch = "feature", state = AgentSession.State.IDLE))
 
         val read = store.read()
@@ -212,8 +214,13 @@ class AgentSessionsTest {
         assertEquals("then the branch", "feature", read[1].branch)
         assertEquals(
             "and main's state survived the second write",
-            AgentSession.State.RUNNING,
+            AgentSession.State.STOPPED,
             read[0].state,
+        )
+        assertEquals(
+            "while feature has its own",
+            AgentSession.State.IDLE,
+            read[1].state,
         )
     }
 
@@ -238,7 +245,7 @@ class AgentSessionsTest {
         // would vanish on upgrade - and it would look like the app had crashed, not like a format change.
         file.parentFile?.mkdirs()
         file.writeText(
-            """{"Shopping":{"state":"RUNNING","sub":"WAITING","retries":0}}""",
+            """{"Shopping":{"state":"STOPPED","sub":"WAITING","retries":0}}""",
         )
 
         val read = store.read()
@@ -246,14 +253,14 @@ class AgentSessionsTest {
         assertEquals("it is main's session", 1, read.size)
         assertEquals("the project", "Shopping", read[0].project)
         assertEquals("and the branch is main", "main", read[0].branch)
-        assertEquals("with its state intact", AgentSession.State.RUNNING, read[0].state)
+        assertEquals("with its state intact", AgentSession.State.STOPPED, read[0].state)
     }
 
     @Test
     fun `a legacy key and a branch key live side by side in one file`() {
         // The upgrade moment itself: an old row is still there while a new branch row appears.
         file.parentFile?.mkdirs()
-        file.writeText("""{"Shopping":{"state":"RUNNING"}}""")
+        file.writeText("""{"Shopping":{"state":"STOPPED"}}""")
         store.put(AgentSession("Shopping", branch = "feature"))
 
         val read = store.read()
