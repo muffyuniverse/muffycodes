@@ -57,7 +57,12 @@ class AgentSessions(private val accountDir: File) {
         }
         return root.keys().asSequence().mapNotNull { key ->
             root.optJSONObject(key)?.let { readOne(key, it) }
-        }.sortedWith(compareBy({ it.project }, { it.branch })).toList()
+        }.sortedWith(
+            // **main first, then the rest alphabetically** — the same order `localBranches` gives the
+            // branch screen, so the two lists cannot disagree about where a project's branches start.
+            // `compareBy(branch)` alone put `feature` above `main`, which is alphabetical and wrong.
+            compareBy({ it.project }, { it.branch != AgentSession.MAIN }, { it.branch.lowercase() }),
+        ).toList()
     }
 
     /**
