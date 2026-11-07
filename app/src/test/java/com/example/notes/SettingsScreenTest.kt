@@ -24,10 +24,10 @@ import org.robolectric.annotation.Config
 /**
  * The settings screen, painted for real.
  *
- * Three things were asked of this screen and each of them is about words on the
- * glass, which a ViewModel test cannot answer: **Switch** instead of an identity
- * editor, the window saying to use Add when there is nothing to switch to, and the
- * history field saying plainly what it counts.
+ * Two things were asked of this screen and each is about words on the glass, which a ViewModel test
+ * cannot answer: the history field saying plainly what it counts, and the account block **not** being
+ * here at all (§13c.5 step 3) — Add, Switch and Remove live on the accounts screen, which is the main
+ * menu, so their absence is the assertion rather than a message about it.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -51,8 +51,6 @@ class SettingsScreenTest {
     }
 
     private fun settings(
-        onSignIn: () -> Unit = {},
-        onRemove: () -> Unit = {},
         /** The phone the test is testing: the exemption is a fact of the system, not of the screen. */
         exempt: (android.content.Context) -> Boolean = { false },
         onAskBattery: () -> Unit = {},
@@ -66,8 +64,6 @@ class SettingsScreenTest {
                 SettingsScreen(
                     viewModel = scene.viewModel,
                     onBack = {},
-                    onSignIn = onSignIn,
-                    onRemoveAccount = onRemove,
                     onTestAccount = {},
                     exempt = exempt,
                     onAskBattery = onAskBattery,
@@ -78,18 +74,23 @@ class SettingsScreenTest {
         }
     }
 
+    /**
+     * **The account block is not on this screen any more** (§13c.5 step 3).
+     *
+     * Add, Switch and Remove all live on the accounts screen, which is the main menu. Two screens
+     * offering them meant the one you reached by accident could switch the account out from under the
+     * projects you were looking at — so this asserts the absence, not a message about it.
+     */
     @Test
-    fun `Switch says to use Add when there is no other account`() {
-        // One account, so there is nothing to move to. An empty window would look
-        // broken; naming the button that fixes it is the whole answer.
+    fun `the account block is not on this screen`() {
         settings()
 
-        compose.onNodeWithText("Switch").performClick()
-
-        compose.onNodeWithText("There are no other accounts on this phone yet.")
-            .assertIsDisplayed()
-        compose.onNodeWithText("Use Add to sign in to another one first.")
-            .assertIsDisplayed()
+        compose.onNodeWithText("Working as", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Switch").assertDoesNotExist()
+        compose.onNodeWithText("Remove").assertDoesNotExist()
+        // **"Add" is the one to be careful about.** The accounts screen has a "+", but a bare "Add"
+        // here would mean the old button had survived the deletion.
+        compose.onNodeWithText("Add").assertDoesNotExist()
     }
 
     @Test
@@ -153,20 +154,22 @@ class SettingsScreenTest {
         compose.onNodeWithText("Ask Android").assertDoesNotExist()
     }
 
+    /**
+     * **Moving to another account is the accounts screen's job now**, so this test says where the
+     * capability went rather than deleting the assertion. `switchTo` is still the mechanism — it is
+     * the *button* that moved — and a screen that could still do it would be the duplicate.
+     */
     @Test
-    fun `Switch lists the other account and moves to it`() {
-        // A second account on this phone. The dialog offers it, and picking it
-        // actually changes who is active — the screen must not be showing a list that
-        // does nothing.
+    fun `switching accounts is not offered here`() {
         scene.viewModel.signIn("someone-else", "a-key", "", "")
         scene.viewModel.switchTo(scene.login)
         settings()
 
-        compose.onNodeWithText("Switch").performClick()
-        compose.onNodeWithText("someone-else").performClick()
-
-        assertEquals("the other account is active", "someone-else", scene.viewModel.activeLogin)
+        compose.onNodeWithText("Switch").assertDoesNotExist()
+        // The account is still the one that was active: this screen neither switched it nor broke it.
+        assertEquals("the active account is untouched", scene.login, scene.viewModel.activeLogin)
     }
+
     @Test
     fun `the notification permission is offered only while it is missing`() {
         // **A declared permission that was never granted is a reminder posted into nowhere.** The row
@@ -246,10 +249,12 @@ class SettingsScreenTest {
         // that is checkable with what is on the screen.
         // **"Working as", not "Signed in as"**: the provisional account is a real workspace that is
         // not signed in to anything, so the label has to be true in both states.
-        compose.onNodeWithText("Working as", substring = true).performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Switch").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Remove").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Add").performScrollTo().assertIsDisplayed()
+        // **The account block used to be the thing this asserted.** It is gone (§13c.5 step 3), so
+        // the grouping promise now belongs to the accounts screen and this screen's own first block
+        // is the agent's. What is checkable here is that the screen still draws and that the account
+        // is not on it.
+        compose.onNodeWithText("Background").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Working as", substring = true).assertDoesNotExist()
     }
 
     @Test

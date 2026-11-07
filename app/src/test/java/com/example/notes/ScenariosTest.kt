@@ -122,8 +122,6 @@ class ScenariosTest {
         SettingsScreen(
             viewModel = viewModel,
             onBack = {},
-            onSignIn = {},
-            onRemoveAccount = {},
             onTestAccount = {},
         )
     }

@@ -459,12 +459,10 @@ private fun AppRoot(viewModel: AppViewModel) {
                 if (permission != null) askNotices.launch(permission)
             },
             onBack = { showSettings = false },
-            onSignIn = { tap("add account"); pending = Pending.SignIn },
+            // **No `onSignIn` / `onRemoveAccount` any more** (§13c.5 step 3): those three acts live
+            // on the accounts screen, which is the main menu. Settings keeps only what is local to
+            // this phone.
             onSetKey = { tap("set model key"); pending = Pending.ModelKey },
-            onRemoveAccount = {
-                tap("remove account")
-                viewModel.account?.let { pending = Pending.RemoveAccount(it.login) }
-            },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
             onOpenSecrets = { tap("secrets"); showSecrets = true },

@@ -89,8 +89,6 @@ private fun traceWhere(): String {
 fun SettingsScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
-    onSignIn: () -> Unit,
-    onRemoveAccount: () -> Unit,
     onTestAccount: () -> Unit,
     /** Opens the trace: what the app was asked to do and what answered. */
     onOpenTrace: () -> Unit = {},
@@ -131,8 +129,6 @@ fun SettingsScreen(
     onAskNotices: () -> Unit = {},
 ) {
     val settings = viewModel.settings
-    val account = viewModel.account
-    var showingSwitch by remember { mutableStateOf(false) }
     val context = LocalContext.current
     // Read once per visit to the system's screen — not per frame, because the check is an IPC into
     // the power service, and not once for ever, because the answer can change while the app is
@@ -166,76 +162,16 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // ---- the account (§5) ----
+            // ---- the account is NOT here any more ----
             //
-            // **One block, with its own tight spacing.** The screen's rhythm is six
-            // density-independent pixels between things that are unrelated; the account's
-            // name, its address and the three buttons that act on it are one thing, and
-            // giving them the outer rhythm — on top of a button's own padding — left a gap
-            // wide enough to look like two screens. Reported from the live log: "between
-            // user account and buttons below it is too much space".
-            // **The rows are one thing, so the space between them is one pixel, not two.** Reported
-            // twice from the live log - "between user account and buttons below it is too much
-            // space", then "and signed in as block still has gaps between rows that should be
-            // halved at least" - and the second report is the useful one: the gap that was left
-            // was between the three *lines*, not between the block and what followed.
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                // **One line, and "Working as" rather than "Signed in as".** The provisional
-                // account is not signed in to anything - it is a real workspace that happens to
-                // live only on this phone - so a label claiming a sign-in would be false in exactly
-                // the state a new person sees first. "Working as" is true of both.
-                //
-                // **The login on the same line as the label**, because two lines for one fact was
-                // the report: "just make Working as <account> a single line". The email went with
-                // it - it is derived from the login, so it answered a question nobody asked and
-                // cost a row.
-                Text(
-                    text = "Working as " + (account?.login ?: "~local"),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                // **What the block decides, in one line**, on the operator's instruction: "add short
-                // description to 'working as' block: that it defines system settings and available
-                // projects in the workspace".
-                //
-                // This is the one control on the screen whose effect is not local: changing the
-                // account changes which projects exist at all, and which of the app's own settings
-                // are in force. Nothing else on the page does that, and nothing said so.
-                Text(
-                    "The account decides the system settings and which projects the workspace has.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // Add, Switch, Remove — and nothing that reads back at you. The commit
-                // name and email are no longer something to type: they come from the
-                // account GitHub already knows, so the only reason to change them would
-                // be to commit as somebody else, which this app has no use for.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // The padding is the button's own; asking for less keeps the touch
-                    // target (Material enforces forty dips) while removing the empty band
-                    // above the label.
-                    val tight = PaddingValues(
-                        horizontal = 10.dp,
-                        vertical = 4.dp,
-                    )
-                    TextButton(onClick = onSignIn, contentPadding = tight) { Text("Add") }
-                    // **Neither button belongs to the provisional account.** There is nothing to
-                    // switch to before a real account exists, and "Remove" on the workspace that
-                    // exists so there is always one would be a button whose only effect is to
-                    // remake what it just deleted. Add is the one act that means something there.
-                    if (account != null && !viewModel.isProvisionalAccount) {
-                        TextButton(
-                            onClick = { showingSwitch = true },
-                            contentPadding = tight,
-                        ) { Text("Switch") }
-                        TextButton(onClick = onRemoveAccount, contentPadding = tight) {
-                            Text("Remove", color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-            // A debug build can make a test account. It lived in the account window
-            // that the three-lined button opened, and that window is gone — so the
-            // capability came here rather than being quietly dropped with it. A
+            // **The Add / Switch / Remove block lived here and is gone** (§13c.5 step 3). The main
+            // menu is now the list of accounts and offers the same three acts — so two screens were
+            // offering them, and the one reached by accident could switch the account out from under
+            // the projects you were looking at.
+            //
+            // What is left is the one thing that was never account *management*: a debug build's test
+            // account. It lived in the account window the three-lined button opened, and that window
+            // is gone, so the capability came here rather than being quietly dropped with it. A
             // release build never sees this: `canMakeTestAccount` is false.
             if (viewModel.canMakeTestAccount) {
                 TextButton(onClick = onTestAccount) { Text("Use the test account") }
@@ -1125,62 +1061,6 @@ fun SettingsScreen(
         }
     }
 
-    if (showingSwitch) {
-        SwitchAccountDialog(
-            current = account?.login,
-            others = viewModel.accountList.map { it.login }.filter { it != account?.login },
-            onPick = { login ->
-                viewModel.switchTo(login)
-                showingSwitch = false
-            },
-            onDismiss = { showingSwitch = false },
-        )
-    }
-}
-
-/**
- * The accounts this phone holds, to move between.
- *
- * When there are none, it says so and names the button that makes one, rather
- * than showing an empty window that looks broken.
- */
-@Composable
-private fun SwitchAccountDialog(
-    current: String?,
-    others: List<String>,
-    onPick: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Switch account") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (others.isEmpty()) {
-                    Text("There are no other accounts on this phone yet.")
-                    Text(
-                        "Use Add to sign in to another one first.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    if (current != null) {
-                        Text(
-                            "Now: $current",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    others.forEach { login ->
-                        TextButton(onClick = { onPick(login) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(login)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }
 
 /** One swatch of the theme row: tap to select, framed when selected. */
