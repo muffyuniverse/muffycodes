@@ -199,4 +199,78 @@ class RepoLocksTest {
             fresh.any { it.contains("repo-hold") && it.contains("slow") },
         )
     }
+    /**
+     * **Two worktrees of one repository are ONE lock** (§13d).
+     *
+     * This is the test the whole change exists for. A linked worktree's `repo.directory` is
+     * `.git/worktrees/<id>`, which is per branch — so a lock keyed on the directory would let two
+     * branches of one repository commit at once, and the loser would have its live `index.lock`
+     * deleted by `clearStaleLock`, which is exactly the bug this class was written to fix.
+     *
+     * The worktree is made with `git` in the test, not by the app: this proves the app's lock agrees
+     * with git's own layout, which is the compatibility direction that matters.
+     */
+    @Test
+    fun `two worktrees of one repository share a lock`() {
+        // A real repository with a real linked worktree.
+        GitService.initOrOpen(dir, GitAuthor("T", "t@t")).use { repo ->
+            val inserter = repo.newObjectInserter()
+            val tree = inserter.insert(org.eclipse.jgit.lib.TreeFormatter())
+            val commit = org.eclipse.jgit.lib.CommitBuilder().apply {
+                setTreeId(tree)
+                setAuthor(org.eclipse.jgit.lib.PersonIdent("T", "t@t"))
+                setCommitter(org.eclipse.jgit.lib.PersonIdent("T", "t@t"))
+                setMessage("first")
+            }
+            val id = inserter.insert(commit)
+            inserter.flush()
+            inserter.close()
+            repo.updateRef("refs/heads/main").apply { setNewObjectId(id) }.update()
+        }
+
+        // **The worktree is made by hand, in git's own format** — the same four files the app will
+        // have to write (§13d.2), because `git` is not available on Android and a test that shelled
+        // out to it would prove nothing about the phone. This is also the first place that format is
+        // exercised, so a mistake in it fails here rather than on a device.
+        val worktree = File(root, "groceries-feature").apply { mkdirs() }
+        val common = File(dir, ".git")
+        val private = File(common, "worktrees/groceries-feature").apply { mkdirs() }
+        File(worktree, ".git").writeText("gitdir: " + private.absolutePath + "\n")
+        File(private, "commondir").writeText("../..\n")
+        File(private, "gitdir").writeText(File(worktree, ".git").absolutePath + "\n")
+        File(private, "HEAD").writeText("ref: refs/heads/feature\n")
+        File(common, "refs/heads").mkdirs()
+        File(common, "refs/heads/feature").writeText(File(common, "refs/heads/main").readText())
+
+        // **JGit agrees it is a worktree of this repository**, which is what makes the lock's answer
+        // about the common directory meaningful rather than incidental.
+        GitService.initOrOpen(worktree, GitAuthor("T", "t@t")).use { linked ->
+            assertEquals(
+                "JGit resolves the worktree to the shared repository",
+                common.canonicalPath,
+                linked.commonDirectory.canonicalPath,
+            )
+        }
+
+        // **Held in one, and the other cannot take it.** The two paths are different directories
+        // with different `repo.directory`, and the lock is the same one.
+        val held = CountDownLatch(1)
+        val released = CountDownLatch(1)
+        val thread = Thread {
+            RepoLocks.hold(dir, "first") {
+                held.countDown()
+                released.await(10, TimeUnit.SECONDS)
+            }
+        }.apply { isDaemon = true; start() }
+
+        assertTrue("the first holder started", held.await(10, TimeUnit.SECONDS))
+        assertTrue("the other worktree sees it held", RepoLocks.isHeld(worktree))
+        val got = RepoLocks.tryHold(worktree, "second", 0L) { }
+        assertFalse("and cannot take it", got)
+
+        released.countDown()
+        thread.join(10_000)
+        assertTrue("and it is free once released", RepoLocks.tryHold(worktree, "second", 0L) { })
+    }
+
 }

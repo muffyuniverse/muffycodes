@@ -1955,6 +1955,16 @@ object GitService {
         }
     }
 
+    /**
+     * The characters git's own `check-ref-format` refuses in a branch name.
+     *
+     * **A set rather than a literal inside the comparison**, because the backslash is one of them and
+     * writing it inside a quoted set is how the line above stopped closing — a mistake whose symptom
+     * is not "one string is broken" but "every symbol in the rest of the file is missing", because the
+     * unterminated string swallows them all.
+     */
+    private val BAD_BRANCH_CHARS = setOf('~', '^', ':', '?', '*', '[', '\\', '\u007F')
+
     /** The name of the branch that is currently checked out. */
     fun currentBranch(repo: Repository): String {
         val branch = try {
@@ -2062,7 +2072,7 @@ object GitService {
             trimmed == "main" -> "main is the branch a project is made of, so it already exists."
             trimmed.contains("..") -> "A branch name cannot contain .. — try a dash."
             trimmed.contains(' ') -> "A branch name cannot contain a space — try a dash."
-            trimmed.any { it in "~^:?*[\\" } ->
+            trimmed.any { it in BAD_BRANCH_CHARS } ->
                 "A branch name cannot contain any of ~ ^ : ? * [ \\ — try a dash."
             trimmed.endsWith("/") || trimmed.endsWith(".lock") ->
                 "A branch name cannot end with a slash or .lock."

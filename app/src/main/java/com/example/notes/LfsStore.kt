@@ -28,8 +28,16 @@ import java.io.File
  */
 object LfsStore {
 
-    /** Where a repository's LFS objects live. `objects/<first two>/<next two>/<rest>`. */
-    fun dirOf(repo: Repository): File = File(repo.directory, "lfs/objects")
+    /**
+     * Where a repository's LFS objects live. `objects/<first two>/<next two>/<rest>`.
+     *
+     * **The COMMON directory, not `repo.directory`.** For a linked worktree `repo.directory` is
+     * `.git/worktrees/<id>`, which is the worktree's private bookkeeping — so keying the store there
+     * would give every branch its own LFS objects, and a picture checked out on one branch would be a
+     * missing object on another. Objects are content-addressed and shared; that is what
+     * `getCommonDirectory()` names, and for a repository with no worktrees it is the same path.
+     */
+    fun dirOf(repo: Repository): File = File(repo.commonDirectory, "lfs/objects")
 
     /**
      * Every LFS object id that some commit reachable from HEAD still points at.

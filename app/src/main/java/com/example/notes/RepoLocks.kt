@@ -56,8 +56,30 @@ object RepoLocks {
     /** How long a hold may go on before it is worth saying so. */
     const val SLOW_MS = 5_000L
 
+    /**
+     * **The directory a lock is really about: the repository's COMMON directory** (§13d).
+     *
+     * With one worktree per project this is the project folder, so nothing changes. With linked
+     * worktrees it is decisive: `repo.directory` is then `.git/worktrees/<id>`, which is *per branch*,
+     * so keying a lock on it would let two worktrees of one repository write at the same time — and
+     * one would take the other's `index.lock`, which is **exactly the bug this class was written to
+     * fix**. The objects, the refs and the index that matters are all in the common directory.
+     *
+     * **A folder that is not a repository is its own key.** A lock is still worth having there, and
+     * answering null would turn a stall into no protection at all.
+     */
+    private fun keyOf(dir: File): File = try {
+        if (!GitService.isRepository(dir)) return dir
+        GitService.initOrOpen(dir, GitAuthor("", "")).use { it.commonDirectory }
+    } catch (t: Throwable) {
+        // Opening it is how the common directory is asked for; a folder that will not open is still a
+        // folder, and locking the folder itself is the next best answer.
+        dir
+    }
+
     private fun keyFor(dir: File): String = try {
-        dir.canonicalPath
+        // **The common directory, so two worktrees of one repository are one lock.** See [keyOf].
+        keyOf(dir).canonicalPath
     } catch (t: Throwable) {
         // A path that will not canonicalise is still a path; the absolute one is the next best
         // answer, and refusing to lock at all would be the worst one.
