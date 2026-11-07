@@ -554,6 +554,15 @@ fun SlimRow(
     busy: Boolean,
     /** Offered only where a screen can open the window: the browser, which is the project. */
     onSeeChanges: (() -> Unit)? = null,
+    /**
+     * Offered when there is nothing left to send, because **that is the moment a release makes
+     * sense**: a version published from a tree with unsent work would name a commit that is not
+     * what is on GitHub.
+     *
+     * The operator chose a button here rather than a menu item, on the reasoning that a person
+     * looking at "up to date" is exactly the person about to publish.
+     */
+    onRelease: (() -> Unit)? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
@@ -587,6 +596,17 @@ fun SlimRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // **And "Publish…" sits beside it**, because "nothing unsent" is the state in which a
+                // release is safe to make: a version published from a tree with unsent work would
+                // name a commit GitHub does not have. This is where Sync used to be, and a release is
+                // a different question from a sync — sync asks "send what is here", and a release
+                // names a version, which only a person decides.
+                if (onRelease != null) {
+                    TextButton(
+                        onClick = onRelease,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) { Text("Publish…") }
+                }
             }
             // **No Sync button, and no button where it was.** The operator moved the decision to
             // the agent: "we can remove this functionality and transfer it to agent so that it can
@@ -1240,7 +1260,7 @@ private fun EmptyState(title: String, text: String) {
  * there is exactly one place that can be wrong.
  */
 @Composable
-fun ProjectSlimRow(viewModel: AppViewModel) {
+fun ProjectSlimRow(viewModel: AppViewModel, onRelease: (() -> Unit)? = null) {
     // **Only inside the repo.** The row carries Sync, and Sync sends what is in
     // the worktree — offering it one level above, where nothing of the project is
     // on screen, raises a question the screen cannot answer.
@@ -1270,6 +1290,7 @@ fun ProjectSlimRow(viewModel: AppViewModel) {
         changes = viewModel.changesOf(project),
         busy = viewModel.busy,
         onSeeChanges = { viewModel.openChanges(project) },
+        onRelease = onRelease,
     )
     HorizontalDivider()
 }

@@ -82,7 +82,7 @@ class ArchiveTest {
         write("src/util/Text.kt", "fun text() {}")
         write("README.md", "# readme")
 
-        val answer = tools().run(call("""{"path":"src/"}"""))
+        val answer = tools().run(tools().run(call("""{"path":"src/"}"""))
 
         assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
         // **Beside the input, same name, other suffix** — the whole of report 38.
@@ -372,14 +372,14 @@ class ArchiveTest {
         val original = write("notes.txt", "the milk went sour")
         val key = EncryptedLog.newKey()
 
-        val sealed = call("""{"path":"notes.txt","seal":true,"key":"$key"}""").text
+        val sealed = tools().run(call("""{"path":"notes.txt","seal":true,"key":"$key"}"""))
         assertTrue("it says what it did: $sealed", sealed.contains("notes.txt.enc"))
 
         val enc = File(project(), "notes.txt.enc")
         assertTrue("the sealed file is beside it", enc.isFile)
         assertTrue("and the plaintext is still there", original.isFile)
 
-        val opened = call("""{"path":"notes.txt.enc","seal":false,"key":"$key"}""").text
+        val opened = tools().run(call("""{"path":"notes.txt.enc","seal":false,"key":"$key"}"""))
         assertTrue("it opened: $opened", opened.contains("notes.txt"))
         assertEquals(
             "and the bytes came back",
@@ -395,7 +395,7 @@ class ArchiveTest {
     @Test
     fun `a sealed file does not contain the plaintext`() {
         write("notes.txt", "the milk went sour")
-        call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}""")
+        call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}"""))
 
         val enc = File(project(), "notes.txt.enc").readText()
         assertFalse("the sentence is not in it", enc.contains("milk went sour"))
@@ -412,11 +412,11 @@ class ArchiveTest {
         write("notes.txt", "the milk went sour")
         call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}""")
 
-        val said = call("""{"path":"notes.txt.enc","seal":false,"key":"${EncryptedLog.newKey()}"}""")
-        assertTrue("it is refused: ${said.text}", said.text.startsWith(AgentLog.FAILURE))
+        val said = tools().run(call("""{"path":"notes.txt.enc","seal":false,"key":"${EncryptedLog.newKey()}"}"""))
+        assertTrue("it is refused: ${said}", said.startsWith(AgentLog.FAILURE))
         assertTrue(
-            "and names the key rather than the format: ${said.text}",
-            said.text.contains("does not open it"),
+            "and names the key rather than the format: ${said}",
+            said.contains("does not open it"),
         )
     }
 
@@ -438,11 +438,11 @@ class ArchiveTest {
         write("notes.txt", "the milk went sour")
 
         val sealed = withVault.run(call("""{"path":"notes.txt","seal":true,"key":"my-key"}"""))
-        assertTrue("it sealed with the vault's value: ${sealed.text}", sealed.text.contains(".enc"))
+        assertTrue("it sealed with the vault's value: ${sealed}", sealed.contains(".enc"))
 
         // Opening with the literal word must fail, because the key was the SECRET, not the name.
         val literal = withVault.run(call("""{"path":"notes.txt.enc","seal":false,"key":"wrong-key"}"""))
-        assertTrue("a different key fails: ${literal.text}", literal.text.startsWith(AgentLog.FAILURE))
+        assertTrue("a different key fails: ${literal}", literal.startsWith(AgentLog.FAILURE))
     }
 
     /**
@@ -453,10 +453,10 @@ class ArchiveTest {
     @Test
     fun `sealing a folder is refused and names archive`() {
         write("src/a.txt")
-        val said = call("""{"path":"src","seal":true,"key":"${EncryptedLog.newKey()}"}""")
+        val said = tools().run(call("""{"path":"src","seal":true,"key":"${EncryptedLog.newKey()}"}"""))
 
-        assertTrue("it is refused: ${said.text}", said.text.startsWith(AgentLog.FAILURE))
-        assertTrue("and names the tool that does: ${said.text}", said.text.contains("archive"))
+        assertTrue("it is refused: ${said}", said.startsWith(AgentLog.FAILURE))
+        assertTrue("and names the tool that does: ${said}", said.contains("archive"))
     }
 
     /**
@@ -467,19 +467,19 @@ class ArchiveTest {
     @Test
     fun `opening a file that is not sealed is refused`() {
         write("notes.txt", "the milk went sour")
-        val said = call("""{"path":"notes.txt","seal":false,"key":"whatever"}""")
+        val said = tools().run(call("""{"path":"notes.txt","seal":false,"key":"whatever"}"""))
 
-        assertTrue("it is refused: ${said.text}", said.text.startsWith(AgentLog.FAILURE))
-        assertTrue("and says why: ${said.text}", said.text.contains(".enc"))
+        assertTrue("it is refused: ${said}", said.startsWith(AgentLog.FAILURE))
+        assertTrue("and says why: ${said}", said.contains(".enc"))
     }
 
     /** No key at all is refused where the mistake is made, not later at open time. */
     @Test
     fun `sealing without a key is refused`() {
         write("notes.txt")
-        val said = call("""{"path":"notes.txt","seal":true}""")
+        val said = tools().run(call("""{"path":"notes.txt","seal":true}"""))
 
-        assertTrue("it is refused: ${said.text}", said.text.startsWith(AgentLog.FAILURE))
-        assertTrue("and asks for one: ${said.text}", said.text.contains("key"))
+        assertTrue("it is refused: ${said}", said.startsWith(AgentLog.FAILURE))
+        assertTrue("and asks for one: ${said}", said.contains("key"))
     }
 }

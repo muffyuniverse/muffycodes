@@ -3484,11 +3484,13 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Starts a release of [versionName] from `main`.
      *
-     * **The other lane, and the one the agent cannot reach.** `AgentTools`' `ci` refuses any branch but
-     * `development`; this goes to `main` and is reachable only from a button a person pressed. No
-     * reviewer is involved: the `release` environment may only be used by `main` and `development`, so
-     * an agent that somehow dispatched on `main` would find the signing key unreachable and the release
-     * would fail rather than ship.
+     * **Both actors can release, and that is the operator's decision** — the two-lane split (person to
+     * `main`, agent to `development`) is ended. What remains between a run and a published version is
+     * `ref == 'refs/heads/main'` in the workflow, and the `release` environment's own rules.
+     *
+     * **This was unreachable until now.** `startRelease` existed, `Release.start` existed and was
+     * tested, and nothing called either — so the app could not publish a release from inside it at
+     * all, and a person had to go to github.com and dispatch by hand. Same defect `CiSetup` had.
      */
     fun startRelease(versionName: String, devBuild: Boolean = false) {
         val login = activeLogin
@@ -3517,10 +3519,6 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    /**
-     * Replaces a project with what GitHub holds (§5.2). An existing project is
-     * asked about first by the screen; this is the act.
-     */
     /** What went wrong the last time a sync was asked for, for a screen that asks. */
     var lastSyncError: String? by mutableStateOf(null)
         private set
