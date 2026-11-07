@@ -1836,10 +1836,31 @@ how git already behaves.
 **What I would not do:** create worktrees in step 2, or put the merge button in before the branches
 screen exists. Both would be building on a folder layout that has not been proven.
 
-**The one thing to decide before step 1:** *does a project still have a single default worktree?* If
-tapping a project always shows branches first, then there is no "default" worktree and `main`'s worktree
-is just another row — which is cleaner, and means the existing project screen is reached one tap deeper.
-That is a change to every screenshot and every scenario test, and it is a real cost worth naming.
+#### The decision, made
+
+**The operator, 2026-11-07:** *"when you tap a project you are shown branch screen where you need to
+select a branch (and main branch exists by default even for newly created projects)."*
+
+**So there is no default worktree.** Tapping a project always shows its branches, and `main` is a row
+like any other. That settles the question this section left open, and it has two consequences worth
+stating:
+
+- **`main` always exists, including for a project made a second ago.** It already does —
+  `ProjectGit.init` sets `setInitialBranch("main")` (`GitService.kt:315`) — so a new project has one
+  branch, one row, and nothing to create. **The empty case cannot happen**, which is why the branch
+  screen needs no "make your first branch" state.
+- **The project's file screen is one tap deeper**, and every scenario screenshot and tour step that
+  assumed "tap project → files" now passes through the branch screen. **That is the real cost, and it is
+  a test-and-screenshots cost, not a logic cost** — the existing `BrowserScreen` is unchanged; it simply
+  is reached by choosing `main`.
+
+**And it removes a class of bug**: with no default worktree there is no "which branch is the project
+on" state to keep in sync with a branch list, because the branch you are in is chosen every time rather
+than remembered. `activeBranch` is then purely "the branch you entered", the same shape as
+`activeLogin`, and leaving a project clears it.
+
+**The back path is therefore three levels**, and each is one gesture: files → branches → projects →
+accounts.
 
 ## 14. What this does not solve
 

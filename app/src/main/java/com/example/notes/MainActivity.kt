@@ -516,7 +516,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         viewModel.onAccountsScreen -> AccountsScreen(
             viewModel = viewModel,
             onEnter = { login -> viewModel.enterAccount(login) },
-            onAdd = { tap("add account"); pending = Pending.AddAccount },
+            // **The same sign-in the Settings block used**, so adding an account from the list and
+            // from Settings were never two mechanisms.
+            onAdd = { tap("add account"); pending = Pending.SignIn },
             onRemove = { login -> tap("remove account", login); pending = Pending.RemoveAccount(login) },
             onSettings = { tap("settings"); showSettings = true },
         )

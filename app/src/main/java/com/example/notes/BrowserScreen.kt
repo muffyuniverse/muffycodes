@@ -3,6 +3,8 @@ package com.example.notes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -110,7 +112,6 @@ class BrowserActions(
  * count, a `⋮` menu and the add button. There is no `projects/` level to walk into. Anywhere else
  * it is an ordinary folder listing (§3): what you made, and nothing the app made.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 /**
  * **The main menu: the accounts on this phone** (§13c.2).
  *
@@ -194,6 +195,7 @@ fun AccountsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun BrowserScreen(
     viewModel: AppViewModel,
