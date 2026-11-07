@@ -1979,7 +1979,7 @@ object GitService {
      * **The branches that exist on this phone**, which is what the branch screen lists.
      *
      * Deliberately not [branches], which asks for `ListMode.ALL` and therefore includes
-     * `refs/remotes/origin/*`. A remote-tracking ref is not a place you can work — it is git's copy of
+     * `refs/remotes/origin/…`. A remote-tracking ref is not a place you can work — it is git's copy of
      * what the server had last time — so offering it as a row would be a row that cannot be entered.
      * The screen names local branches; the *count* of unsent work already compares against
      * `origin/<branch>`.
