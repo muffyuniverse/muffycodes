@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -20,6 +22,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * **A project's branches, and the two refusals that matter** (§13d).
@@ -252,5 +255,105 @@ class BranchesScreenTest {
             "and the refusal names the reason: ${scene.viewModel.message}",
             scene.viewModel.message.orEmpty().contains("main is the branch"),
         )
+    }
+
+    // ---- a branch is a folder ---------------------------------------------
+
+    @Test
+    fun `entering a branch opens that branch's own folder`() {
+        // **The claim the whole feature rests on**: `main/notes.txt` and `feature/notes.txt` are two
+        // files. Before this, every branch was the same folder and choosing one changed only a label.
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.viewModel.openBranches("Shopping")
+
+        scene.viewModel.enterBranch("feature")
+
+        assertEquals("the workspace is on the branch", "feature", scene.viewModel.activeBranch)
+        assertEquals(
+            "and the files shown are the project's",
+            "Shopping",
+            scene.viewModel.currentProject,
+        )
+        assertTrue(
+            "which live in the branch's own folder: ${scene.viewModel.currentDir}",
+            scene.viewModel.currentDir!!.absolutePath.replace('\\', '/')
+                .contains(".muffy/worktrees/Shopping/feature"),
+        )
+    }
+
+    @Test
+    fun `a file made on a branch is not the file main has`() {
+        // **Two real files, written from the app's own door.** A test that only checked the folder path
+        // would pass while both folders pointed at the same place - which is exactly what an unfixed
+        // `fileAt` would do.
+        scene.project("Shopping")
+        scene.viewModel.open(listOf("Shopping"))
+        val onMain = scene.file("notes.txt", "main's copy")
+
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.enterBranch("feature")
+        val onBranch = scene.file("notes.txt", "the branch's copy")
+
+        assertNotEquals("two different files", onMain.absolutePath, onBranch.absolutePath)
+        assertEquals("main keeps its text", "main's copy", onMain.readText())
+        assertEquals("and the branch has its own", "the branch's copy", onBranch.readText())
+    }
+
+    @Test
+    fun `main has no worktree folder, because the project root is already its tree`() {
+        // Picking `main` must be the path every screen took before branches existed — no folder made, no
+        // migration, nothing to migrate.
+        scene.project("Shopping")
+
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.enterBranch("main")
+
+        val dir = scene.viewModel.currentDir!!
+        assertEquals("the project folder itself", scene.workspace!!.projectDir("Shopping"), dir)
+        assertFalse(
+            "and nothing was made under .muffy",
+            File(scene.workspace!!.stateDir, "worktrees/Shopping").exists(),
+        )
+    }
+
+    @Test
+    fun `a file on a branch is still recognised as being inside its project`() {
+        // **The inverse mapping, which is not cosmetic.** Read literally, a worktree path names no
+        // project — so every rule that asks "is this inside a project?" would stop applying the moment a
+        // person opened a branch: including the ones that stop an agent rewriting .git or leaving.
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.enterBranch("feature")
+
+        val file = File(scene.viewModel.currentDir, "on-the-branch.txt").apply { writeText("x") }
+
+        assertEquals(
+            "the path the screen calls it",
+            listOf("Shopping", "on-the-branch.txt"),
+            scene.workspace!!.relative(file),
+        )
+        assertEquals("and it is inside the project", "Shopping", scene.workspace!!.projectOf(file))
+        assertTrue("so the project rules apply to it", scene.workspace!!.inWorktree(file))
+    }
+
+    @Test
+    fun `leaving the account puts the workspace back on main`() {
+        // A branch belongs to a project in one account, so it cannot survive an account change — and the
+        // silent version of this bug is editing main's files while the title still says `feature`.
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.enterBranch("feature")
+
+        scene.viewModel.leaveAccount()
+
+        assertEquals("back on main", "main", scene.viewModel.activeBranch)
     }
 }
