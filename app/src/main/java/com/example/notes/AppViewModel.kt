@@ -5291,8 +5291,18 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun enterBranch(branch: String) {
         Trace.tap("enter branch", branch)
-        val project = choosingBranchFor ?: return
-        val ws = workspace ?: return
+        // **Silence here was a bug, not a shortcut.** A project that is not being chosen and a
+        // workspace that is not signed in are both states a person can reach, and returning quietly
+        // left the screen exactly as it was — so the row looked unpressed. Every other refusal in this
+        // class says a sentence; so does this one.
+        val project = choosingBranchFor ?: run {
+            message = "No project is chosen, so there is no branch to open."
+            return
+        }
+        val ws = workspace ?: run {
+            message = "No account is open, so $branch cannot be checked out."
+            return
+        }
         val dir = Worktrees(ws).make(project, branch)
         val tree = dir.getOrElse { failure ->
             message = failure.message ?: "That branch could not be opened."

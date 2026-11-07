@@ -267,6 +267,10 @@ class BranchesScreenTest {
         scene.viewModel.openBranches("Shopping")
         scene.viewModel.newBranch("feature")
         scene.viewModel.openBranches("Shopping")
+        // **Pinned, because `enterBranch` has two guards and only one of them was in doubt.** If this
+        // line fails, the branch screen was never open; if it passes and the next assertion fails, the
+        // worktree itself was refused.
+        assertEquals("the branch screen is open", "Shopping", scene.viewModel.choosingBranchFor)
 
         scene.viewModel.message = null
         scene.viewModel.enterBranch("feature")
