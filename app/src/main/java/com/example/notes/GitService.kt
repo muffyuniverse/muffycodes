@@ -1965,6 +1965,112 @@ object GitService {
         return branch?.removePrefix("refs/heads/") ?: "main"
     }
 
+    /**
+     * **The branches that exist on this phone**, which is what the branch screen lists.
+     *
+     * Deliberately not [branches], which asks for `ListMode.ALL` and therefore includes
+     * `refs/remotes/origin/*`. A remote-tracking ref is not a place you can work — it is git's copy of
+     * what the server had last time — so offering it as a row would be a row that cannot be entered.
+     * The screen names local branches; the *count* of unsent work already compares against
+     * `origin/<branch>`.
+     */
+    fun localBranches(repo: Repository): List<String> = try {
+        Git(repo).use { git ->
+            git.branchList().setListMode(ListBranchCommand.ListMode.HEADS).call()
+                .map { it.name.removePrefix("refs/heads/") }
+                .sortedWith(compareBy({ it != "main" }, { it.lowercase() }))
+        }
+    } catch (e: Throwable) {
+        emptyList()
+    }
+
+    /**
+     * Makes [name] from [from], or answers why not.
+     *
+     * **Refused rather than guessed** when the name is one git would reject or when it already
+     * exists: a branch made twice is a person working in the wrong one for an hour.
+     */
+    fun createBranch(repo: Repository, name: String, from: String = "main"): Result<String> {
+        val problem = branchNameProblem(name)
+        if (problem != null) return Result.failure(IllegalArgumentException(problem))
+        return try {
+            Git(repo).use { git ->
+                if (git.branchList().call().any { it.name == "refs/heads/$name" }) {
+                    return Result.failure(IllegalStateException("There is already a branch called $name."))
+                }
+                val start = repo.resolve("refs/heads/$from")
+                    ?: return Result.failure(IllegalStateException("There is no $from to branch from."))
+                git.branchCreate().setName(name).setStartPoint(start).call()
+                Result.success(name)
+            }
+        } catch (e: Throwable) {
+            Result.failure(IllegalStateException(Secrets.describe(e)))
+        }
+    }
+
+    /**
+     * Deletes [name] from this phone, **and refuses the two deletions that lose work.**
+     *
+     * A branch that is not fully merged into `main` is work that exists nowhere else — deleting it
+     * would be the one act here that destroys something a person cannot get back, which is the rule
+     * that removed `delete_repo` (§13b.6). `main` itself is refused because it is the branch a project
+     * is defined by.
+     */
+    fun deleteBranch(repo: Repository, name: String): Result<String> {
+        if (name == "main") {
+            return Result.failure(IllegalStateException("main is the branch a project is made of, so it stays."))
+        }
+        return try {
+            Git(repo).use { git ->
+                val ref = repo.exactRef("refs/heads/$name")
+                    ?: return Result.failure(IllegalStateException("There is no branch called $name."))
+                val tip = ref.objectId
+                val mainTip = repo.resolve("refs/heads/main")
+                if (mainTip != null) {
+                    // **The branch's tip must be reachable from main**, which is [isAncestor]'s own
+                    // question — the same one the fast-forward check asks, so it is asked the same
+                    // way rather than with a second walk that could disagree.
+                    if (!isAncestor(repo, tip, mainTip)) {
+                        return Result.failure(
+                            IllegalStateException(
+                                "$name has work that is not on main. Merge it first, or the commits " +
+                                    "would be left with nothing pointing at them.",
+                            ),
+                        )
+                    }
+                }
+                git.branchDelete().setBranchNames(name).setForce(false).call()
+                Result.success(name)
+            }
+        } catch (e: Throwable) {
+            Result.failure(IllegalStateException(Secrets.describe(e)))
+        }
+    }
+
+    /**
+     * Why [name] cannot be a branch, or null.
+     *
+     * **`git check-ref-format`'s rules, stated once.** A name git would reject must be refused here,
+     * where the person can change it, rather than by a command that fails later with git's own words.
+     */
+    fun branchNameProblem(name: String): String? {
+        val trimmed = name.trim()
+        return when {
+            trimmed.isEmpty() -> "Give the branch a name."
+            trimmed != name -> "A branch name cannot start or end with a space."
+            trimmed.startsWith("-") -> "A branch name cannot start with a dash."
+            trimmed == "main" -> "main is the branch a project is made of, so it already exists."
+            trimmed.contains("..") -> "A branch name cannot contain .. — try a dash."
+            trimmed.contains(' ') -> "A branch name cannot contain a space — try a dash."
+            trimmed.any { it in "~^:?*[\\" } ->
+                "A branch name cannot contain any of ~ ^ : ? * [ \\ — try a dash."
+            trimmed.endsWith("/") || trimmed.endsWith(".lock") ->
+                "A branch name cannot end with a slash or .lock."
+            trimmed.startsWith("/") -> "A branch name cannot start with a slash."
+            else -> null
+        }
+    }
+
     /** The branches in the repository. */
     fun branches(repo: Repository): List<String> {
         return try {

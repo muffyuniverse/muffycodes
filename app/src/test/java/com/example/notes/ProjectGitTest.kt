@@ -924,4 +924,143 @@ class ProjectGitTest {
         assertFalse("a person's `.new` stays visible", workspace.isHidden("notes.new"))
     }
 
+    // ---- branches (§13d) ----------------------------------------------------
+
+    /**
+     * **A new project has `main` and nothing else**, which is why the branch screen needs no empty
+     * state: `ProjectGit.init` sets `setInitialBranch("main")`, so there is always one row.
+     */
+    @Test
+    fun `a new project has main and only main`() {
+        git.init("Shopping").getOrThrow()
+
+        val repo = git.open("Shopping")!!
+        val branches = GitService.localBranches(repo)
+        repo.close()
+
+        assertEquals("one branch, and it is main", listOf("main"), branches)
+    }
+
+    /**
+     * **A branch made here is a local branch**, and the screen lists only those. A remote-tracking ref
+     * is git's copy of what the server had, not a place a person can work — offering it as a row would
+     * be a row that cannot be entered.
+     */
+    @Test
+    fun `a branch is made from main and appears in the list`() {
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+
+        val made = GitService.createBranch(repo, "feature")
+        assertTrue("it was made: $made", made.isSuccess)
+        assertTrue(
+            "and listed: ${GitService.localBranches(repo)}",
+            "feature" in GitService.localBranches(repo),
+        )
+        // **main is first**, because it is the branch a project is made of and the one every other
+        // branch merges into.
+        assertEquals("main", GitService.localBranches(repo).first())
+        repo.close()
+    }
+
+    /** Making the same branch twice is refused, because the second one would be a silent no-op. */
+    @Test
+    fun `a branch that already exists is refused`() {
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+        GitService.createBranch(repo, "feature").getOrThrow()
+
+        val again = GitService.createBranch(repo, "feature")
+        assertTrue("refused", again.isFailure)
+        assertTrue(
+            "and it says which: ${again.exceptionOrNull()?.message}",
+            again.exceptionOrNull()?.message.orEmpty().contains("already a branch"),
+        )
+        repo.close()
+    }
+
+    /**
+     * **`main` cannot be deleted**, because it is what a project is made of — and the screen does not
+     * even offer the button, so this is the store refusing what a caller could still ask for.
+     */
+    @Test
+    fun `main cannot be deleted`() {
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+
+        val refused = GitService.deleteBranch(repo, "main")
+        assertTrue("refused", refused.isFailure)
+        assertTrue("and main is still there", "main" in GitService.localBranches(repo))
+        repo.close()
+    }
+
+    /**
+     * **A branch with work that is not on `main` is refused**, which is the one act here that would
+     * destroy something a person cannot get back — the same rule that removed `delete_repo`.
+     */
+    @Test
+    fun `a branch with unmerged work cannot be deleted`() {
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+        GitService.createBranch(repo, "feature").getOrThrow()
+
+        // Commit on the branch, so it is ahead of main.
+        val head = repo.resolve("refs/heads/feature")!!
+        repo.updateRef("refs/heads/feature").apply {
+            val tree = org.eclipse.jgit.lib.ObjectId.fromString(
+                repo.resolve("refs/heads/main^{tree}").toString(),
+            )
+            val builder = org.eclipse.jgit.lib.CommitBuilder().apply {
+                setTreeId(tree)
+                setAuthor(author.let { org.eclipse.jgit.lib.PersonIdent(it.name, it.email) })
+                setCommitter(author.let { org.eclipse.jgit.lib.PersonIdent(it.name, it.email) })
+                setMessage("only on feature")
+                setParentId(head)
+            }
+            val inserter = repo.newObjectInserter()
+            val id = inserter.insert(builder)
+            inserter.flush()
+            inserter.close()
+            setNewObjectId(id)
+        }.update()
+
+        val refused = GitService.deleteBranch(repo, "feature")
+        assertTrue("refused: $refused", refused.isFailure)
+        assertTrue(
+            "and it says why: ${refused.exceptionOrNull()?.message}",
+            refused.exceptionOrNull()?.message.orEmpty().contains("not on main"),
+        )
+        assertTrue("the branch is still there", "feature" in GitService.localBranches(repo))
+        repo.close()
+    }
+
+    /** And a branch with nothing of its own goes quietly, because nothing is lost. */
+    @Test
+    fun `a branch with no work of its own is deleted`() {
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+        GitService.createBranch(repo, "scratch").getOrThrow()
+
+        val gone = GitService.deleteBranch(repo, "scratch")
+        assertTrue("deleted: $gone", gone.isSuccess)
+        assertFalse("and gone", "scratch" in GitService.localBranches(repo))
+        repo.close()
+    }
+
+    /**
+     * **The name rules are stated once**, so a name git would reject is refused where the person can
+     * still change it rather than by a command that fails later in git's own words.
+     */
+    @Test
+    fun `a branch name git would reject is refused before anything is made`() {
+        val bad = listOf("", " ", "-x", "main", "a..b", "a b", "a~b", "a^b", "a:b", "a?b", "a*b",
+            "a[b", "a\\b", "a/", "a.lock", "/a")
+        for (name in bad) {
+            assertNotNull("refused: \"$name\"", GitService.branchNameProblem(name))
+        }
+        for (name in listOf("feature", "fix-123", "wip/ui", "a_b")) {
+            assertNull("allowed: \"$name\"", GitService.branchNameProblem(name))
+        }
+    }
+
 }

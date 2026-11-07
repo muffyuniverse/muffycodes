@@ -113,6 +113,96 @@ class BrowserActions(
  * it is an ordinary folder listing (§3): what you made, and nothing the app made.
  */
 /**
+ * **The branches of a project** (§13d).
+ *
+ * The operator's shape: *"when you tap a project you are shown branch screen where you need to select a
+ * branch (and main branch exists by default even for newly created projects)."*
+ *
+ * **`main` is always there**, because `ProjectGit.init` sets `setInitialBranch("main")` — so a project
+ * made a second ago has one row and there is no empty state to design. That also means the screen never
+ * has to say "make your first branch", which would be a screen a person only ever sees once and which
+ * every test would have to fake.
+ *
+ * **A branch is a place an agent can work without touching anybody else's work.** That is why this is
+ * a screen rather than a dropdown: entering one is choosing what the agent may see, and a control that
+ * changes what an agent can do should be a row you pressed, not a value that drifted.
+ */
+@Composable
+fun BranchesScreen(
+    project: String,
+    branches: List<String>,
+    /** The branch with work not on `main`, so the row can say so before it is entered. */
+    unmerged: Set<String> = emptySet(),
+    onEnter: (String) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (String) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text("‹ Projects")
+            }
+            Text(
+                project,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { Trace.tap("add branch"); onAdd() }) { Text("+ Branch") }
+        }
+        HorizontalDivider()
+        Text(
+            "Each branch is its own working copy, so an agent in one cannot disturb another. " +
+                "main is what a project is made of; every other branch merges into it.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            for (branch in branches) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            Trace.tap("enter branch", branch)
+                            onEnter(branch)
+                        }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(branch, style = MaterialTheme.typography.bodyLarge)
+                        if (branch in unmerged) {
+                            // **Said before the row is entered**, because it is the fact that decides
+                            // whether the work can be merged and whether deleting the branch would
+                            // lose anything.
+                            Text(
+                                "has work that is not on main",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // **main cannot be removed**, because it is the branch a project is made of —
+                    // and offering a button that always refuses is worse than not offering it.
+                    if (branch != "main") {
+                        TextButton(onClick = { onRemove(branch) }) { Text("Remove") }
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+/**
  * **The main menu: the accounts on this phone** (§13c.2).
  *
  * The operator's shape: *"main menu is about projects listed on the app, not just one account. There
