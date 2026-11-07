@@ -865,9 +865,13 @@ class AgentTools(
                     "write can read one and hand it back as an artifact. That is why a workflow a " +
                     "person has read is marked approved and yours is not — but the mark does not " +
                     "stop the run. **Never put a secret in a workflow you wrote.** If a job needs " +
-                    "one, say so and let the person write that job.",
+                    "one, say so and let the person write that job. " +
+                    "**`op: \"setup\"` sets up the sealing environment and its key**, which is what " +
+                    "makes a log or an artifact readable afterwards; every step is idempotent, so " +
+                    "running it twice is running it once, and the key is stored on this phone " +
+                    "without being shown.",
                 "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\"," +
-                    "\"limit\":10,\"event\":\"workflow_dispatch\",\"inputs\":{}}",
+                    "\"limit\":10,\"event\":\"workflow_dispatch\",\"inputs\":{},\"op\":\"\"}",
             ),
             spec(
                 "runs",
