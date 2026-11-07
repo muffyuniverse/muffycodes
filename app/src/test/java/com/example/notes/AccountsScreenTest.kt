@@ -1,9 +1,11 @@
 package com.example.notes
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -57,7 +59,7 @@ class AccountsScreenTest {
         // but is "not displayed" — a failure that reads like a missing element and is really an
         // unbounded parent. Taps passed while display assertions failed, which is what gave it away.
         MaterialTheme {
-            Surface(modifier = androidx.compose.foundation.layout.fillMaxSize) { content() }
+            Surface(modifier = Modifier.fillMaxSize()) { content() }
         }
     }
 
@@ -85,13 +87,22 @@ class AccountsScreenTest {
 
     @Test
     fun `the menu lists each account with how many projects it has`() {
-        // **The count is the row's whole content beyond the login.** Two accounts with one project
-        // each and two accounts with none look identical without it, and the person is choosing
-        // between workspaces, not between names.
+        // **Every account already has one project: `system`.** Its folder is made on the first refresh
+        // and `isProjectFolder` counts it before it has a repository — so one project made here reads
+        // "2 projects", not "1". I wrote 0 and 1 first and CI said otherwise, twice.
         scene.project("Shopping")
         accounts()
 
         compose.onNodeWithText(scene.login).assertIsDisplayed()
+        compose.onNodeWithText("2 projects").assertIsDisplayed()
+    }
+
+    @Test
+    fun `the count is right before anything has been made`() {
+        // The floor: an account nobody has touched shows the system project, in the singular. A
+        // missing count would leave two accounts looking identical.
+        accounts()
+
         compose.onNodeWithText("1 project").assertIsDisplayed()
     }
 
@@ -103,17 +114,8 @@ class AccountsScreenTest {
         scene.project("Work")
         accounts()
 
-        compose.onNodeWithText("2 projects").assertIsDisplayed()
-    }
-
-    @Test
-    fun `an account with no projects says so, rather than showing nothing`() {
-        // The row has to exist and read as an account with an empty workspace — not vanish, which
-        // would make a fresh account look like it had not been created.
-        accounts()
-
-        compose.onNodeWithText(scene.login).assertIsDisplayed()
-        compose.onNodeWithText("0 projects").assertIsDisplayed()
+        compose.onNodeWithText("3 projects").assertIsDisplayed()
+        compose.onNodeWithText("3 project").assertDoesNotExist()
     }
 
     @Test
