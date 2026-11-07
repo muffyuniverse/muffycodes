@@ -192,6 +192,8 @@ class Agent(
      * is idle means the next turn.
      */
     private val httpAllowed: () -> Boolean = { true },
+    /** The largest answer one request may take, in bytes. Read per call; see `AgentTools`. */
+    private val fetchLimit: () -> Long = { Fetched.LIMIT_BYTES },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
     private val browseMs: () -> Long = { 0L },
     /**
@@ -252,6 +254,7 @@ class Agent(
         fetcher = fetcher,
         mcp = mcp, credentials = credentials, scanner = scanner,
         httpAllowed = httpAllowed,
+        fetchLimit = fetchLimit,
         github = github, githubToken = githubToken, phone = phone,
         modelSees = modelSees,
         onDiskChanged = onDiskChanged,

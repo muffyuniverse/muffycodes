@@ -584,7 +584,7 @@ class AgentTools(
             // **One path, and one flag.** Report 38: *"make archive simpler: -u (flag to unarchive)
             // path (path of what you want to un/archive)"*. So there is no destination key at all —
             // the output is a property of the input, not something the caller has to invent.
-            "archive" to setOf("path", "unpack"),
+            "archive" to setOf("path", "unpack", "seal", "key"),
             // **No `into`.** A fetched file lands in `agent/fetched/` always, and `archive` with
             // `unpack` is what moves it into the project — the operator's *"everything can land
             // there"*, and the reason vendoring is two visible steps rather than one that commits
@@ -968,10 +968,17 @@ class AgentTools(
                     "says which entry, because that is the one way a zip can write outside where " +
                     "it was told to. " +
                     "**An unpack answers with the entry names, never the bytes** — a zip in this " +
-                    "conversation is binary that costs the whole context to say nothing.",
-                // **Two keys, both shown, because the schema is built from the example.** A schema
-                // that named only one shape would refuse the other before it ran.
-                "{\"path\":\"src\",\"unpack\":true}",
+                    "conversation is binary that costs the whole context to say nothing. " +
+                    "**`seal` encrypts, and `seal: false` decrypts** — the same file, the other " +
+                    "way, landing beside it with `.enc` added or removed. `key` names a secret in " +
+                    "the vault, or is the key itself. A sealed file is readable only with its key, " +
+                    "which is what makes it safe to put somewhere a stranger can see: a public " +
+                    "repository, a build log, an artifact anybody can download. " +
+                    "**This is how a public project's agent hands work to a private one, or back**: " +
+                    "seal the output, and only the holder of the key can open it.",
+                // **Every key shown, because the schema is built from the example.** A schema that
+                // named only some shapes would refuse the others before they ran.
+                "{\"path\":\"src\",\"unpack\":true,\"seal\":true,\"key\":\"my-key\"}",
             ),
 
             spec(
@@ -4298,7 +4305,91 @@ class AgentTools(
         // **`unpack` is a boolean, so `false` means pack.** Reading it with `optBoolean` is what
         // makes `{"path":"x.zip","unpack":false}` the same call as `{"path":"x.zip"}` — a key that
         // is present but false must not become a third mode nobody described.
+        // **`seal` is the third direction, and it is a flag for the same reason `unpack` is.** The
+        // output is a property of the input — `x.txt` becomes `x.txt.enc` — so nothing has to be
+        // named. `seal: false` means decrypt, which keeps one key per direction rather than two
+        // tool names in every request's cache prefix.
+        if (args.has("seal")) {
+            val sealing = args.optBoolean("seal", true)
+            return if (sealing) sealFile(source, args) else unsealFile(source, args)
+        }
         return if (args.optBoolean("unpack", false)) unpack(source, deadline) else pack(source, deadline)
+    }
+
+    /**
+     * The key `seal`/`unseal` was given, resolved.
+     *
+     * **A name in the vault, or the key itself.** A key that is already in the vault is the right
+     * thing to name — it stays out of the conversation and out of the trace — and a literal is
+     * allowed because a person may hand one over in chat, and refusing that would make the tool
+     * useless for the case it was asked for.
+     *
+     * **A name that matches a vault secret wins over the literal reading**, because a name is what
+     * the vault is for and a literal that happens to equal a name is far more likely to be that
+     * secret than a key of the same text.
+     */
+    private fun sealKey(args: JSONObject, host: String): Result<String> {
+        val asked = args.optString("key", "").trim()
+        if (asked.isEmpty()) {
+            return Result.failure(
+                IllegalStateException(
+                    "`seal` and `unseal` need `key` — the name of a secret in the vault, or the key " +
+                        "itself. Without one the file could not be opened again by anyone.",
+                ),
+            )
+        }
+        val stored = credentials?.secret(project, asked, host)
+        return Result.success(stored ?: asked)
+    }
+
+    /** Seals [source] to `<name>.enc` beside it. The plaintext stays; nothing is destroyed. */
+    private fun sealFile(source: File, args: JSONObject): String {
+        if (source.isDirectory) {
+            return refusal(
+                "\"${rel(source)}\" is a folder. `archive` it first, then seal the zip — " +
+                    "sealing a folder would have to invent a file, and the name would be a guess.",
+            )
+        }
+        val key = sealKey(args, "").getOrElse { return refusal(it.message ?: "no key") }
+        val target = File(source.parentFile, source.name + ".enc")
+        return try {
+            val plain = source.readBytes()
+            target.writeBytes(EncryptedLog.sealBytes(plain, key))
+            success(
+                "Sealed ${rel(source)} to ${rel(target)}. " +
+                    "It is ${Fetcher.size(target.length())} and readable only with that key.",
+            )
+        } catch (e: Throwable) {
+            refusal("It could not be sealed: " + Secrets.explain(e, "not written"))
+        }
+    }
+
+    /** Opens `<name>.enc` to `<name>`, refusing rather than guessing when the key is wrong. */
+    private fun unsealFile(source: File, args: JSONObject): String {
+        if (source.isDirectory) {
+            return refusal("\"${rel(source)}\" is a folder, and only a sealed file can be opened.")
+        }
+        if (!source.name.endsWith(".enc")) {
+            return refusal(
+                "\"${rel(source)}\" does not end in .enc, so it is not a sealed file. " +
+                    "Sealing writes `<name>.enc`; opening takes that name.",
+            )
+        }
+        val key = sealKey(args, "").getOrElse { return refusal(it.message ?: "no key") }
+        val target = File(source.parentFile, source.name.removeSuffix(".enc"))
+        return try {
+            val plain = EncryptedLog.openBytes(source.readBytes(), key)
+            target.writeBytes(plain)
+            success(
+                "Opened ${rel(source)} to ${rel(target)}, " +
+                    "${Fetcher.size(plain.size.toLong())}.",
+            )
+        } catch (e: Throwable) {
+            // **The reader's own sentence**, because it names the one thing that is true: a wrong key
+            // and a damaged blob are not distinguishable, and pretending otherwise would send the
+            // caller to fix the wrong thing.
+            refusal(e.message ?: "It could not be opened")
+        }
     }
 
     /**

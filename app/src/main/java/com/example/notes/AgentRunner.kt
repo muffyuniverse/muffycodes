@@ -95,6 +95,8 @@ class AgentRunner(
      * a person who turns it off while an agent is idle means the next turn.
      */
     private val httpAllowed: () -> Boolean = { true },
+    /** The largest answer one request may take, in bytes. Read per call; see `AgentTools`. */
+    private val fetchLimit: () -> Long = { Fetched.LIMIT_BYTES },
     /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
@@ -400,6 +402,7 @@ class AgentRunner(
                     credentials = credentials,
                     scanner = scanner,
                     httpAllowed = httpAllowed,
+                    fetchLimit = fetchLimit,
                     // **Read from the settings at the moment of the call**, like the other limits:
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },
