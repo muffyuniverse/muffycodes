@@ -218,6 +218,22 @@ fun BranchesScreen(
  * **Each row says how many projects it holds**, read from the folder rather than stored, so the number
  * cannot disagree with what entering it shows.
  */
+/**
+ * How many projects an account row says it has.
+ *
+ * **A function rather than an expression inside the row**, because it is a sentence a person reads and
+ * the only way to test it without a painted screen is to call it. The alternative — asserting "1
+ * project" in a Compose test — is ambiguous the moment the phone holds two accounts, and the
+ * ambiguity is about the *number of rows*, not about the sentence.
+ *
+ * **Zero is reachable**: an account whose only project was deleted says "0 projects", which is honest,
+ * and it is not the same as a row that failed to count.
+ */
+fun projectCountText(count: Int): String = when (count) {
+    1 -> "1 project"
+    else -> "$count projects"
+}
+
 @Composable
 fun AccountsScreen(
     viewModel: AppViewModel,
@@ -269,7 +285,7 @@ fun AccountsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(account.login, style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                if (projects == 1) "1 project" else "$projects projects",
+                                projectCountText(projects),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

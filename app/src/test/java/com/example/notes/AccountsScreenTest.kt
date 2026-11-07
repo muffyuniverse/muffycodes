@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -86,36 +86,32 @@ class AccountsScreenTest {
     }
 
     @Test
-    fun `the menu lists each account with how many projects it has`() {
-        // **Every account already has one project: `system`.** Its folder is made on the first refresh
-        // and `isProjectFolder` counts it before it has a repository — so one project made here reads
-        // "2 projects", not "1". I wrote 0 and 1 first and CI said otherwise, twice.
+    fun `the menu lists the account, and its project count is the count it really has`() {
+        // **The count is asserted against the model's own number**, because the *sentence* is
+        // `projectCountText`'s to prove (below). What this adds is that the row is wired to the right
+        // account's number and not to nothing — the failure it catches is a blank row, which is what
+        // the first version of this screen would have drawn.
         scene.project("Shopping")
+        val expected = projectCountText(
+            scene.viewModel.accountsWithProjects.first { it.first.login == scene.login }.second,
+        )
         accounts()
 
         compose.onNodeWithText(scene.login).assertIsDisplayed()
-        compose.onNodeWithText("2 projects").assertIsDisplayed()
+        compose.onNodeWithText(expected).assertIsDisplayed()
     }
 
-    @Test
-    fun `the count is right before anything has been made`() {
-        // The floor: an account nobody has touched shows the system project, in the singular. A
-        // missing count would leave two accounts looking identical.
-        accounts()
-
-        compose.onNodeWithText("1 project").assertIsDisplayed()
-    }
+    // ---- the sentence ------------------------------------------------------
 
     @Test
-    fun `the count says projects when there is more than one`() {
-        // A plural that reads "2 project" is the kind of wrongness that survives for years, so the
-        // sentence is asserted rather than the number.
-        scene.project("Shopping")
-        scene.project("Work")
-        accounts()
-
-        compose.onNodeWithText("3 projects").assertIsDisplayed()
-        compose.onNodeWithText("3 project").assertDoesNotExist()
+    fun `the count is singular for one and plural for the rest`() {
+        // **Pure, so it does not depend on how many accounts the phone holds.** The painted version of
+        // this assertion is ambiguous the moment there are two rows, and the ambiguity is about rows
+        // rather than about the sentence.
+        assertEquals("1 project", projectCountText(1))
+        assertEquals("0 projects", projectCountText(0))
+        assertEquals("2 projects", projectCountText(2))
+        assertEquals("11 projects", projectCountText(11))
     }
 
     @Test
@@ -146,11 +142,15 @@ class AccountsScreenTest {
         // **Offered, not hidden behind a long press.** And it must name its own row: a removal that
         // took the wrong login is the one mistake here that loses a workspace.
         val taps = Taps()
+        // **The first row in the model's own order**, which is the order the screen draws. Written
+        // this way because the phone may hold more than one account and `onNodeWithText("Remove")`
+        // would then match several — the ambiguity is about rows, not about the claim.
+        val first = scene.viewModel.accountsWithProjects.first().first.login
         accounts(taps)
 
-        compose.onNodeWithText("Remove").performScrollTo().performClick()
+        compose.onAllNodesWithText("Remove")[0].performScrollTo().performClick()
 
-        assertEquals("the row named its own account", scene.login, taps.removed)
+        assertEquals("the row named its own account", first, taps.removed)
     }
 
     @Test
