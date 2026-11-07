@@ -587,8 +587,13 @@ data class AgentSession(
      */
     fun notice(): String? {
         if (!needsYou) return null
+        // **The branch is in the title when there is one to be in.** Two worktrees of one project can
+        // both need the person at once, and two notifications saying "Shopping" are two rows a person
+        // cannot tell apart — the one piece of information that separates them is the branch, and it is
+        // the only thing `branch` adds here.
+        val where = if (branch == MAIN) project else "$project · $branch"
         val said = when (state) {
-            State.STOPPED -> "$project: stopped, ${stopWords(this)}"
+            State.STOPPED -> "$where: stopped, ${stopWords(this)}"
             State.IDLE -> return null
         }
         // **`reminders` is how many reminders have been sent, so the first one is the first.**

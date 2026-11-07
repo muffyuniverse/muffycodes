@@ -121,7 +121,9 @@ fun AgentChatScreen(
     // it is also the key that follows a new turn's arrival.
     val generation = viewModel.chatGeneration
     val box = viewModel.chatBox
-    var draft by remember(project) { mutableStateOf("") }
+    // **Keyed by the worktree**, like the conversation it is a draft for: a half-written message in
+    // `feature`'s chat must not appear in main's when the person switches branch.
+    var draft by remember(project, viewModel.chatBranch) { mutableStateOf("") }
     /**
      * **Which bubble is open, by the row's id** — 0 for none.
      *

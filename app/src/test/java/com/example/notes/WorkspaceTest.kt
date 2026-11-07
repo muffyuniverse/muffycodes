@@ -160,6 +160,48 @@ class WorkspaceTest {
         assertTrue("the folder itself survived", system.isDirectory)
     }
 
+    // ---- which branch a path is on (§13d) ------------------------------------
+
+    @Test
+    fun `a branch is read from the path, and a branch with a slash is read whole`() {
+        // **The reading three other functions depend on.** `relative` maps a worktree path back to the
+        // project, the index is keyed by it, and a save is committed in it — so a wrong answer here is a
+        // commit in the wrong tree, not a cosmetic mistake.
+        workspace.ensure()
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+
+        // Main's tree is the project's own folder.
+        assertEquals("main for a project file", AgentSession.MAIN, workspace.branchOf(File(proj, "a.txt")))
+
+        // Two worktrees, written the way git writes them, because `exists` asks for exactly that.
+        for (branch in listOf("feature", "feature/x")) {
+            val dir = File(workspace.accountDir, ".muffy/worktrees/Shopping/$branch")
+            dir.mkdirs()
+            File(dir, ".git").writeText("gitdir: nowhere\n")
+        }
+
+        assertEquals(
+            "the branch, not the first segment",
+            "feature",
+            workspace.branchOf(File(workspace.accountDir, ".muffy/worktrees/Shopping/feature/a.txt")),
+        )
+        // **The nested name wins over its prefix.** `feature/x` is a branch, not a branch `feature`
+        // holding a folder called `x` — and if the shorter reading won, a file in `feature/x` would be
+        // committed as `feature`'s, which is a different tree.
+        assertEquals(
+            "the longest real branch name, because a branch may hold a slash",
+            "feature/x",
+            workspace.branchOf(File(workspace.accountDir, ".muffy/worktrees/Shopping/feature/x/a.txt")),
+        )
+        // And the two readings agree: the path a person sees is the project's, not the state folder's.
+        assertEquals(
+            "the file still reads as Shopping/a.txt",
+            listOf("Shopping", "a.txt"),
+            workspace.relative(File(workspace.accountDir, ".muffy/worktrees/Shopping/feature/x/a.txt")),
+        )
+    }
+
     // ---- onboarding: written, versioned, and locked ---------------------------
 
     /** The folder the pages go in. */

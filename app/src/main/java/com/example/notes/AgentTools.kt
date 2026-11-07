@@ -295,6 +295,7 @@ class AgentTools(
          *
          * So this is no longer a boundary. It is the branch a project has, said once.
          */
+        /** The branch a project keeps its own tree on — the one every project has. */
         const val BRANCH = "main"
 
         /**
@@ -3444,14 +3445,19 @@ class AgentTools(
         // This guard used to be a boundary: `main` published a release, so an agent that could name
         // it could publish one. That ended with the second branch — a release is started by `Release`,
         // which is a person's two presses and no tool at all. What is left is a typo check.
+        // **The branch this agent is on, unless the call names one.**
+        //
+        // It used to be the constant `main`, with a refusal that called any other name a mistake —
+        // which was true when one branch existed. With branches (§13d) an agent standing in `feature`
+        // that dispatched `main` would run a workflow over code it never touched, and read the verdict
+        // of a build that says nothing about its work.
+        //
+        // **A named branch is not validated here.** Whether a workflow may *run* on a branch is the
+        // environment's rule (GitHub refuses a job that names an environment the branch is not allowed
+        // to use), and a check here would be a second answer that could disagree with the one that
+        // decides.
         val asked = args.optString("branch").trim()
-        if (asked.isNotEmpty() && asked != BRANCH) {
-            return refusal(
-                "This project has one branch, `$BRANCH`, and this call asked for \"$asked\". " +
-                    "Leave `branch` out, or say `$BRANCH`.",
-            )
-        }
-        val branch = BRANCH
+        val branch = asked.ifEmpty { this.branch }
         val there = when (val w = ciWhere()) {
             is Where.Refused -> return refusal(w.said)
             is Where.Found -> w

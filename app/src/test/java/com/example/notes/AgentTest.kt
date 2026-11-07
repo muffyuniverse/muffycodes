@@ -2608,6 +2608,25 @@ class AgentTest {
     }
 
     @Test
+    fun `a file in a worktree belongs to its project, not to the state folder`() {
+        // **The refusal that made branches useless.** `projectOf` took the first segment of the absolute
+        // path — `.muffy` for every worktree file — so `isMine` was false and every write was refused
+        // with "belongs to `.muffy`, another project". The sentence was correct about the path and wrong
+        // about the world, which is the worst kind: it reads like a rule.
+        val tree = branchWithWorktree()
+        val tools = AgentTools(ws, "shopping", git, log, branch = "feature")
+
+        assertEquals("the branch's tree is shopping's", "shopping", tools.projectOf(File(tree, "notes.txt")))
+        assertTrue("so it is the agent's to change", tools.isMine(File(tree, "notes.txt")))
+        // The account's own state is still itself, so the rule has not been widened to everything.
+        assertEquals(
+            "and .muffy is still .muffy",
+            Workspace.STATE_DIR,
+            tools.projectOf(File(File(ws.accountDir, Workspace.STATE_DIR), "agents.json")),
+        )
+    }
+
+    @Test
     fun `a read on a branch answers the branch's text, not main's`() {
         // **The other direction, and the one a person notices as "the agent is lying".** Both trees
         // hold `milk.txt`; the answer has to be the one in the tree the agent is standing in.
