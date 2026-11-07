@@ -99,6 +99,24 @@ interface Credentials {
      */
     fun secret(project: String?, name: String, host: String): String? = secret(name, host)
 
+    /**
+     * A secret **every project can read, whatever the account** (§13c.4).
+     *
+     * A general secret is a fact about the app rather than about the identity signed in: the same
+     * `stripe` key for every project, whether it was made under one account or another. It is looked up
+     * **last**, after the project's own and the account's, so a narrower scope always wins.
+     */
+    fun generalSecret(name: String, host: String): String? = null
+
+    /** Keeps a general secret. See [generalSecret]. */
+    fun setGeneralSecret(name: String, value: String, host: String) {}
+
+    /** The names of the general secrets, **never their values**. */
+    fun generalSecretNames(): List<String> = emptyList()
+
+    /** Forgets a general secret. */
+    fun forgetGeneralSecret(name: String) {}
+
     /** Keeps [value] as [name]'s secret for the active account, usable **only** at [host]. */
     fun setSecret(name: String, value: String, host: String) {}
 
@@ -350,16 +368,28 @@ class CredentialStore(context: Context) : Credentials {
         prefs.edit().putString(secretKey(login, name), packed).apply()
     }
 
+    /**
+     * **Project, then account, then general — narrowest first** (§13c.4).
+     *
+     * Each step is a deliberate shadow: a project that needs a different key for the same service says so
+     * by storing one; an account that needs a different key from the shared one does the same. **General
+     * is last** because it is the widest, and a narrower scope that exists must win or it would be
+     * impossible to override the shared key for one project.
+     *
+     * **General is consulted even with no account signed in**, which is the one place this differs from
+     * the other two scopes: it is not the account's secret to hide.
+     */
     override fun secret(project: String?, name: String, host: String): String? {
-        val login = activeLogin ?: return null
-        // **Project first, then account.** The order is the whole feature: a project that needs a
-        // different key for the same service says so by storing one, and nothing else changes.
-        if (project != null) {
-            val scoped = prefs.getString(projectSecretKey(login, project, name), null)
-            if (scoped != null) return openedAt(scoped, host)
+        val login = activeLogin
+        if (login != null) {
+            if (project != null) {
+                val scoped = prefs.getString(projectSecretKey(login, project, name), null)
+                if (scoped != null) return openedAt(scoped, host)
+            }
+            val account = prefs.getString(secretKey(login, name), null)
+            if (account != null) return openedAt(account, host)
         }
-        val account = prefs.getString(secretKey(login, name), null) ?: return null
-        return openedAt(account, host)
+        return generalSecret(name, host)
     }
 
     override fun setSecret(project: String?, name: String, value: String, host: String) {
@@ -367,6 +397,42 @@ class CredentialStore(context: Context) : Credentials {
         val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
         val key = if (project == null) secretKey(login, name) else projectSecretKey(login, project, name)
         prefs.edit().putString(key, packed).apply()
+    }
+
+    /**
+     * **`secret_general_<name>`, with no login in it** — which is the whole point of the scope.
+     *
+     * Every other key carries the account because the account is the identity. A general secret is
+     * deliberately not: a key for a service the app itself uses should not become invisible because a
+     * second person signs in. That also means `generalSecret` answers **with no account signed in**,
+     * which is right — the value is not that account's to hide.
+     */
+    override fun generalSecret(name: String, host: String): String? {
+        val stored = prefs.getString(generalSecretKey(name), null) ?: return null
+        return openedAt(stored, host)
+    }
+
+    override fun setGeneralSecret(name: String, value: String, host: String) {
+        val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
+        prefs.edit().putString(generalSecretKey(name), packed).apply()
+    }
+
+    override fun generalSecretNames(): List<String> {
+        val prefix = GENERAL_PREFIX
+        return prefs.all.keys
+            .filter { it.startsWith(prefix) }
+            .mapNotNull { key ->
+                try {
+                    java.net.URLDecoder.decode(key.removePrefix(prefix), "UTF-8")
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            .sorted()
+    }
+
+    override fun forgetGeneralSecret(name: String) {
+        prefs.edit().remove(generalSecretKey(name)).apply()
     }
 
     override fun forgetProjectSecrets(project: String): Int {
@@ -522,6 +588,10 @@ class CredentialStore(context: Context) : Credentials {
      *
      * This changed the format, and that is free: no project-scoped secret has ever been stored (§13c.4).
      */
+    /** `secret_general_<name>` — **no login**, because a general secret belongs to the app. */
+    private fun generalSecretKey(name: String): String =
+        GENERAL_PREFIX + java.net.URLEncoder.encode(name, "UTF-8")
+
     private fun projectSecretPrefix(login: String, project: String): String =
         "secret_${login}_project_${java.net.URLEncoder.encode(project, "UTF-8")}/"
 
@@ -630,5 +700,15 @@ class CredentialStore(context: Context) : Credentials {
          * ciphertext is base64. Any separator would do; this one is the one that cannot be forged.
          */
         const val HOST_SEPARATOR = "\n"
+
+        /**
+         * The prefix of a general secret's key: `secret_general_<name>`.
+         *
+         * **No login**, unlike every other key here, because a general secret belongs to the app rather
+         * than to the account that happens to be signed in (§13c.4). `secretNames()` filters this prefix
+         * out so a general secret is not listed twice — once as an account secret with the name
+         * `general_x`, which nothing could use.
+         */
+        const val GENERAL_PREFIX = "secret_general_"
     }
 }

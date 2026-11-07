@@ -86,7 +86,9 @@ open class MemoryCredentials : Credentials {
      * that is what the window draws rows from.
      */
     override fun secretNames(): List<String> =
-        (secrets.keys + projectSecrets.keys.map { it.substringAfter('/') }).distinct().sorted()
+        (secrets.keys + projectSecrets.keys.map { it.substringAfter('/') } + generalSecrets.keys)
+            .distinct()
+            .sorted()
 
     /**
      * The host a secret is bound to.
@@ -106,19 +108,44 @@ open class MemoryCredentials : Credentials {
      * Project-scoped secrets, keyed `project/name`.
      *
      * **A separate map, not a prefix in [secrets]** — the real store keeps them under a different pref
-     * key and [secretNames] excludes them, so a fake that merged the two would pass a test the phone
-     * fails.
+     * key, so a fake that merged the two would pass a test the phone fails. Both maps are listed by
+     * [secretNames], because the window draws a row per secret whatever its scope.
      */
     private val projectSecrets = LinkedHashMap<String, String>()
     private val projectHosts = LinkedHashMap<String, String>()
 
+    /** General secrets: readable from every project, whatever the account (§13c.4). */
+    private val generalSecrets = LinkedHashMap<String, String>()
+    private val generalHosts = LinkedHashMap<String, String>()
+
+    override fun generalSecret(name: String, host: String): String? {
+        val allowed = generalHosts[name] ?: return null
+        return if (hostMatches(allowed, host)) generalSecrets[name] else null
+    }
+
+    override fun setGeneralSecret(name: String, value: String, host: String) {
+        generalSecrets[name] = value
+        generalHosts[name] = host
+    }
+
+    override fun generalSecretNames(): List<String> = generalSecrets.keys.sorted()
+
+    override fun forgetGeneralSecret(name: String) {
+        generalSecrets.remove(name)
+        generalHosts.remove(name)
+    }
+
+    /**
+     * **Project, then account, then general** — the real store's order, so a test cannot pass where the
+     * phone would answer differently.
+     */
     override fun secret(project: String?, name: String, host: String): String? {
         if (project != null) {
             val key = "$project/$name"
             val allowed = projectHosts[key]
             if (allowed != null && hostMatches(allowed, host)) return projectSecrets[key]
         }
-        return secret(name, host)
+        return secret(name, host) ?: generalSecret(name, host)
     }
 
     override fun setSecret(project: String?, name: String, value: String, host: String) {

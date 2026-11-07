@@ -162,12 +162,18 @@ class SigningTest {
         assertFalse("the workflow was not edited either", workflow.readText().contains("environment:"))
     }
 
+    /**
+     * **One branch, because there is one lane.** Plan §13b.1: the person and the agent both push
+     * `main`, so an environment restricted to `main` is the whole of the restriction. `development` is
+     * gone from the list on purpose — it was there because a second branch ran `build-release` and
+     * signed with the same key, and that reason no longer exists.
+     */
     @Test
-    fun `the environment is restricted to the branches that build`() {
+    fun `the environment is restricted to the one branch that publishes`() {
         exposed()
         Signing.move(github, "a-key", ref, project, properties, workflow).getOrThrow()
         assertEquals(
-            listOf("main", "development"),
+            listOf("main"),
             github.branchesOf(ref, ReleaseKey.ENVIRONMENT),
         )
     }

@@ -1686,11 +1686,19 @@ by the projects that have their agent switched on**. A person with 40 projects a
 threads — each mostly blocked on a socket, each costing a few hundred KB of stack. That is affordable,
 and it is the honest cost of what was asked for.
 
-**The bill is the real ceiling, not the thread count.** Parallel pings are parallel *requests*, so N
-agents pinged at once costs N times the warmth. That is a **setting** — a cap on how many agents may be
-in flight at once, defaulting to unlimited — rather than a fixed pool size nobody can explain. And
-because the idle ceiling already stops pinging a quiet session (`warmDue` → false, §13c.6), the number
-of *actually* active agents falls off on its own.
+**The bill is not capped by a setting either — the operator ruled it out, 2026-11-07:** *"we dont need
+max in flight settings parameter - however many are active are active, user can stop them if he wants."*
+
+So there is **no cap, no pool size, and nothing to configure**. The controls that already exist are the
+ones that answer "this costs too much":
+
+- **the per-session switch** — a person stops an agent, and `StopReason.BY_OPERATOR` is the one stop
+  nothing restarts
+- **the keepalive ceiling** — `warmDue` → false, so a quiet session stops being pinged (§13c.6)
+- **the interval** — how often a session is pinged at all
+
+**A fourth knob would be a second way to say what the switch already says**, and it would be a number
+nobody could pick correctly. The operator's rule is the right one: however many are active are active.
 
 **So: "a pool" was the wrong word, and the operator's instinct is the design.** One thread per active
 agent, with a configurable cap for the bill rather than a fixed pool for a contention that does not

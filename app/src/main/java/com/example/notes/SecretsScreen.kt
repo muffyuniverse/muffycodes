@@ -55,6 +55,10 @@ fun SecretsScreen(
     var names by remember { mutableStateOf(viewModel.secretNames()) }
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<String?>(null) }
+    // **A refusal is shown, not dropped.** `saveSecret` returns the sentence to show and this screen
+    // used to discard it — so a secret the phone refused to keep looked exactly like one it kept,
+    // and the person found out when a request failed. A failure has to say what happened.
+    var said by remember { mutableStateOf<String?>(null) }
     // **The projects a secret may be scoped to**, which is also the list the selector offers. Read
     // once: a project cannot be made from inside this screen, so the list cannot go stale while it
     // is open.
@@ -74,6 +78,14 @@ fun SecretsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
         )
+        said?.let { problem ->
+            Text(
+                problem,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         if (names.isEmpty()) {
             Text(
                 "No secrets on this phone yet. The agent's `http` tool and an MCP article both " +
@@ -98,7 +110,7 @@ fun SecretsScreen(
                         // it belongs on the row, not behind a tap.
                         Text(
                             viewModel.secretHost(name).orEmpty().ifEmpty { "used by this phone only" } +
-                                " · " + scopeLabel(viewModel.secretProject(name)),
+                                " · " + scopeLabel(viewModel.scopeOf(name)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -116,8 +128,15 @@ fun SecretsScreen(
         AddSecretDialog(
             projects = projects,
             onDismiss = { adding = false },
-            onSave = { name, value, host, project ->
-                viewModel.saveSecret(name, value, host, project)
+            onSave = { name, value, host, scope ->
+                // **The scope decides which store method is called**, not a nullable argument: general
+                // is not "a project called null", and passing it as one would store a general secret
+                // under the account scope.
+                val problem = when (scope) {
+                    SecretScope.General -> viewModel.saveGeneralSecret(name, value, host)
+                    else -> viewModel.saveSecret(name, value, host, scope.projectArg)
+                }
+                said = problem
                 names = viewModel.secretNames()
                 adding = false
             },
@@ -166,13 +185,14 @@ fun AddSecretDialog(
     /** Every project, for the scope selector. Empty when there are none yet. */
     projects: List<String> = emptyList(),
     onDismiss: () -> Unit,
-    onSave: (name: String, value: String, host: String, project: String?) -> Unit,
+    onSave: (name: String, value: String, host: String, scope: SecretScope) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("") }
-    // **Null is "all projects"**, which is the wider scope and therefore the one that needs saying.
-    var project by remember { mutableStateOf<String?>(null) }
+    // **The account scope is the default**, because it is the narrowest that does not name a project:
+    // a secret is presumed to belong to the person who typed it.
+    var scope by remember { mutableStateOf<SecretScope>(SecretScope.Account) }
     val problem = secretProblem(name, value, host)
 
     AlertDialog(
@@ -224,11 +244,11 @@ fun AddSecretDialog(
                 // one line, always visible, and says its current answer.
                 if (projects.isNotEmpty()) {
                     TextButton(
-                        onClick = { project = nextScope(project, projects) },
+                        onClick = { scope = nextScope(scope, projects) },
                         modifier = Modifier.padding(top = 4.dp),
                     ) {
                         Text(
-                            "Scope: " + scopeLabel(project) + " (tap to change)",
+                            "Scope: " + scopeLabel(scope) + " (tap to change)",
                         )
                     }
                 }
@@ -245,7 +265,7 @@ fun AddSecretDialog(
         confirmButton = {
             TextButton(
                 enabled = problem == null,
-                onClick = { onSave(name.trim(), value, host.trim(), project) },
+                onClick = { onSave(name.trim(), value, host.trim(), scope) },
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -253,24 +273,61 @@ fun AddSecretDialog(
 }
 
 /**
- * The scope after [current] when the selector is tapped.
+ * **Which of the four scopes a secret lives in** (§13c.4).
  *
- * **`null` is "all projects" and comes first**, so the cycle is: all projects → each project in turn
- * → back to all projects. A separate function rather than a lambda because it is the one part of the
- * dialog that can be wrong in a way a person would not notice until they had saved a secret to the
- * wrong scope.
+ * This is a type rather than a `String?` because **three scopes cannot be told apart by null**: the
+ * old signature used null for "all projects" (the account), and adding general would have needed a
+ * second sentinel — a magic project name, or an empty string — which is exactly the kind of
+ * indistinguishable-in-code mistake the vault's host rule exists to prevent.
+ *
+ * **The account scope is still the default**, because it is the narrowest scope that does not name a
+ * project: a secret is presumed to belong to the person who typed it.
  */
-fun nextScope(current: String?, projects: List<String>): String? {
-    val order = listOf<String?>(null) + projects
-    val at = order.indexOf(current)
-    // An unknown current value (a project deleted while the dialog was open) starts from the
-    // beginning rather than crashing or silently keeping a scope that no longer exists.
-    return order[((at + 1).takeIf { at >= 0 } ?: 0) % order.size]
+sealed interface SecretScope {
+    /** Every project on **this account**. The default. */
+    data object Account : SecretScope
+
+    /** Every project, **whatever the account** — the shared service key. */
+    data object General : SecretScope
+
+    /** One project only. */
+    data class Project(val name: String) : SecretScope
+
+    /**
+     * The `project` argument the store takes: null for account, a name for a project.
+     *
+     * **General is null too**, and that is not a loss: [CredentialStore] stores general under its own
+     * key prefix, so the store is told which method to call by the caller, not by this value.
+     */
+    val projectArg: String?
+        get() = (this as? Project)?.name
 }
 
 /** How a scope reads on a row: the fact, not the null. */
-fun scopeLabel(project: String?): String =
+fun projectScopeLabel(project: String?): String =
     project?.let { "only $it" } ?: "all projects"
+
+/**
+ * How a [SecretScope] reads on a row and in the selector.
+ *
+ * **Each of the three is a different sentence**, because they are different facts and a person
+ * deciding where a key should live has to be able to tell them apart at a glance.
+ */
+fun scopeLabel(scope: SecretScope): String = when (scope) {
+    SecretScope.Account -> "this account"
+    SecretScope.General -> "all projects, every account"
+    is SecretScope.Project -> "only ${scope.name}"
+}
+
+/** The scope after [current] when the selector is tapped: account, general, then each project. */
+fun nextScope(current: SecretScope, projects: List<String>): SecretScope {
+    val order = listOf<SecretScope>(SecretScope.Account, SecretScope.General) +
+        projects.map { SecretScope.Project(it) }
+    // **A project deleted while the dialog was open** starts from the beginning rather than keeping a
+    // scope that no longer exists.
+    val at = order.indexOfFirst { it == current }
+    return order[((at + 1).takeIf { at >= 0 } ?: 0) % order.size]
+}
 
 /**
  * Why this secret cannot be saved yet, or null when it can.

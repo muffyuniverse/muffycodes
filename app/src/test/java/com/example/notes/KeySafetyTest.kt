@@ -551,20 +551,112 @@ class KeySafetyTest {
     }
 
     /**
-     * **A project called `project` must not be readable as an account secret.** The pref key shapes
-     * are `secret_<login>_<name>` and `secret_<login>_project_<project>_<name>`, so without the
-     * literal marker those two could collide. This test is the reason the marker is there.
+     * **A project secret is listed, and is NOT readable as an account secret.** Two separate claims,
+     * and both matter:
+     *
+     * 1. **It is listed.** It used to be filtered out of `secretNames()`, which made it invisible in
+     *    the window — stored, readable by the agent, and impossible to see or remove. A secret nobody
+     *    can audit is worse than one that is listed under a slightly odd name.
+     * 2. **It is not readable without its project.** `secret(null, "acme-api", …)` must miss, or a
+     *    project's token would be handed to every project on the account — which is the whole thing
+     *    the scope exists to prevent.
      */
     @Test
-    fun `a project-scoped secret never appears as an account secret`() {
+    fun `a project-scoped secret is listed but is not an account secret`() {
         val credentials = MemoryCredentials().apply { activeLogin = "someone" }
         credentials.setSecret("acme", "acme-api", "tok_1", "api.acme.test")
 
-        assertFalse(
-            "the account list does not show it: ${credentials.secretNames()}",
+        assertTrue(
+            "the window can see it: ${credentials.secretNames()}",
             credentials.secretNames().contains("acme-api"),
         )
-        assertEquals("but the scope is answerable", "acme", credentials.secretProject("acme-api"))
+        assertEquals("and the scope is answerable", "acme", credentials.secretProject("acme-api"))
+        assertNull(
+            "but the account scope cannot read it",
+            credentials.secret(null, "acme-api", "api.acme.test"),
+        )
+        assertEquals(
+            "and its own project can",
+            "tok_1",
+            credentials.secret("acme", "acme-api", "api.acme.test"),
+        )
+    }
+
+    // ---- four scopes, narrowest first (§13c.4) ------------------------------
+
+    /**
+     * **A general secret is readable from every project**, which is the whole point of the scope: the
+     * same service key for every project, whether it was made under one account or another.
+     */
+    @Test
+    fun `a general secret is readable from any project and any account`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "first" }
+        credentials.setGeneralSecret("shared", "the-key", "api.shared.test")
+
+        assertEquals(
+            "under the account that made it",
+            "the-key",
+            credentials.secret("acme", "shared", "api.shared.test"),
+        )
+
+        // **And under a different account**, which is what "general" means: the login is not in the key.
+        credentials.activeLogin = "second"
+        assertEquals(
+            "under an account that never set it",
+            "the-key",
+            credentials.secret("other", "shared", "api.shared.test"),
+        )
+    }
+
+    /**
+     * **The narrowest scope wins**, and each step is checked: a project secret shadows the account's,
+     * and the account's shadows the general one. Without this order a shared key could never be
+     * overridden for one project, which is the case the scopes exist for.
+     */
+    @Test
+    fun `project shadows account, and account shadows general`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "dev" }
+        credentials.setGeneralSecret("key", "general", "api.test")
+        assertEquals("general alone", "general", credentials.secret("acme", "key", "api.test"))
+
+        credentials.setSecret("key", "account", "api.test")
+        assertEquals("account shadows general", "account", credentials.secret("acme", "key", "api.test"))
+
+        credentials.setSecret("acme", "key", "project", "api.test")
+        assertEquals("project shadows account", "project", credentials.secret("acme", "key", "api.test"))
+        assertEquals(
+            "and another project still sees the account's",
+            "account",
+            credentials.secret("shop", "key", "api.test"),
+        )
+    }
+
+    /**
+     * **The host rule still applies to a general secret.** A general secret is not a secret that may go
+     * anywhere — it is one every project may *ask* for, and the host is still the guard.
+     */
+    @Test
+    fun `a general secret is still refused for a host it was not stored for`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "dev" }
+        credentials.setGeneralSecret("key", "the-value", "api.shared.test")
+
+        assertNull(
+            "a different host is refused",
+            credentials.secret("acme", "key", "evil.example"),
+        )
+    }
+
+    /** And a general secret is listed, so the window can show and remove it. */
+    @Test
+    fun `a general secret is listed`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "dev" }
+        credentials.setGeneralSecret("shared", "v", "api.test")
+
+        assertTrue("listed: ${credentials.secretNames()}", "shared" in credentials.secretNames())
+        assertTrue(
+            "and known to be general: ${credentials.generalSecretNames()}",
+            "shared" in credentials.generalSecretNames(),
+        )
     }
 
 }

@@ -212,32 +212,56 @@ class SecretsScreenTest {
      * that gets stuck is one a person works around by deleting and re-adding the secret.
      */
     @Test
-    fun `the scope selector cycles through all projects and back`() {
+    fun `the scope selector cycles through all four scopes and back`() {
         val projects = listOf("acme", "shop")
 
-        // null -> acme -> shop -> null. Each step asserted, because a cycle that skips a scope is
-        // the failure a person would work around by deleting and re-adding the secret.
-        assertEquals("all projects -> the first project", "acme", nextScope(null, projects))
-        assertEquals("acme -> shop", "shop", nextScope("acme", projects))
-        assertEquals("shop wraps back to all projects", null, nextScope("shop", projects))
+        // account -> general -> acme -> shop -> account. Each step asserted, because a cycle that
+        // skips a scope is the failure a person would work around by deleting and re-adding the
+        // secret. **General is second**, so it is one tap from the default rather than four.
+        assertEquals(
+            "account -> general",
+            SecretScope.General,
+            nextScope(SecretScope.Account, projects),
+        )
+        assertEquals(
+            "general -> the first project",
+            SecretScope.Project("acme"),
+            nextScope(SecretScope.General, projects),
+        )
+        assertEquals(
+            "acme -> shop",
+            SecretScope.Project("shop"),
+            nextScope(SecretScope.Project("acme"), projects),
+        )
+        assertEquals(
+            "shop wraps back to account",
+            SecretScope.Account,
+            nextScope(SecretScope.Project("shop"), projects),
+        )
     }
 
     /**
-     * **A project that vanished does not crash the dialog.** The scope is a project name, and a
-     * project can be deleted from another screen while this dialog is open; the answer must be a
-     * valid scope rather than an exception or a scope that no longer exists.
+     * **A project that vanished does not crash the dialog.** A project can be deleted from another
+     * screen while this dialog is open; the answer must be a valid scope rather than an exception or a
+     * scope that no longer exists.
      */
     @Test
     fun `a scope naming a project that no longer exists starts over`() {
-        assertEquals(null, nextScope("gone", listOf("acme")))
-        assertEquals(null, nextScope("gone", emptyList()))
+        assertEquals(SecretScope.Account, nextScope(SecretScope.Project("gone"), listOf("acme")))
+        assertEquals(SecretScope.Account, nextScope(SecretScope.Project("gone"), emptyList()))
     }
 
-    /** The two labels, because "all projects" and a project's name are the whole answer. */
+    /** **All three labels**, because they are three different facts and a person must tell them apart. */
     @Test
-    fun `a scope reads as all projects or as the one project`() {
-        assertEquals("all projects", scopeLabel(null))
-        assertEquals("only acme", scopeLabel("acme"))
+    fun `each scope reads as its own fact`() {
+        assertEquals("this account", scopeLabel(SecretScope.Account))
+        assertEquals("all projects, every account", scopeLabel(SecretScope.General))
+        assertEquals("only acme", scopeLabel(SecretScope.Project("acme")))
+        // **The store's own language is a nullable project**, so that form is labelled separately
+        // rather than overloaded: `scopeLabel(null)` would have been ambiguous between the two, and
+        // an ambiguity that compiles is one a reader has to resolve by hand.
+        assertEquals("all projects", projectScopeLabel(null))
+        assertEquals("only acme", projectScopeLabel("acme"))
     }
 
     /**

@@ -4074,6 +4074,7 @@ class AgentTools(
             val value = credentials.secret(project, authName, host)
                 ?: return refusal(
                     if (credentials.secretNames().contains(authName) ||
+                        credentials.generalSecretNames().contains(authName) ||
                         credentials.secretProject(authName) != null
                     ) {
                         // **The host is the reason, and it is named.** The secret exists and is simply not
@@ -4084,12 +4085,14 @@ class AgentTools(
                         // editing a host. A person reading this needs to know which row to open.
                         "The secret \"$authName\" is not for $host. It is stored for " +
                             "${credentials.secretHost(authName).orEmpty().ifEmpty { "this phone only" }}" +
-                            (credentials.secretProject(authName)?.let { " (project \"$it\")" }.orEmpty()) +
+                            scopeOf(credentials, authName) +
                             ", and the app will not send it anywhere else. Add a secret for $host if " +
                             "one is needed."
                     } else {
-                        "There is no secret called \"$authName\" on this phone. Its names are: " +
-                            credentials.secretNames()
+                        "There is no secret called \"$authName\" on this phone, in this project, or " +
+                            "for every project. The names it knows are: " +
+                            (credentials.secretNames() + credentials.generalSecretNames())
+                                .distinct()
                                 .joinToString(", ") { "\"$it\"" }
                                 .ifEmpty { "none" } + "."
                     },
@@ -4328,6 +4331,19 @@ class AgentTools(
      * the vault is for and a literal that happens to equal a name is far more likely to be that
      * secret than a key of the same text.
      */
+    /**
+     * Which scope a stored secret lives in, as a phrase for a refusal.
+     *
+     * **Named rather than implied**, because "stored for another host" and "stored for another project"
+     * are different facts and only one of them is fixed by editing a host — a person reading the refusal
+     * needs to know which row to open (§13c.4).
+     */
+    private fun scopeOf(credentials: Credentials, name: String): String = when {
+        credentials.secretProject(name) != null -> " (project \"${credentials.secretProject(name)}\")"
+        credentials.generalSecretNames().contains(name) -> " (all projects, every account)"
+        else -> ""
+    }
+
     private fun sealKey(args: JSONObject, host: String): Result<String> {
         val asked = args.optString("key", "").trim()
         if (asked.isEmpty()) {

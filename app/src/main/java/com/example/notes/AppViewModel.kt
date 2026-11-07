@@ -1522,6 +1522,45 @@ class AppViewModel @JvmOverloads constructor(
     fun secretProject(name: String): String? = credentials.secretProject(name)
 
     /**
+     * **Which scope a listed secret lives in**, for the row (§13c.4).
+     *
+     * The row is drawn from a name, and a name is not unique across scopes — so this answers the
+     * narrowest scope that holds it. Project first, then general, then the account: the same order
+     * `secret()` resolves in, so the row cannot claim a scope the lookup would not use.
+     */
+    fun scopeOf(name: String): SecretScope = when {
+        credentials.secretProject(name) != null -> SecretScope.Project(credentials.secretProject(name)!!)
+        credentials.generalSecretNames().contains(name) -> SecretScope.General
+        else -> SecretScope.Account
+    }
+
+    /**
+     * Keeps a **general** secret, and reads it back before saying so.
+     *
+     * The same read-back rule as [saveSecret], for the same reason: "kept" is a claim about this phone,
+     * and the only way to know it is true is to ask the store to open the door it was put behind.
+     *
+     * @return null when it is kept, or the sentence to show when it is not.
+     */
+    fun saveGeneralSecret(name: String, value: String, host: String): String? {
+        val problem = secretProblem(name, value, host)
+        if (problem != null) return problem
+        val trimmedHost = Secrets.hostOf(host).ifEmpty { host.trim().lowercase() }
+        credentials.setGeneralSecret(name.trim(), value, trimmedHost)
+        return if (credentials.generalSecret(name.trim(), trimmedHost) != null) {
+            Trace.note("secret-kept", "$name for $trimmedHost (every project, every account)")
+            Trace.said("The secret $name is kept for $trimmedHost, for every project")
+            secretSaved++
+            null
+        } else {
+            Trace.note("secret-not-kept", "$name saved and could not be read back")
+            "The secret was stored, and this phone could not read it back. Unlock the phone and try " +
+                "again; if it keeps happening, the phone's key has changed and every secret has to be " +
+                "entered again."
+        }
+    }
+
+    /**
      * Every project, for the scope selector.
      *
      * **The system project is excluded**: it holds the account's own settings and cannot be deleted,
