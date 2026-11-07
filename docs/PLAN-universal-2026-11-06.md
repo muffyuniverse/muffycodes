@@ -1598,6 +1598,85 @@ not a menu's.
 
 **Answer: no problem, nothing to build, and the folder model keeps it that way.**
 
+#### Where tool commands actually run — the measured answer
+
+**The operator's question:** *"is it currently fully sequential or sequential for one agent and parallel
+across different agents/projects?"*
+
+**Neither, exactly — and the distinction matters.** Measured:
+
+| work | thread | parallel? |
+|---|---|---|
+| **a turn from the screen** (the person typed) | `AppViewModel.worker` — its **own** single-thread executor (`AppViewModel.kt:110`) | **runs beside** the runner's work |
+| **a keepalive ping / a wake** | `AgentRunner.worker` — a **different** single-thread executor (`AgentRunner.kt:158`) | serialised **among themselves** |
+| **the tool calls inside one turn** | the thread running that turn | **strictly sequential** — `for (call in calls)` (`Agent.kt:749`, `:829`) |
+| **a `background` call** | its own thread (`Background.real`) | parallel, by design |
+
+**So the honest answer is: sequential within one agent's turn, and the screen's turn runs beside the
+runner's pings.** The runner's own pings are serial across projects — that is the decision quoted above,
+and it is about **model requests**, not about tools.
+
+**There is no parallelism across projects for keepalive/wake work today.** Two projects due at the same
+moment are handled one after the other, because they share `AgentRunner.worker`.
+
+**But tool execution is not the thing that would block it.** The tools are fast — a file read, a commit,
+a zip — and the time in a turn is overwhelmingly the **model request**. That is why the serial decision is
+stated in terms of the bill and the battery rather than in terms of the disk.
+
+#### Running across every project and account, with model requests in parallel
+
+**Yes, and it is a small change, because the pieces are already keyed correctly:**
+
+| what would need to change | today | what it becomes |
+|---|---|---|
+| `AgentRunner.worker` | `newSingleThreadExecutor()` | `newFixedThreadPool(N)` or a cached pool |
+| `inFlight` | already a **set of agent ids** | **no change** — it already tracks more than one |
+| `RepoLocks` | already **per repository** | **no change** — two projects never contend |
+| `AgentTools` | one instance per `Agent`, per project | **no change** — nothing is shared between turns |
+| the tick | `for (session in sessions.read())` | unchanged; the dispatch is already per session |
+
+**What genuinely needs deciding, and it is a person's decision, not a code one:**
+
+1. **The bill.** N parallel pings is N times the cost of the same warmth. The comment at
+   `AgentRunner.kt:140` names this as the reason serial was chosen.
+2. **The queue policy.** What happens when six are due and the pool is four — which one waits, whether a
+   person's turn may jump a ping.
+3. **The phone.** Several simultaneous completions is heat and battery, which is the second reason.
+4. **Across accounts**, `AgentRunner` holds **one** `Workspace` (`:24`), so cross-account work needs
+   either one runner per account or the runner to hold a map. **That is the real cost**, and it is why
+   accounts-as-folders keeps it out of scope: one runner, one account, exactly as today.
+
+**So the shape of the change is `newSingleThreadExecutor()` → a bounded pool, plus a per-account runner
+if accounts are to run together.** The concurrency *machinery* already exists; what does not exist is a
+decision about the bill and the queue.
+
+#### "Agents become stopped when they run out of idle time" — **this is not what happens**
+
+**Measured, because it changes the argument:** the keepalive ceiling does **not** stop a session.
+
+```
+warmDue(...) = when {
+    !keepAlive -> false                      // the switch is off
+    state == State.STOPPED -> false          // already stopped
+    forAt > 0 && from > 0 && at - from >= forAt -> false   // the ceiling: stop PINGING
+    else -> at >= lastPollAt + every
+}
+```
+`AgentSession.kt:269`
+
+**The ceiling makes `warmDue` return false, so the session stops being *pinged*. It stays `IDLE` and
+stays `running`.** `running = state != State.STOPPED` (`:214`), and the only four stop reasons are
+`BY_OPERATOR`, `PIN_REFUSED`, `LOOP` and `ERROR` (`:119`) — **none of them is idleness.**
+
+**So a session that has gone quiet is not stopped, it is idle** — and idle sessions are exactly what a
+parallel tick would find. The operator's inference ("so it shouldn't be problematic") is **right about
+the conclusion and wrong about the mechanism**: nothing is being switched off, so nothing has to be
+switched back on.
+
+**What this means for concurrency:** a pool would dispatch the same `tick()` over the same list of idle
+sessions. **No state machine change, no restart path, no re-arming** — only "how many at a time" and
+"who waits".
+
 ## 14. What this does not solve
 
 - **CI portability.** §1's missing quarter. `http` makes providers reachable, never interchangeable.

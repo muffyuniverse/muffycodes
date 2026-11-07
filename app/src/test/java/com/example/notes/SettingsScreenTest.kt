@@ -350,8 +350,14 @@ class SettingsScreenTest {
         compose.onNodeWithText("Keep the session log under", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
-        // The MB field and its label are gone rather than renamed: one unit, one field.
-        compose.onNodeWithText("MB", substring = true).assertDoesNotExist()
+        // **The session log's MB field is gone rather than renamed**: one unit, one field. This used to
+        // assert that "MB" appears nowhere on the screen, which stopped being true when the download
+        // size became a setting — a different field, in a different section, that is measured in MB.
+        // The claim that matters is about THIS block, so it is scoped to it.
+        compose.onNodeWithText("Keep the session log under", substring = true)
+            .performScrollTo()
+        compose.onNodeWithText("Session log size (MB)", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Max lines", substring = true).assertDoesNotExist()
     }
 
     @Test

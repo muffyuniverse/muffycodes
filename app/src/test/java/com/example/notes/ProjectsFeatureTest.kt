@@ -222,15 +222,30 @@ class ProjectsFeatureTest : FeatureTest() {
         assertTrue("the repository is untouched", scene.remote("Shopping").isDirectory)
     }
 
+    /**
+     * **"Everywhere" no longer reaches GitHub.** Plan §13b.6: `delete_repo` was the one irreversible
+     * capability, and it was dropped so that no act in this app can destroy something a person cannot
+     * get back. The local folder goes; **the repository stays**, and the message says so and says where.
+     *
+     * This test used to assert the opposite, which is why it is rewritten rather than deleted: the
+     * behaviour changed on purpose, and the record of that is worth keeping.
+     */
     @Test
-    fun `deleting a project everywhere removes the repository too`() {
+    fun `deleting a project everywhere removes the folder and leaves the repository alone`() {
         scene.project("Shopping")
 
         scene.viewModel.deleteProject("Shopping", everywhere = true)
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
         assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
-        assertFalse("and the repository with it", scene.remote("Shopping").exists())
+        assertTrue(
+            "and the repository is still there, because this app cannot delete one",
+            scene.remote("Shopping").exists(),
+        )
+        assertTrue(
+            "and the message says where it went: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("still on GitHub"),
+        )
     }
 
     @Test

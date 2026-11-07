@@ -93,7 +93,9 @@ class SecretsScreenTest {
         screen()
 
         compose.onNodeWithText("github").assertIsDisplayed()
-        compose.onNodeWithText("api.github.com").assertIsDisplayed()
+        // **The host and the scope are one line**, so the host is found inside it rather than as a
+        // node of its own — the row reads "api.github.com · all projects" and both halves matter.
+        compose.onNodeWithText("api.github.com", substring = true).assertIsDisplayed()
         // **The assertion the whole store exists for.** Not masked, not shortened: absent.
         assertEquals(
             "the value is on the screen, which undoes the store",
