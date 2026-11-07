@@ -183,7 +183,18 @@ class CiToolsTest {
      * a test that read a ring buffer would race the writer. The sink is a file this class attaches
      * in `@Before`, and reading it is the same read the report screen does.
      */
-    private fun traceNow(): String = Trace.sinkNow()?.read().orEmpty()
+    /**
+     * What the trace has written so far, **after the writes have landed**.
+     *
+     * `Trace.emit` hands each batch to an executor, so a read straight after a call races the writer —
+     * which is exactly how two tests of the lock-gate removal failed: they asserted a note the trace
+     * had not written yet. `awaitWrites` is the trace's own answer to that, and the comment beside it
+     * says it is "only a test" that needs it.
+     */
+    private fun traceNow(): String {
+        Trace.awaitWrites()
+        return Trace.sinkNow()?.read().orEmpty()
+    }
 
     @Test
     fun `a remote is read as a repository whichever way it is written`() {

@@ -1731,6 +1731,116 @@ switched back on.
 sessions. **No state machine change, no restart path, no re-arming** — only "how many at a time" and
 "who waits".
 
+## 13d. Branches as worktrees — measured, and it is possible
+
+**The operator's proposal, 2026-11-07:** tapping a project shows **its branches**; `+` adds and removes
+them; tapping a branch enters **that branch's worktree**; an agent inside one works only on that branch,
+so its pushes and pulls are tied to it (`local branch <> remote branch`); and the sync slot shows
+**"merge"** on a non-`main` branch instead of "release", merging only when there are no conflicts and
+otherwise leaving the worktree in the merging state for the agent to resolve.
+
+**Answer: yes, and the parts are all either already built or verified below.** But it is not free, and
+the costs are stated rather than glossed.
+
+### 13d.1 What was measured, on this machine, with the app's own JGit
+
+| question | answer | how |
+|---|---|---|
+| Can JGit **open** a worktree? | **Yes** | `FileRepositoryBuilder().setWorkTree(dir).findGitDir(dir)` on a real `git worktree` → `branch=feature`, `workTree=/tmp/wtprobe/feat`, `directory=/tmp/wtprobe/main/.git/worktrees/feat` |
+| Can JGit **create** a worktree? | **No** | The 6.10/7.2 jars contain **zero** `WorktreeAddCommand`-style classes. Creation must be done another way (below). |
+| Does a JGit **commit inside** a worktree stay on that branch? | **Yes** | Committed `only-feat.txt` inside the worktree → landed on `feature`; `git -C main status` stayed clean, main's `HEAD` unmoved |
+| Does JGit **merge** work inside a worktree? | **Yes** | Merged main's commit into the worktree's branch → `Fast-forward`, the worktree's file updated, main's worktree untouched |
+| Is the shared object store correct? | **Yes** | `getDirectory()` = the worktree's private dir, `getCommonDirectory()` = the shared `.git` |
+| Is `info/exclude` shared? | **Yes** | One `main/.git/info/exclude`; the worktree's `.git` is a *file* pointing at `main/.git/worktrees/feat` |
+
+### 13d.2 The four real costs
+
+**1. JGit cannot create a worktree — so the app must write four things itself.**
+
+A `git worktree add` produces, and this app would have to produce identically:
+
+```
+<worktree>/.git              a FILE: "gitdir: <common>/.git/worktrees/<id>"
+<common>/.git/worktrees/<id>/HEAD
+<common>/.git/worktrees/<id>/commondir       "../.."
+<common>/.git/worktrees/<id>/gitdir          "<worktree>/.git"
+```
+plus the branch's `refs/heads/<name>` and the checkout. **JGit can do every step** — `RefUpdate` for the
+branch, `DirCacheCheckout` for the tree — but "the app hand-writes git's own bookkeeping format" is a
+standing liability: it must match git exactly, forever, or `git` itself will refuse the directory.
+
+**Mitigation, and it is the honest one:** `git` the binary is **not** available on Android, so there is
+no "just shell out". The format above is four small files and it is stable; the probe above shows JGit
+accepting what git wrote, which is the compatibility direction that matters. **A test must create a
+worktree with this code and then verify `git` (in CI, where it exists) accepts it** — that is the
+falsification, and without it this is a guess.
+
+**2. One repository, many worktrees — and the app's locks assume one folder.**
+
+| hazard | today | what it needs |
+|---|---|---|
+| `RepoLocks` | keyed by **the directory** (`RepoLocks.kt:64`) | keyed by **`getCommonDirectory()`**, or two worktrees of one repo commit concurrently and one takes the other's `index.lock` — **exactly the bug `RepoLocks` was written to fix** |
+| `LfsStore.dirOf` | `File(repo.directory, "lfs/objects")` — **per worktree** | `File(repo.commonDirectory, "lfs/objects")`, or each worktree gets a private LFS store and a picture checked out on one branch is a missing object on another |
+| `.gitattributes` | written per project folder | **committed content, so per branch** — which is right, and means two branches can disagree about LFS. That is git's own behaviour, not a defect. |
+| `agent/` (the record) | inside the project folder, in `info/exclude` | **`info/exclude` is shared**, so a worktree's `agent/` is excluded on every branch — which is what we want, but it means one `agent/` per worktree folder, not one per repo |
+
+**3. The identity change is the largest part, and it is the same one §13c.3 dissolved.**
+
+Today a project **is** a folder **is** a repository (`Workspace.projectDir`). A worktree breaks that:
+`Workspace.projectDir(name)` must become "the worktree of (project, branch)", and **every one of the 102
+`project: String` signatures** would need to know which branch it is in — `AgentTools`, `AgentLog`,
+`AgentSessions`, `SemanticSearch`, the index, the request log, `Door`.
+
+**The cheap way through, and it is the same trick as §13c.2:** `activeLogin` already means "the account
+you are inside"; add **`activeBranch`** meaning "the branch you are inside". The workspace is
+`accountDir/<project>/<branch>/`, and `activeBranch` is set on entering a branch — so the 102 signatures
+keep meaning "the project I am in" and the branch is ambient, exactly as the account is.
+
+**That works, and it costs one more dimension of ambient state.** The risk is the same one the account
+scope had: a background job that outlives the screen must name its branch. `AgentRunner` holds one
+`Workspace`, so it would need one per (account, project, branch) or an ambient branch — and **that is
+where this design gets expensive**, because an agent's session is already keyed by project
+(`AgentSessions.readOne(project, …)`).
+
+**4. The merge button is the cheapest part, because it already exists.**
+
+`GitService.merge` (`:591`) already: merges into the current branch, **does not commit on conflict**,
+returns the conflicted paths, and says *"Read the file, choose what it should say, write it, then push."*
+That is precisely the requested behaviour — **nothing new is needed for "merge only if no conflicts,
+otherwise leave the worktree merging"**. The worktree is already left in the merging state because JGit
+writes the markers and stops.
+
+The button's rule is a **branch test**, not new machinery:
+
+| branch you are on | the slot shows |
+|---|---|
+| `main` | **Publish…** (§13b.7) |
+| anything else | **Merge into `main`** |
+
+### 13d.3 What I think: yes, and here is the order that makes it safe
+
+**The feature is coherent and the operator's framing is right** — a branch is a place an agent can work
+without touching anybody else's work, and "merge only when clean, otherwise let the agent resolve" is
+how git already behaves.
+
+**But it is four features stacked, and shipping them together would be one commit nobody could review:**
+
+| # | step | why this order |
+|---|---|---|
+| 1 | **`RepoLocks` → `getCommonDirectory()`; `LfsStore` → `commonDirectory`** | Two one-line changes that are **correct even with one worktree**, and the two that would corrupt a repository if forgotten. Do them first, alone. |
+| 2 | **The branches screen** — list `refs/heads`, `+` to create from `main`, remove | Read-only against refs; no worktrees yet. A project still opens its single worktree. |
+| 3 | **`activeBranch` + the worktree folder** — one worktree per branch, entered by tapping a row | The identity change; ambient, like the account |
+| 4 | **Worktree creation** (the four files) + the CI test that `git` accepts it | The risky part, and it is testable in CI where `git` exists |
+| 5 | **The merge/publish split in the sync slot** | Smallest; `GitService.merge` already does the work |
+
+**What I would not do:** create worktrees in step 2, or put the merge button in before the branches
+screen exists. Both would be building on a folder layout that has not been proven.
+
+**The one thing to decide before step 1:** *does a project still have a single default worktree?* If
+tapping a project always shows branches first, then there is no "default" worktree and `main`'s worktree
+is just another row — which is cleaner, and means the existing project screen is reached one tap deeper.
+That is a change to every screenshot and every scenario test, and it is a real cost worth naming.
+
 ## 14. What this does not solve
 
 - **CI portability.** §1's missing quarter. `http` makes providers reachable, never interchangeable.

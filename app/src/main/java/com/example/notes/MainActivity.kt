@@ -118,7 +118,8 @@ private sealed interface Pending {
     data object ModelKey : Pending
     data object AddProject : Pending
     data object NewProject : Pending
-    data object RemoveAccount : Pending
+    /** **Which account**, because the list shows several and the row that was tapped decides. */
+    data class RemoveAccount(val login: String) : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
     /** Local -> synced: a repository, seeded with the licence the person picks. */
@@ -289,6 +290,19 @@ private fun AppRoot(viewModel: AppViewModel) {
         if (uri != null) viewModel.importFolder(uri)
     }
 
+    // **Back from a project screen returns to the accounts list**, which is what makes the folders a
+    // hierarchy rather than a mode. A back from the account's root (path is empty) leaves it; a back
+    // from inside a project's folders goes up one folder first, as it always did.
+    BackHandler(
+        enabled = !showTrace && !showSettings && !showSecrets && pending is Pending.None &&
+            !viewModel.onAccountsScreen,
+    ) {
+        if (viewModel.path.isEmpty() && viewModel.editingFile == null && chatProject == null) {
+            viewModel.leaveAccount()
+        } else if (viewModel.path.isNotEmpty()) {
+            viewModel.up()
+        }
+    }
     BackHandler(enabled = showTrace) { showTrace = false }
     BackHandler(enabled = showSettings) { showSettings = false }
     BackHandler(enabled = showSecrets) { showSecrets = false }
@@ -447,7 +461,10 @@ private fun AppRoot(viewModel: AppViewModel) {
             onBack = { showSettings = false },
             onSignIn = { tap("add account"); pending = Pending.SignIn },
             onSetKey = { tap("set model key"); pending = Pending.ModelKey },
-            onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
+            onRemoveAccount = {
+                tap("remove account")
+                viewModel.account?.let { pending = Pending.RemoveAccount(it.login) }
+            },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
             onOpenSecrets = { tap("secrets"); showSecrets = true },
@@ -491,6 +508,17 @@ private fun AppRoot(viewModel: AppViewModel) {
             // The same act the browser offers, reaching the same window: a report is a report
             // wherever it is noticed, and the chat is where a wrong answer is noticed.
             onReport = openReport,
+        )
+
+        // **The main menu is the list of accounts** (§13c.2). It is a branch of its own rather than a
+        // mode inside BrowserScreen, because the two show different things about different subjects —
+        // and because the back gesture has to return here from a project screen.
+        viewModel.onAccountsScreen -> AccountsScreen(
+            viewModel = viewModel,
+            onEnter = { login -> viewModel.enterAccount(login) },
+            onAdd = { tap("add account"); pending = Pending.AddAccount },
+            onRemove = { login -> tap("remove account", login); pending = Pending.RemoveAccount(login) },
+            onSettings = { tap("settings"); showSettings = true },
         )
 
         else -> androidx.compose.foundation.layout.Box {
@@ -715,7 +743,7 @@ private fun Dialogs(
             )
         }
 
-        Pending.RemoveAccount -> viewModel.account?.let { account ->
+        is Pending.RemoveAccount -> viewModel.accounts.account(pending.login)?.let { account ->
             RemoveAccountDialog(
                 login = account.login,
                 onDismiss = dismiss,

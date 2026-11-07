@@ -111,6 +111,89 @@ class BrowserActions(
  * it is an ordinary folder listing (§3): what you made, and nothing the app made.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/**
+ * **The main menu: the accounts on this phone** (§13c.2).
+ *
+ * The operator's shape: *"main menu is about projects listed on the app, not just one account. There
+ * should be no selected account, but a list of added accounts... user can simply enter or exit folders
+ * of different accounts and there see their projects... and the + button on accounts screen allows
+ * adding and removing accounts."*
+ *
+ * **Why a list rather than one flat list of every project:** the agent runs one account at a time
+ * (`AgentRunner` holds one `Workspace`), and a flat list would need N runners and N WebViews. Entering
+ * an account keeps that true while still letting a person move between them freely — the thing that
+ * was actually missing was navigation, not concurrency.
+ *
+ * **Each row says how many projects it holds**, read from the folder rather than stored, so the number
+ * cannot disagree with what entering it shows.
+ */
+@Composable
+fun AccountsScreen(
+    viewModel: AppViewModel,
+    onEnter: (String) -> Unit,
+    onAdd: () -> Unit,
+    onRemove: (String) -> Unit,
+    onSettings: () -> Unit,
+) {
+    val accounts = viewModel.accountsWithProjects
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Accounts",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            // **The `+` lives here, not in Settings.** The operator moved it: accounts are what this
+            // screen is about, so adding one belongs on it, and Settings keeps only what applies to
+            // the app as a whole.
+            TextButton(onClick = { Trace.tap("add account"); onAdd() }) { Text("+ Add") }
+            TextButton(onClick = onSettings) { Text("Settings") }
+        }
+        HorizontalDivider()
+        if (accounts.isEmpty()) {
+            EmptyState(
+                title = "No accounts yet",
+                text = "An account is a GitHub identity. Its projects live in a folder of its own, " +
+                    "and the agent works in one account at a time — so you can move between them " +
+                    "freely without their agents interfering.",
+            )
+        } else {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                for ((account, projects) in accounts) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                Trace.tap("enter account")
+                                onEnter(account.login)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(account.login, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                if (projects == 1) "1 project" else "$projects projects",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        // **Removal is offered, not hidden behind a long press.** A row a person can
+                        // add to but never remove from is a row they work around by reinstalling.
+                        TextButton(onClick = { onRemove(account.login) }) { Text("Remove") }
+                    }
+                    HorizontalDivider()
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun BrowserScreen(
     viewModel: AppViewModel,
