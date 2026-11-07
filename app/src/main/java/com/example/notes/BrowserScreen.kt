@@ -882,6 +882,21 @@ private fun ProjectList(
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // **The explanation survives the system row.** It used to be the whole screen or nothing,
+        // because the list was the projects; now a new account has a row in it — the app's own folder —
+        // so "empty" would be a screen showing one row and saying nothing about why. The words come
+        // first, above the row they are about.
+        if (names.isEmpty()) {
+            item {
+                Text(
+                    text = "No projects yet. The add button makes one on GitHub, brings in a " +
+                        "repository you already have, or makes one that stays on this phone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                )
+            }
+        }
         items(names) { name ->
             var menu by remember { mutableStateOf(false) }
             Column {

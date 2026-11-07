@@ -2571,8 +2571,10 @@ class AgentTest {
      * not as a missing file.
      */
     private fun branchWithWorktree(): File {
-        // A second commit on main, so both trees have a file whose text differs per branch.
-        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
+        // **The text really changes**, because a commit with nothing to record leaves main's tip where
+        // the fixture's own `Initial commit` put it — and then "main did not move" would pass while
+        // proving nothing.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres, and a note\n")
         git.commit("shopping", "main's text")
         GitService.openExisting(ws.repoOf("shopping"))!!.use { repo ->
             GitService.createBranch(repo, "feature").getOrThrow()
@@ -2615,7 +2617,7 @@ class AgentTest {
         val body = onFeature.run(Call("c1", "read", """{"path":"milk.txt"}"""))
 
         assertTrue("it read: $body", body.contains("three litres"))
-        assertFalse("not main's copy", body.contains("two litres"))
+        assertFalse("not main's copy", body.contains("two litres, and a note"))
     }
 
     @Test

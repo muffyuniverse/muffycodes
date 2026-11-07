@@ -5678,7 +5678,10 @@ class AppViewModel @JvmOverloads constructor(
         // history of their own to show.
         val project = ws.projectAt(target) ?: return emptyList()
         val g = git ?: return emptyList()
-        return g.versions(project, target.drop(1).joinToString("/"))
+        // **The tree that holds the version**, which is the file's own (§13d): a file opened from a
+        // branch is that branch's history, and main's would answer with versions of a different text.
+        return g.onBranch(ws.branchOf(ws.fileAt(target)))
+            .versions(project, target.drop(1).joinToString("/"))
     }
 
     /**
@@ -5858,8 +5861,11 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val project = ws.projectAt(target)
+        // **The file's own tree**, for the same reason [versions] reads it there: putting a version back
+        // into main's file while the person is looking at a branch's would replace text they cannot see.
+        val here = git?.onBranch(ws.branchOf(ws.fileAt(target)))
         val ok = project != null &&
-            git?.restore(project, target.drop(1).joinToString("/"), revisionId)?.isSuccess == true
+            here?.restore(project, target.drop(1).joinToString("/"), revisionId)?.isSuccess == true
 
         // **Only a failure is announced on the screen.** A restore replaces the text the
         // person is looking at, so a message saying "restored that version" repeats what

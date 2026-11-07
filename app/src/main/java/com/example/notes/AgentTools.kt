@@ -5259,11 +5259,16 @@ class AgentTools(
      * than the false sentence the old rule gave, which called a readable path "outside this project".
      */
     fun projectOf(file: File): String? {
-        val account = ws.accountDir.absolutePath
-        val full = file.absolutePath
-        if (!full.startsWith(account + File.separator)) return null
-        val rest = full.substring(account.length + 1)
-        return rest.substringBefore(File.separator).ifEmpty { null }
+        // **The workspace's reading of the path, not the first segment of the absolute path.**
+        //
+        // The raw segment called every file in a branch's worktree `.muffy` — because a worktree lives
+        // under `<account>/.muffy/worktrees/<project>/<branch>/` — so `isMine` was false for every path
+        // an agent on a branch touched, and every write was refused with "belongs to `.muffy`, another
+        // project". Measured by `AgentTest`, whose failure is the sentence rather than a stack trace.
+        //
+        // `relative` answers the project a path *stands for* (§13d), so `Shopping/feature/x` is
+        // `Shopping` on every branch — and an account file is still the `.muffy` or the name it was.
+        return ws.relative(file)?.firstOrNull()?.ifEmpty { null }
     }
 
     /** True when [file] is inside the project the agent is working in. */
