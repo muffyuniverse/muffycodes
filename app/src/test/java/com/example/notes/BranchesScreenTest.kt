@@ -312,7 +312,12 @@ class BranchesScreenTest {
             scene.viewModel.currentDir!!.absolutePath.replace('\\', '/')
                 .contains(".muffy/worktrees/Shopping/feature"),
         )
-        val onBranch = scene.file("notes.txt", "the branch's copy")
+        // **Written through the editor, not `createFile`** — and that is the honest shape of the claim.
+        // The branch was made from main, so it already *contains* `notes.txt`; there is nothing to
+        // create. What a worktree changes is where an edit lands: the same path, two copies on disk.
+        val onBranch = File(scene.viewModel.currentDir, "notes.txt")
+        scene.viewModel.openEditor(onBranch)
+        scene.viewModel.saveEditor("the branch's copy")
 
         assertNotEquals("two different files", onMain.absolutePath, onBranch.absolutePath)
         assertEquals("main keeps its text", "main's copy", onMain.readText())
