@@ -380,15 +380,26 @@ class CredentialStore(context: Context) : Credentials {
         return doomed.size
     }
 
+    /**
+     * The project a secret is scoped to, or null when it is account-wide.
+     *
+     * **Read off the key**, because the key is the scope and a second copy could disagree with the one
+     * the lookup uses. The split is at the slash: a slash is escaped to `%2F` in both the project and
+     * the name, so it cannot occur inside either and is the only unambiguous boundary.
+     *
+     * **When two projects hold a secret of the same name**, this answers the first one found. That is a
+     * real ambiguity and it is stated rather than hidden: the window draws a row from a name, and a
+     * name is not unique across scopes. Two projects holding the same name is the case that exposes it,
+     * and the honest fix — if it ever matters — is to key the row by scope as well, not to guess here.
+     */
     override fun secretProject(name: String): String? {
         val login = activeLogin ?: return null
-        // Read off the key rather than stored beside the value: the key is the scope, and a second
-        // copy of it could disagree with the one the lookup uses.
-        val prefix = "secret_${login}_project_"
-        val suffix = "_${java.net.URLEncoder.encode(name, "UTF-8")}"
-        val hit = prefs.all.keys.firstOrNull { it.startsWith(prefix) && it.endsWith(suffix) }
-            ?: return null
-        val middle = hit.removePrefix(prefix).removeSuffix(suffix)
+        val marker = "secret_${login}_project_"
+        val encoded = java.net.URLEncoder.encode(name, "UTF-8")
+        val hit = prefs.all.keys.firstOrNull {
+            it.startsWith(marker) && it.substringAfterLast('/') == encoded
+        } ?: return null
+        val middle = hit.removePrefix(marker).substringBeforeLast('/')
         return try {
             java.net.URLDecoder.decode(middle, "UTF-8")
         } catch (e: Exception) {
@@ -414,22 +425,45 @@ class CredentialStore(context: Context) : Credentials {
      * secret exists is not the same as being able to use it, and a screen that showed nothing while the phone
      * was locked would look like the secret had been lost.
      */
+    /**
+     * Every secret this account has, **including the project-scoped ones**, as the names a person
+     * should see.
+     *
+     * **This used to exclude project-scoped keys, and that made them invisible rather than tidy.** The
+     * exclusion was written to avoid listing `secret_dev_project_x` as a secret called `project_x` —
+     * which is right about the *name* and wrong about the *row*: a project secret was stored, was
+     * readable by the agent, and **could not be seen, edited or removed in the window**. A secret the
+     * screen cannot show is a secret nobody can audit, and the scope is exactly the fact a person needs
+     * to see.
+     *
+     * So the project marker is **parsed out rather than filtered out**: `secret_dev_project_<p>_<n>`
+     * becomes the name `n`, and [secretProject] answers `<p>` for it so the row can say which scope it
+     * is. A project name is decoded with the same `URLDecoder` as the secret's own name, because it is
+     * encoded the same way and a project called `acme shop` would otherwise never match its own row.
+     */
     override fun secretNames(): List<String> {
         val login = activeLogin ?: return emptyList()
-        val prefix = "secret_${login}_"
-        // **Project-scoped keys are excluded**, because they share this prefix. `secret_dev_project_x`
-        // would otherwise be listed as a secret called `project_x` — a name nothing stored and no
-        // article names, so it could never be used and would look like a broken row.
-        val projectMarker = "secret_${login}_project_"
+        val accountPrefix = "secret_${login}_"
+        val projectPrefix = "secret_${login}_project_"
         return prefs.all.keys
-            .filter { it.startsWith(prefix) && !it.startsWith(projectMarker) }
+            .filter { it.startsWith(accountPrefix) }
             .mapNotNull { key ->
                 try {
-                    java.net.URLDecoder.decode(key.removePrefix(prefix), "UTF-8")
+                    if (key.startsWith(projectPrefix)) {
+                        // **Everything after the last slash is the name**, because a slash cannot occur
+                        // inside the encoded project or the encoded name.
+                        java.net.URLDecoder.decode(
+                            key.substringAfterLast('/'),
+                            "UTF-8",
+                        )
+                    } else {
+                        java.net.URLDecoder.decode(key.removePrefix(accountPrefix), "UTF-8")
+                    }
                 } catch (e: Exception) {
                     null
                 }
             }
+            .distinct()
             .sorted()
     }
 
@@ -477,8 +511,19 @@ class CredentialStore(context: Context) : Credentials {
     private fun projectSecretKey(login: String, project: String, name: String): String =
         projectSecretPrefix(login, project) + java.net.URLEncoder.encode(name, "UTF-8")
 
+    /**
+     * `secret_<login>_project_<project>/`
+     *
+     * **The separator is a slash, and that is the whole reason it is not an underscore.** `URLEncoder`
+     * leaves `_` unescaped, so a project called `a_b` and one called `a` followed by a secret named
+     * `b_x` produce the same key — and no amount of parsing can tell them apart afterwards. A slash is
+     * escaped to `%2F` in both the project and the name, so **it cannot occur inside either**, which
+     * makes it the one character that is unambiguously a boundary.
+     *
+     * This changed the format, and that is free: no project-scoped secret has ever been stored (§13c.4).
+     */
     private fun projectSecretPrefix(login: String, project: String): String =
-        "secret_${login}_project_${java.net.URLEncoder.encode(project, "UTF-8")}_"
+        "secret_${login}_project_${java.net.URLEncoder.encode(project, "UTF-8")}/"
 
     /**
      * Splits a stored secret into the host it is bound to and the ciphertext.

@@ -1646,9 +1646,55 @@ stated in terms of the bill and the battery rather than in terms of the disk.
    either one runner per account or the runner to hold a map. **That is the real cost**, and it is why
    accounts-as-folders keeps it out of scope: one runner, one account, exactly as today.
 
-**So the shape of the change is `newSingleThreadExecutor()` → a bounded pool, plus a per-account runner
-if accounts are to run together.** The concurrency *machinery* already exists; what does not exist is a
+**So the shape of the change is `newSingleThreadExecutor()` → a pool, plus a per-account runner if
+accounts are to run together.** The concurrency *machinery* already exists; what does not exist is a
 decision about the bill and the queue.
+
+#### "What is a pool? We need as many threads as there are active agents, don't we?"
+
+**Yes — and the operator is right, which corrects what this section said above.**
+
+**A pool** is a fixed set of worker threads that tasks are handed to. `newSingleThreadExecutor()` is a
+pool of exactly one. `newFixedThreadPool(4)` is a pool of four, and a fifth task **waits in a queue**
+until one frees up. That waiting is the whole point of a fixed pool: it bounds how much runs at once.
+
+**Why a fixed pool would be the wrong shape here, measured:**
+
+| fact | where | consequence |
+|---|---|---|
+| the model request is **blocking** `HttpURLConnection` | `Door.kt:5`, `OpenRouterAuth.kt:150` | a turn holds its thread for the whole completion — seconds to minutes |
+| the wait is almost entirely **network** | — | the thread does **nothing** for most of its life except block on a socket |
+| a turn is not CPU-bound | — | adding threads costs memory, not contention |
+| **the app already does this** | `Background.kt:209` — `Thread(...)` per call | **a thread created for the work that exists is not a resource to reason about** — the file says so in its own comment |
+
+**So the right shape is one thread per active agent, not a fixed pool.** A pool of four would mean the
+fifth project's agent waits for a slot **even though nothing is contending** — it would be a limit that
+buys nothing, because the bottleneck is somebody else's server, not this phone's CPU.
+
+**The corrected design:**
+
+| | today | becomes |
+|---|---|---|
+| `AgentRunner.worker` | `newSingleThreadExecutor()` | **one thread per due agent** — or `newCachedThreadPool()`, which is the same thing with reuse |
+| `inFlight` | set of agent ids | **no change** — already per-agent |
+| `RepoLocks` | per repository | **no change** |
+| the tick | `for (session in sessions)` | dispatch each to its own thread instead of the shared one |
+
+**What still has to be bounded, and this is the real answer to "how many":** the number of threads is
+"as many as there are active agents", and **that number is bounded by the session list, which is bounded
+by the projects that have their agent switched on**. A person with 40 projects and 40 agents on gets 40
+threads — each mostly blocked on a socket, each costing a few hundred KB of stack. That is affordable,
+and it is the honest cost of what was asked for.
+
+**The bill is the real ceiling, not the thread count.** Parallel pings are parallel *requests*, so N
+agents pinged at once costs N times the warmth. That is a **setting** — a cap on how many agents may be
+in flight at once, defaulting to unlimited — rather than a fixed pool size nobody can explain. And
+because the idle ceiling already stops pinging a quiet session (`warmDue` → false, §13c.6), the number
+of *actually* active agents falls off on its own.
+
+**So: "a pool" was the wrong word, and the operator's instinct is the design.** One thread per active
+agent, with a configurable cap for the bill rather than a fixed pool for a contention that does not
+exist.
 
 #### "Agents become stopped when they run out of idle time" — **this is not what happens**
 

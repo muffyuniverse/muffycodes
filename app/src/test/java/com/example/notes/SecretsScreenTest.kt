@@ -247,7 +247,17 @@ class SecretsScreenTest {
      */
     @Test
     fun `a project-scoped secret shows its scope on the row`() {
-        scene.viewModel.saveSecret("acme-api", "tok_1", "api.acme.test", "acme")
+        // **The project must exist**, or the row would be a claim about a project that is not there.
+        scene.project("acme")
+        val problem = scene.viewModel.saveSecret("acme-api", "tok_1", "api.acme.test", "acme")
+        assertEquals("the secret was kept: $problem", null, problem)
+        // **And it is listed**, which it was not: `secretNames()` used to filter project-scoped keys
+        // out entirely, so a project secret was stored, readable by the agent, and invisible in the
+        // window — it could never be seen or removed.
+        assertTrue(
+            "the project secret is listed: ${scene.viewModel.secretNames()}",
+            "acme-api" in scene.viewModel.secretNames(),
+        )
         screen()
 
         compose.onNodeWithText("acme-api").assertIsDisplayed()

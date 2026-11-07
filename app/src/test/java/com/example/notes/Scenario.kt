@@ -80,7 +80,13 @@ open class MemoryCredentials : Credentials {
         secretHosts[name] = host
     }
 
-    override fun secretNames(): List<String> = secrets.keys.sorted()
+    /**
+     * **Every secret, project-scoped ones included** — the fake must answer what the real store answers,
+     * or a test would pass here and fail on a phone. The project scopes are folded in by name, because
+     * that is what the window draws rows from.
+     */
+    override fun secretNames(): List<String> =
+        (secrets.keys + projectSecrets.keys.map { it.substringAfter('/') }).distinct().sorted()
 
     /**
      * The host a secret is bound to.
