@@ -94,6 +94,17 @@ class AgentTools(
      */
     private val privateAllowed: () -> Boolean = { false },
     /**
+     * The largest answer one request may take, in bytes.
+     *
+     * **A lambda rather than a number, and read per call**, for the reason the settings' own comment
+     * gives: a person who lowers the cap while an agent is idle should see it apply to the next
+     * request, not to the runner built before they changed it.
+     *
+     * The default is the old constant, so every test and every caller that does not care keeps the
+     * behaviour it had.
+     */
+    private val fetchLimit: () -> Long = { Fetched.LIMIT_BYTES },
+    /**
      * Whether the agent may download at all — **and it removes the tool rather than making it refuse.**
      *
      * The tool list is part of every request's cache prefix, so a capability a person has turned off should not
@@ -921,7 +932,7 @@ class AgentTools(
                     "**It never lands on a project file** — `agent/` is outside git, so a download " +
                     "does not commit itself, and it cannot overwrite work by arriving. " +
                     "`name` is a name, not a path: Downloads is one folder. " +
-                    "Refused above ${Fetcher.size(Fetched.LIMIT_BYTES)}, naming the size, because a " +
+                    "Refused above ${Fetcher.size(fetchLimit())}, naming the size, because a " +
                     "video is something a phone's Downloads holds and not something an agent reads.",
                 "{\"name\":\"trace.log.txt\"}",
             ),
@@ -3850,9 +3861,9 @@ class AgentTools(
             "There is no file called \"$asked\" in Downloads. Run `downloads` with no arguments to " +
                 "see what is there.",
         )
-        if (size > Fetched.LIMIT_BYTES) {
+        if (size > fetchLimit()) {
             return refusal(
-                "\"$asked\" is ${Fetcher.size(size)} and the limit is ${Fetcher.size(Fetched.LIMIT_BYTES)}. " +
+                "\"$asked\" is ${Fetcher.size(size)} and the limit is ${Fetcher.size(fetchLimit())}. " +
                     "Nothing was copied: a file this big is not something an agent reads.",
             )
         }
@@ -4106,7 +4117,7 @@ class AgentTools(
         }
 
         deadline.check("http")
-        val answer = fetcher.request(url, method, given, body, Fetched.LIMIT_BYTES).getOrElse {
+        val answer = fetcher.request(url, method, given, body, fetchLimit()).getOrElse {
             return refusal(it.message ?: "The request to $url failed")
         }
 

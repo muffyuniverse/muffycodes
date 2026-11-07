@@ -634,6 +634,25 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            // **The download cap, next to the other network limits** because it is the same kind of
+            // number: a bound the person sets and the app enforces. It was a constant until the
+            // operator asked for it to be theirs — "a hundred" refused archives that were genuinely
+            // a dependency, and a cap nobody can change is the tool's opinion rather than the
+            // person's.
+            LengthField(
+                label = "One download may be (MB)",
+                value = settings.fetchMegabytes,
+                placeholder = "${SettingsStore.DEFAULT_FETCH_MB}",
+                onValueChange = { settings.keepFetchMegabytes(it) },
+            )
+            Text(
+                text = "Now: ${settings.fetchMegabytes} MB per download, between " +
+                    "${SettingsStore.MIN_FETCH_MB} and ${SettingsStore.MAX_FETCH_MB}. Larger is " +
+                    "refused with the size named rather than cut short, so a half-file never " +
+                    "arrives looking whole.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

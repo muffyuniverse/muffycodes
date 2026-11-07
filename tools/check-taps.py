@@ -194,7 +194,7 @@ VOCABULARY = {
     # the browser: whether the agent may reach this phone and the private network, and how long one
     # page may take. Two acts because they answer two questions - *where* may it read, and *how long*
     # may it spend - and the first is a capability rather than a limit.
-    "browse private", "browse timeout",
+    "browse private", "browse timeout", "fetch size",
     # the injection scanner's threshold: how sure a guard model must be before a section of a page is cut.
     # Its own act rather than part of the browse block, because it decides *what survives* rather than
     # where or how long.

@@ -365,6 +365,30 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** What [keepBrowseSeconds] last set, in seconds, for the field to show. */
     val browseSeconds: Int get() = prefs.getInt(KEY_BROWSE_SECONDS, DEFAULT_BROWSE_SECONDS)
 
+    /**
+     * How large one download may be, in megabytes.
+     *
+     * **Read per call**, like every other limit here, so a number changed while an agent is idle
+     * applies to the next request rather than to the runner built before it.
+     *
+     * **100 MB by default, and that number was the operator's, not the app's** — twenty refused
+     * archives that were genuinely a dependency. A cap that cannot be changed is the tool's opinion
+     * rather than the person's, which is why this is a setting at all; it is still a refusal and
+     * still not a truncation, so a 2 GB ISO cannot arrive by accident.
+     */
+    val fetchMegabytes: Int get() = prefs.getInt(KEY_FETCH_MB, DEFAULT_FETCH_MB)
+
+    /** Sets the download cap, in megabytes, clamped to something a phone can survive. */
+    fun keepFetchMegabytes(megabytes: Int) {
+        val clean = megabytes.coerceIn(MIN_FETCH_MB, MAX_FETCH_MB)
+        Trace.tap("fetch size", "$clean MB")
+        prefs.edit().putInt(KEY_FETCH_MB, clean).apply()
+        Trace.said("one download may be $clean MB")
+    }
+
+    /** The cap in bytes, which is what the fetcher compares against. */
+    val fetchBytes: Long get() = fetchMegabytes.toLong() * 1024L * 1024L
+
     /** Turns the keepalive on or off. */
     fun keepWarm(on: Boolean) {
         Trace.tap("keepalive", if (on) "on" else "off")
@@ -796,6 +820,20 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** A page: long enough for a slow site, short enough that a turn is not lost to one. */
     const val DEFAULT_BROWSE_SECONDS = 30
 
+    /** One download's default ceiling, in megabytes. */
+    const val DEFAULT_FETCH_MB = 100
+
+    /**
+     * The range a person may set.
+     *
+     * **One megabyte minimum**, because a cap of zero would be a switch wearing a number's clothes —
+     * and there is already a switch for "no downloads at all". **A gigabyte maximum**, because beyond
+     * that the phone's own storage is the real limit and the app should not be the thing that
+     * discovers it.
+     */
+    const val MIN_FETCH_MB = 1
+    const val MAX_FETCH_MB = 1024
+
     /**
      * The scanner's default threshold, in percents — **the design's own number**, from
      * `docs/COUNTERPROPOSAL-III-search-mcp-articles.md` §2: high enough not to cut prose *about* prompt
@@ -837,6 +875,8 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** Whether the scanner runs at all — separate from its threshold, because zero also means "off". */
     const val KEY_SCAN = "agent_scan"
     const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
+
+    const val KEY_FETCH_MB = "agent_fetch_mb"
 
     /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */
     const val KEY_POLL = "agent_poll_seconds"

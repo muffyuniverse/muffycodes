@@ -154,6 +154,9 @@ object AgentWiring {
                 threshold = { if (settings.scanAllowed) settings.scanThreshold else 0.0 },
             ),
             httpAllowed = { settings.httpAllowed },
+            // **Read per call, so a cap lowered while the agent is idle applies to the next request**
+            // rather than to the runner built before the person changed it.
+            fetchLimit = { settings.fetchBytes },
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

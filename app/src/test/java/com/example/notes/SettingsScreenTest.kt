@@ -436,4 +436,50 @@ class SettingsScreenTest {
         assertEquals("the switch is off", false, scene.settings.scanAllowed)
         compose.onAllNodesWithText("Cut a section at (percent)").assertCountEquals(0)
     }
+    // ---- the download cap, which used to be a constant ----------------------
+
+    @Test
+    fun `a fresh account refuses downloads above 100 MB, and says the number`() {
+        // **The default the operator set**, and asserted because a default is the thing nobody
+        // re-checks: 100 MB replaced 20 after archives that were genuinely a dependency were
+        // refused.
+        assertEquals(100, scene.settings.fetchMegabytes)
+        assertEquals("and the fetcher gets bytes", 100L * 1024 * 1024, scene.settings.fetchBytes)
+    }
+
+    @Test
+    fun `the download cap is clamped to something a phone can survive`() {
+        // **Zero would be a switch wearing a number's clothes**, and there is already a switch for
+        // "no downloads at all". A number that can be set to nonsense is a number nobody can reason
+        // about later.
+        scene.settings.keepFetchMegabytes(0)
+        assertEquals(
+            "below the floor it is the floor",
+            SettingsStore.MIN_FETCH_MB,
+            scene.settings.fetchMegabytes,
+        )
+
+        scene.settings.keepFetchMegabytes(999_999)
+        assertEquals(
+            "above the ceiling it is the ceiling",
+            SettingsStore.MAX_FETCH_MB,
+            scene.settings.fetchMegabytes,
+        )
+
+        scene.settings.keepFetchMegabytes(250)
+        assertEquals("and in range it is what was asked", 250, scene.settings.fetchMegabytes)
+    }
+
+    @Test
+    fun `the download cap is on the settings screen and says the current number`() {
+        // **The number in the sentence, not only in the field.** A field showing "250" and a
+        // sentence still saying "100" is the failure the app keeps finding: two places that must
+        // agree and nothing making them.
+        scene.settings.keepFetchMegabytes(250)
+        settings()
+
+        compose.onNodeWithText("One download may be (MB)").performScrollTo()
+        compose.onNodeWithText("One download may be (MB)").assertExists()
+        compose.onNodeWithText("Now: 250 MB per download", substring = true).assertExists()
+    }
 }
