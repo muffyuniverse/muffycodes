@@ -227,7 +227,7 @@ class BranchesScreenTest {
         scene.project("Shopping")
         scene.viewModel.openBranches("Shopping")
         scene.viewModel.newBranch("feature")
-        scene.message = null
+        scene.viewModel.message = null
 
         // No commits on it, so it goes.
         scene.viewModel.dropBranch("feature")
@@ -243,7 +243,7 @@ class BranchesScreenTest {
     fun `main cannot be removed, and the refusal is said`() {
         scene.project("Shopping")
         scene.viewModel.openBranches("Shopping")
-        scene.message = null
+        scene.viewModel.message = null
 
         scene.viewModel.dropBranch("main")
 
