@@ -5154,6 +5154,9 @@ class AppViewModel @JvmOverloads constructor(
         )
         credentials.activeLogin = login
         activeLogin = login
+        // **Signing in is an account change too**, so it forgets the branch screen for the same reason
+        // `switchTo` does. This line was missing and only a test found it.
+        forgetBranches()
         path = emptyList()
         if (adopted) {
             // Said once, because a person who had projects before signing in should be told they
@@ -5207,7 +5210,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun leaveAccount() {
         Trace.tap("leave account")
-        choosingBranchFor = null
+        forgetBranches()
         path = emptyList()
         editingPath = null
         historyPath = null
@@ -5251,7 +5254,17 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** Back to the project list, from the branch screen. */
-    fun closeBranches() {
+    fun closeBranches() = forgetBranches()
+
+    /**
+     * **Drops the branch screen, without a trace line**, because the caller is already leaving.
+     *
+     * Extracted because **three** paths change which account is in force — `signIn`, `switchTo` and
+     * `leaveAccount` — and a branch belongs to a project in one account, so every one of them has to
+     * forget it. Two of the three did, and the one that did not was `signIn`: the test for it failed,
+     * which is the only reason this is a function rather than three copies of the same two lines.
+     */
+    private fun forgetBranches() {
         choosingBranchFor = null
         choosingBranches = emptyList()
     }
@@ -5335,7 +5348,7 @@ class AppViewModel @JvmOverloads constructor(
         activeLogin = login
         // **The branch belongs to a project in the account you were in**, so switching accounts
         // must not leave the branch screen naming a project that is no longer there.
-        choosingBranchFor = null
+        forgetBranches()
         // One log, not one per account: a switch is a thing that happened in this
         // session, and splitting the stream would lose the line before it.
         Trace.note("switched-account", login)
