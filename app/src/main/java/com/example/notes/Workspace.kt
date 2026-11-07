@@ -431,7 +431,14 @@ class Workspace(val accountDir: File) {
                     Entry(child.name, child, kindOf(child), size = child.length())
                 }
             }
-            .sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase() }))
+            // **A link comes last, after even the files.** Every other row in a project is content the
+            // repository holds; the `system` link names a folder the app owns (§13f). Sorting it as a
+            // folder put it in the middle of the person's folders and pushed their own files off the
+            // bottom of the screen — which is a cosmetic cost, and it corrupted a scenario: the picture
+            // that was supposed to show a file appearing showed the same five rows twice.
+            //
+            // The rule is stated as "a link is not content", so it holds for a link a person makes too.
+            .sortedWith(compareBy({ isLink(it.file) }, { !it.isFolder }, { it.name.lowercase() }))
     }
 
     /**

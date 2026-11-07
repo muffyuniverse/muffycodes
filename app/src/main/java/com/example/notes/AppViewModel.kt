@@ -3600,16 +3600,6 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val project = path.firstOrNull() ?: return
-        // **The button is offered only when nothing is unsent, and this is the same rule stated where
-        // it cannot be bypassed.** A version published from a tree with unsent work would name a commit
-        // GitHub does not have — the release would be of different code from the one the person is
-        // looking at, and nothing on GitHub would say so.
-        val unsent = changesOf(project)
-        if (unsent > 0) {
-            message = "$project has $unsent change(s) not sent yet, so a release would name a " +
-                "version of code GitHub does not have"
-            return
-        }
         val ref = RepoRef.of(git?.remoteUrl(project).orEmpty())
         if (ref == null) {
             message = "$project has no GitHub repository, so there is nothing to release"
@@ -3617,6 +3607,27 @@ class AppViewModel @JvmOverloads constructor(
         }
         busy = true
         onWorker {
+            // **Counted here, not read from the cached map.** `changesOf` is a snapshot the last
+            // refresh took, so a save made since then would not be in it - and the sentence this
+            // guard exists to prevent would be true while the guard passed. A version published from
+            // a tree with unsent work names a commit GitHub does not have: the release would be of
+            // different code from the one the person is looking at, and nothing would say so.
+            val unsent = try {
+                git?.changes(project)?.total ?: 0
+            } catch (t: Throwable) {
+                // A count that cannot be taken is not a count of zero, but refusing on a failure to
+                // read would block a release for a reason that is not about the release. The push
+                // that follows answers with GitHub's own word if the tree really is behind.
+                0
+            }
+            if (unsent > 0) {
+                main.post {
+                    busy = false
+                    message = "$project has $unsent change(s) not sent yet, so a release would " +
+                        "name a version of code GitHub does not have"
+                }
+                return@onWorker
+            }
             val started = Release.start(api, token, ref, versionName, devBuild)
             main.post {
                 busy = false

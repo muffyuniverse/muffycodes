@@ -437,6 +437,35 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `publishing a release is refused while anything is unsent`() {
+        // **The one rule that makes a release mean something**, and it is enforced in the view model
+        // rather than only by the button: a version published from a tree with unsent work names a
+        // commit GitHub does not have, so the release would be of different code from the one the
+        // person is looking at.
+        //
+        // **The count is taken when the release is asked for**, because `changesOf` is a snapshot the
+        // last refresh took — a save made since would not be in it, and the guard would pass while the
+        // sentence it exists to prevent was true.
+        scene.signedIn()
+        scene.project("Shopping")
+        scene.open("Shopping")
+        scene.file("notes.txt", "unsent\n")
+        scene.viewModel.message = null
+
+        scene.viewModel.startRelease("1.5")
+        scene.await("the answer") { !scene.viewModel.busy && scene.viewModel.message != null }
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says why: $said", said.contains("not sent yet"))
+        assertTrue("and names the version's problem: $said", said.contains("GitHub does not have"))
+        // **Nothing was dispatched**, which is the half a message alone cannot prove.
+        assertFalse(
+            "the pretend GitHub has no run",
+            File(scene.remote("Shopping"), "ci").listFiles().orEmpty().isNotEmpty(),
+        )
+    }
+
+    @Test
     fun `the system folder is reachable at the root and is not a project`() {
         // **A folder, not a hidden one** - the settings that belong to the whole account live in it,
         // and the report that asked for it was explicit: "system prompt is outdated. Another reason why

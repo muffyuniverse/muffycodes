@@ -66,6 +66,26 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `the link is listed last, after the person's files`() {
+        // **A given, asserted because a screenshot depends on it.** Sorting the link as a folder put it
+        // between `muffycodes_data/` and the files, which pushed the newest file off the bottom of the
+        // run's own list — and scenario 07's two pictures became the same five rows.
+        workspace.ensure()
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        File(proj, ".git").mkdirs()
+        File(proj, "a-folder").mkdirs()
+        File(proj, "milk.txt").writeText("two litres\n")
+        assertTrue("the link is made", workspace.linkSystem(proj))
+
+        assertEquals(
+            "folders, then files, then the app's link",
+            listOf("a-folder", "milk.txt", Workspace.SYSTEM_PROJECT),
+            workspace.list(proj).map { it.name },
+        )
+    }
+
+    @Test
     fun `every tree gets the link, including a folder a person already made`() {
         workspace.ensure()
         val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
