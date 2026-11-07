@@ -1,10 +1,13 @@
 name: Build and release
 
-# **One branch, `main`.** A person pushes to it and so does the agent; there used
-# to be a second one (`development`) so that only a person could reach the branch
-# that publishes. The operator ended that: *"lets keep only main"*. What keeps a
-# release out of an agent's hands is not the branch but the *event* — see the
-# `Publish the release` step, which now requires a `push`.
+# **Two branches HERE, and that is not the app's rule.**
+#
+# The app's model for a *user's project* is one branch, `main` — the operator ended
+# the person/agent split: *"lets keep only main"*. **This file is not that.** It is
+# muffycodes' own CI, and muffycodes is developed on `development` and released
+# from `main`. Narrowing this trigger to `[main]` was a conflation of the two, and
+# it stopped every run for three commits before anyone noticed — which is exactly
+# the failure a CI file must not have.
 #
 # Two levels of cost, one for each thing a run is for:
 #
@@ -19,9 +22,12 @@ name: Build and release
 #
 # A `workflow_dispatch` publishes too, if it names a version: the app's release
 # button uses it. Both actors can release, which is the operator's decision.
+#
+# `development` is the work branch: tests, build, and an installable APK as an
+# artifact. `main` publishes.
 on:
   push:
-    branches: [main]
+    branches: [main, development]
     # **A change that touches nothing the build reads costs a full pipeline.** Documentation,
     # and the note files that describe work rather than perform it, cannot break a compile or a
     # test — but they used to start the whole suite, which is the most expensive thing a run can
@@ -987,11 +993,9 @@ jobs:
         # was not built at all on a push — it only existed on a manual dispatch — so the release APK
         # was the only thing on offer, and the release APK keeps no trace. That is why a report
         # arrived from a build that had never written a log.
-        # **A dispatch asking for it, and nothing else.** This was also true for a push to
-        # `development`, and that branch no longer exists — a push is always `main`, so the second
-        # clause could never be true. Kept as one condition so the reason is visible rather than
-        # looking like an omission.
-        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
+          (github.event_name == 'push' && github.ref_name != 'main')
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -1250,7 +1254,9 @@ jobs:
       # The dev copy rides in its own artifact, and only when one was built. It is never
       # part of the release: anything published is the shipping app and is attested.
       - name: Hand the dev copy onward
-        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
+          (github.event_name == 'push' && github.ref_name != 'main')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dev-apk
@@ -1407,14 +1413,9 @@ jobs:
             --out bundle/scenarios/README.md
           ls -la bundle/
 
-      # **Dead, and left in place deliberately.** This existed so a `development` push — which
-      # published nothing — still handed over a bundle. With one branch every push is `main`, every
-      # `main` run publishes, and the release IS the delivery. So the condition can never be true.
-      #
-      # It is kept rather than deleted because the same reasoning that removed the branch removes
-      # this, and a reader who finds the branch gone will look here next. Deleting it is a
-      # follow-up, not a silent tidy: nothing uploads `build-bundle` any more, so nothing that reads
-      # it can break.
+      # Only a development push needs this artifact: main publishes a release,
+      # and the release is the delivery. Uploading it there as well would be nine
+      # megabytes of storage and a couple of seconds spent on a copy nobody opens.
       - name: Hand the bundle to the run, for a build with no release
         if: github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

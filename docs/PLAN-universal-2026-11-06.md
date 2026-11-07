@@ -966,12 +966,17 @@ and it is ended: *"lets keep only main"*.
 
 - `AgentTools.AGENT_BRANCH` → `AgentTools.BRANCH = "main"`. The dispatch guard stays, but it is now a
   **typo check, not a boundary** — there is only one branch for it to agree with.
-- `.github/workflows/build-and-release.yml`: `branches: [main, development]` → `[main]`.
+- **`.github/workflows/build-and-release.yml` keeps `branches: [main, development]`, and this was a
+  mistake worth recording.** The first version of this change narrowed it to `[main]`, reasoning that
+  one branch meant one trigger. **That conflated two different things**: the app's model for a *user's
+  project* is one branch, and muffycodes' own CI is a repository developed on `development` and
+  released from `main`. Narrowing it stopped every run for three commits before anyone noticed — the
+  exact failure a CI file must not have. The file now says so at the top, because the next person to
+  read "one branch" will reach for the same edit.
 - `ReleaseKey.BRANCHES` → `listOf("main")`.
-- **The `development`-only steps become dead** and go with it: the dev-APK job condition
-  (`ref_name != 'main'`) can never be true, so `dev-apk` and `build-bundle` stop being produced by a
-  push. They stay reachable through `workflow_dispatch`'s `dev_build` input, which is the only
-  remaining way to get a debug build from CI.
+- **The `development`-only steps stay**, for the same reason: they are this repository's own
+  pipeline, not the app's rule. A push to `development` still produces `dev-apk` and `build-bundle`,
+  and `main` still publishes.
 - **The publish guard stays `ref == 'refs/heads/main'` and does NOT gain an event condition.** A draft
   of this change added `event_name == 'push'`, reasoning that the branch was the only thing stopping an
   agent from publishing. That reasoning was right about the mechanism and wrong about the intent: the
