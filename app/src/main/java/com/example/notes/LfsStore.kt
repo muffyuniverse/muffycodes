@@ -37,7 +37,7 @@ object LfsStore {
      * missing object on another. Objects are content-addressed and shared; that is what
      * `getCommonDirectory()` names, and for a repository with no worktrees it is the same path.
      */
-    fun dirOf(repo: Repository): File = File(repo.commonDirectory, "lfs/objects")
+    fun dirOf(repo: Repository): File = File(repo.getCommonDirectory(), "lfs/objects")
 
     /**
      * Every LFS object id that some commit reachable from HEAD still points at.

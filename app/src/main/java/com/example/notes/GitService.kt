@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.eclipse.jgit.api.CreateBranchCommand
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
 import org.eclipse.jgit.api.ResetCommand
@@ -1986,8 +1987,14 @@ object GitService {
      */
     fun localBranches(repo: Repository): List<String> = try {
         Git(repo).use { git ->
-            git.branchList().setListMode(ListBranchCommand.ListMode.HEADS).call()
-                .map { it.name.removePrefix("refs/heads/") }
+            // **`ALL` minus the remote refs, because `ListMode` has no `HEADS`.** JGit offers exactly
+            // two modes — `ALL` and `REMOTE` — so "local only" is not a mode to ask for but a filter
+            // to apply. I assumed a `HEADS` existed because git's own CLI has `--list` versus
+            // `-r`; the enum is the authority and it has two values.
+            git.branchList().setListMode(ListBranchCommand.ListMode.ALL).call()
+                .map { it.name }
+                .filter { it.startsWith("refs/heads/") }
+                .map { it.removePrefix("refs/heads/") }
                 .sortedWith(compareBy({ it != "main" }, { it.lowercase() }))
         }
     } catch (e: Throwable) {
@@ -2008,9 +2015,12 @@ object GitService {
                 if (git.branchList().call().any { it.name == "refs/heads/$name" }) {
                     return Result.failure(IllegalStateException("There is already a branch called $name."))
                 }
-                val start = repo.resolve("refs/heads/$from")
-                    ?: return Result.failure(IllegalStateException("There is no $from to branch from."))
-                git.branchCreate().setName(name).setStartPoint(start).call()
+                if (repo.exactRef("refs/heads/$from") == null) {
+                    return Result.failure(IllegalStateException("There is no $from to branch from."))
+                }
+                // **`setStartPoint` takes a String or a RevCommit, not an ObjectId** — the ref name
+                // itself is the argument, so resolving it first would only be a way to get it wrong.
+                git.branchCreate().setName(name).setStartPoint("refs/heads/$from").call()
                 Result.success(name)
             }
         } catch (e: Throwable) {
@@ -2065,6 +2075,14 @@ object GitService {
      */
     fun branchNameProblem(name: String): String? {
         val trimmed = name.trim()
+        // **git's own answer is asked as well**, because a list of characters I thought of will
+        // always be missing one that git knows about. The sentences below are still the reason a
+        // person reads; this is the rule that cannot drift.
+        if (trimmed.isNotEmpty() && trimmed == name &&
+            !CreateBranchCommand.isValidBranchName(trimmed)
+        ) {
+            return "git would not accept \"$trimmed\" as a branch name — try letters, digits and dashes."
+        }
         return when {
             trimmed.isEmpty() -> "Give the branch a name."
             trimmed != name -> "A branch name cannot start or end with a space."

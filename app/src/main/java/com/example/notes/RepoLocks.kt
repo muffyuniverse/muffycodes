@@ -70,7 +70,7 @@ object RepoLocks {
      */
     private fun keyOf(dir: File): File = try {
         if (!GitService.isRepository(dir)) return dir
-        GitService.initOrOpen(dir, GitAuthor("", "")).use { it.commonDirectory }
+        GitService.initOrOpen(dir, GitAuthor("", "")).use { it.getCommonDirectory() }
     } catch (t: Throwable) {
         // Opening it is how the common directory is asked for; a folder that will not open is still a
         // folder, and locking the folder itself is the next best answer.

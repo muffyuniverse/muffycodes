@@ -1862,6 +1862,102 @@ than remembered. `activeBranch` is then purely "the branch you entered", the sam
 **The back path is therefore three levels**, and each is one gesture: files → branches → projects →
 accounts.
 
+## 13e. Downloads as a folder in the worktree — the measurements, and the one fact that decides it
+
+**The operator's ask, 2026-11-07:** *"is it possible to display downloads folder as a gitignored folder
+inside a file (worktree) screen? so that there are no upload/download/list tools and just a folder that
+syncs on its own?"* and then *"maybe there is another folder that can be accessed without extra
+permissions? isnt there a single allowed shared folder in android?"*
+
+Both questions are answered by measurement below. **The short answer is yes to the first, and no to the
+second** — and the "no" is what forces the design.
+
+### 13e.1 There is no shared folder that is free in both directions
+
+| folder | app writes with no permission | other apps can write | pickable by `ACTION_OPEN_DOCUMENT_TREE` |
+|---|---|---|---|
+| `/data/data/<pkg>/files/` (where projects are) | **yes** | no | n/a — not shared storage |
+| `Android/data/<pkg>/files/` | yes | **no** | **blocked** |
+| `Download/` (root) | no | yes | **blocked on Android 11+** |
+| `Download/<sub>/` | no | yes | **yes** |
+| `Documents/`, `Pictures/` | no | yes | yes |
+
+**There is no cell that is "yes" in both of the first two columns.** Android 11 put `Download/`'s root
+on the explicitly blocked list for the folder picker, so the one folder everybody knows cannot even be
+granted; a **subfolder** of it can. That is the whole of the "isn't there one allowed folder" answer:
+no, but there is a grantable subfolder.
+
+### 13e.2 Why `trace.log` works, and why that is not evidence
+
+**`trace.log` reaches Downloads because the app writes it**, not because Downloads is shared.
+`DownloadsSink` inserts the `MediaStore` row itself, so it always owns that row — and it collides with a
+real store behaviour doing so: a row inserted as `trace.log` with a text MIME type comes back as
+`trace.log.txt`, because the store appends an extension for what the type says the file is. That is
+recorded in `DownloadsSink.kt:255`.
+
+**For a file another app wrote, the ownership rule reverses.** A plain `MediaStore` query without a
+storage permission returns **only the app's own rows**, and `READ_EXTERNAL_STORAGE` no longer covers
+non-media files on Android 13+. So a `MediaStore`-backed Downloads row would list the app's own traces
+and **silently omit the screenshot the person just saved from Chrome**.
+
+**That silence is the reason this section exists.** A row that says "there is nothing there" about a
+file the person can see with their eyes is exactly the failure this codebase keeps removing — it is a
+no-op that reports success. The first draft of this plan recommended `MediaStore`; asking whether it
+would carry a file *between apps* is what showed the recommendation was wrong.
+
+### 13e.3 The decision: one folder, `Download/Muffy/`, granted once, via SAF
+
+**A `DocumentFile` tree, not a `MediaStore` cursor.** The person picks `Download/Muffy/` once (the root
+is blocked, the subfolder is not), the grant is persisted, and from then on the app holds a real
+`content://` tree that both it and other apps can write.
+
+**It is shared both ways** — owner and other apps — which is what the operator wants, and it is why the
+`MediaStore` gap disappears rather than being documented as a limitation.
+
+**The cost, stated plainly:** SAF yields a `content://` tree, **not a `File`**. JGit, `withinProject`,
+and every path-based tool take `java.io.File`. So a SAF-backed folder needs a copy-in/copy-out layer.
+That layer is **the code `download`/`upload` already are** — so the verbs do not disappear from the
+implementation, only from the agent's view.
+
+### 13e.4 What the agent sees
+
+**A `Downloads` row in the worktree screen, and one named exception in the path rules.**
+
+- The row is **virtual**: it is not in the worktree, so it is not in the repository, so **it is
+  gitignored automatically and free**. No `.gitignore` line is needed, and none should be added — a line
+  for a folder that does not exist would be a rule about nothing.
+- `read`/`ls`/`write` treat the name `Downloads` as a second root. **The exception is by name, not by
+  path**, because a path check is defeated by a symlink and `withinProject` (`AgentTools.kt:1912`)
+  already resolves canonically for exactly that reason.
+- **The three verbs go away**: `downloads`, `download`, `upload` are deleted from the tool set. The
+  agent uses `read`, `write` and `ls` on a folder it already understands, which is the ergonomic win
+  that survives even though the bytes move the same way.
+
+**`withinProject` is not widened.** It keeps answering about the account folder; `Downloads` is a
+separate root checked beside it, so the rule that everything the agent can reach is under one folder
+stays true for the repository side.
+
+### 13e.5 The cross-project consequence, accepted by the operator
+
+**Downloads is a phone folder, not a project folder.** Put it in every worktree and:
+
+- project A's agent can read a file project B's agent left there;
+- two branches show the same folder, including two agents running at once.
+
+**The operator accepted this:** *"Yes — it's my Downloads."* It is their own folder, they can see it
+too, and it is the channel they asked for. It is recorded here because it is a real cross-project
+channel and the next person to read this should not have to rediscover it.
+
+### 13e.6 What is not settled
+
+- **The grant prompt is a new first-run step.** Every other permission this app asks for is either
+  automatic or refused outright; this one is a person choosing a folder. It belongs on the same screen
+  as the account list, and **the app must work with the grant refused** — Downloads absent, not broken.
+- **`MediaStore` is still how the trace log is written**, and that stays: it is the app's own file, and
+  ownership is exactly what makes it work.
+- **A file with no `MediaStore` row** (dropped by a shell, or by an old app) is invisible to a
+  `MediaStore` query but **visible through the SAF tree**, which is a second reason to prefer SAF.
+
 ## 14. What this does not solve
 
 - **CI portability.** §1's missing quarter. `http` makes providers reachable, never interchangeable.
