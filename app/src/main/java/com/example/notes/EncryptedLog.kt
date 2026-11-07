@@ -247,6 +247,52 @@ object EncryptedLog {
     }
 
     /**
+     * Seal [plain] so that [openBytes] can open it — **the exact inverse, and the format is the
+     * workflow's.**
+     *
+     * `openssl enc -aes-256-cbc -pbkdf2 -pass env:KEY -base64` writes: the marker, then the base64
+     * of `Salted__`, a random 8-byte salt, and the AES-CBC ciphertext of the *base64 of the file*.
+     * This writes the same bytes from Kotlin so the app can seal what it produces — which it could
+     * not do before, and which is why "encrypt" had no tool: there was a reader and no writer.
+     *
+     * **The salt is fresh every call.** Reusing one would make two seals of the same file identical,
+     * and a person comparing two artifacts could tell they were the same bytes without opening
+     * either.
+     *
+     * Returns the bytes a file may hold directly; the marker is at the front, which is how
+     * [openBytes] recognises its own work.
+     */
+    fun sealBytes(
+        plain: ByteArray,
+        key: String,
+        random: SecureRandom = SecureRandom(),
+    ): ByteArray {
+        if (key.isBlank()) {
+            throw IllegalArgumentException(
+                "A file cannot be sealed without a key: the key is what makes it readable again.",
+            )
+        }
+        val salt = ByteArray(SALT)
+        random.nextBytes(salt)
+        val material = derive(key, salt)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            SecretKeySpec(material.copyOfRange(0, KEY), "AES"),
+            IvParameterSpec(material.copyOfRange(KEY, KEY + IV)),
+        )
+        // **The inner base64 is not decoration.** The workflow seals the base64 of the file, because
+        // `openssl ... -base64` is what makes the ciphertext one token that survives a log line — and
+        // `openBytes` decodes it after opening. Sealing the raw bytes would produce something this
+        // app's own reader could not open, which is the one thing a writer must never do.
+        val inner = java.util.Base64.getEncoder().encode(plain)
+        val cipherText = cipher.doFinal(inner)
+        val blob = SALTED + salt + cipherText
+        val base64 = java.util.Base64.getEncoder().encode(blob)
+        return MARKER.toByteArray(Charsets.US_ASCII) + base64 + '\n'.code.toByte()
+    }
+
+    /**
      * A fresh 32-byte key, as the text the workflow will hold.
      *
      * Base64 rather than hex or raw bytes, because the value has to survive being put in a secret,

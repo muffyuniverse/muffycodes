@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -176,5 +177,110 @@ class EncryptedLogTest {
         val fresh = EncryptedLog.newKey()
         val text = "AssertionError: expected <locked> but was <unlocked>"
         assertEquals(text, EncryptedLog.read(EncryptedLog.MARKER + seal(text, fresh), fresh))
+    }
+    // ---- sealing, which had no writer until now -----------------------------
+    //
+    // Every test above opens something the *workflow* sealed with `openssl`. The app could only read.
+    // These are the other direction: what the app writes must be what the app (and the workflow) can
+    // open, and the format is openssl's rather than one of our own invention.
+
+    /**
+     * **The round trip, which is the whole contract.** `sealBytes` and `openBytes` are inverses, and
+     * a writer that produces something the reader cannot open is the one failure that would make the
+     * tool useless while every test still passed.
+     */
+    @Test
+    fun `sealing bytes and opening them gives the same bytes back`() {
+        val key = EncryptedLog.newKey()
+        val plain = "AssertionError: expected <locked> but was <unlocked>".toByteArray()
+
+        val sealed = EncryptedLog.sealBytes(plain, key)
+
+        assertArrayEquals(plain, EncryptedLog.openBytes(sealed, key))
+    }
+
+    /**
+     * **A sealed file starts with the marker**, because that is how `openBytes` recognises its own
+     * work. A writer that forgot it would produce bytes the reader passed through unchanged — a
+     * silent no-op that looks like success.
+     */
+    @Test
+    fun `a sealed file is recognisable by its first bytes`() {
+        val sealed = EncryptedLog.sealBytes("hello".toByteArray(), EncryptedLog.newKey())
+        val marker = EncryptedLog.MARKER.toByteArray(Charsets.US_ASCII)
+
+        assertTrue(
+            "the marker is at the front, so openBytes knows this is its own work",
+            sealed.copyOfRange(0, marker.size).contentEquals(marker),
+        )
+    }
+
+    /**
+     * **A fresh salt every time.** Two seals of identical bytes must differ, or a person comparing
+     * two artifacts could tell they hold the same file without opening either — which is a leak the
+     * seal exists to prevent.
+     */
+    @Test
+    fun `sealing the same bytes twice gives different output`() {
+        val key = EncryptedLog.newKey()
+        val plain = "the same sentence".toByteArray()
+
+        val one = EncryptedLog.sealBytes(plain, key)
+        val two = EncryptedLog.sealBytes(plain, key)
+
+        assertFalse(
+            "two seals of one file are different bytes",
+            one.contentEquals(two),
+        )
+        assertArrayEquals("and both open", plain, EncryptedLog.openBytes(one, key))
+        assertArrayEquals("to the same plaintext", plain, EncryptedLog.openBytes(two, key))
+    }
+
+    /**
+     * **A wrong key is refused by name, not silently.** The reader's sentence already distinguishes
+     * this; the test exists so the writer cannot accidentally produce something that opens with any
+     * key — which would mean it was not encrypted.
+     */
+    @Test
+    fun `a sealed file does not open with a different key`() {
+        val sealed = EncryptedLog.sealBytes("secret".toByteArray(), EncryptedLog.newKey())
+
+        val opened = try {
+            EncryptedLog.openBytes(sealed, EncryptedLog.newKey())
+            "it opened, which means it was not encrypted"
+        } catch (e: Throwable) {
+            e.message.orEmpty()
+        }
+
+        assertTrue("it refuses: $opened", opened.contains("does not open it"))
+    }
+
+    /**
+     * **An empty key is refused rather than used.** A file sealed with an empty key is a file
+     * anybody can open, and the refusal has to happen where the mistake is made.
+     */
+    @Test
+    fun `sealing without a key is refused`() {
+        val said = try {
+            EncryptedLog.sealBytes("hello".toByteArray(), "")
+            "it was sealed anyway"
+        } catch (e: Throwable) {
+            e.message.orEmpty()
+        }
+
+        assertTrue("it refuses: $said", said.contains("without a key"))
+    }
+
+    /**
+     * **Binary survives the trip.** The inner base64 is what makes a seal a single token, and a
+     * picture or a zip has bytes that are not valid UTF-8 — so this is the case that proves the
+     * writer is not doing a `String` round trip somewhere.
+     */
+    @Test
+    fun `bytes that are not text survive sealing`() {
+        val key = EncryptedLog.newKey()
+        val plain = ByteArray(512) { (it % 256).toByte() }
+
+        assertArrayEquals(plain, EncryptedLog.openBytes(EncryptedLog.sealBytes(plain, key), key))
     }
 }

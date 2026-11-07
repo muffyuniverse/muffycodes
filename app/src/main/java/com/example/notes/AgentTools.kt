@@ -924,6 +924,11 @@ class AgentTools(
                     "file is there.",
                 "{}",
             ),
+            // **The size in this text is the DEFAULT, not the setting.** This is the companion
+            // object, where an instance property is not in scope — and it has to be a constant
+            // anyway, because the tool description is part of the request's cache prefix, so a
+            // number that varied per account would break the prefix on every change. The real cap is
+            // the person's, and `download` enforces it by reading `fetchLimit()`.
             spec(
                 "download",
                 "Copy one file **out of** the phone's Downloads into this project, at " +
@@ -932,7 +937,8 @@ class AgentTools(
                     "**It never lands on a project file** — `agent/` is outside git, so a download " +
                     "does not commit itself, and it cannot overwrite work by arriving. " +
                     "`name` is a name, not a path: Downloads is one folder. " +
-                    "Refused above ${Fetcher.size(fetchLimit())}, naming the size, because a " +
+                    "Refused above ${Fetcher.size(Fetched.LIMIT_BYTES)} by default, " +
+                    "naming the size, because a " +
                     "video is something a phone's Downloads holds and not something an agent reads.",
                 "{\"name\":\"trace.log.txt\"}",
             ),
@@ -984,7 +990,9 @@ class AgentTools(
                     "with the path named. A status that is not 2xx is not a failure of this tool: " +
                     "the body is the reason, and it is given to you to read. A redirect on " +
                     "anything but a GET is returned rather than followed, because a POST that " +
-                    "became a GET would silently lose its body.",
+                    "became a GET would silently lose its body. " +
+                    "**The size cap is the person's, in Settings**, 100 MB by default; a larger " +
+                    "answer is refused with its size named rather than cut short.",
                 // **Every argument is named here, because the schema is built from this example** -
                 // an argument the runner reads and the schema omits is one the model cannot know
                 // about, which the suite asserts against.
