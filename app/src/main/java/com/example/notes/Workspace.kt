@@ -747,7 +747,41 @@ class Workspace(val accountDir: File) {
         return if (isProjectFolder(dir)) first else null
     }
 
-    /** The path of [file] from the account root, or null when it is not below it. */
+    /**
+     * **Which branch's worktree the browser is looking at** (§13d).
+     *
+     * Ambient, like [accountDir] itself: the workspace *is* "the account currently open", so which of
+     * its branches is open belongs here rather than being threaded through forty call sites. `main` is
+     * the default because a project's root is main's tree — so a workspace with no branch chosen behaves
+     * exactly as it did before branches existed.
+     *
+     * **Only [fileAt] and the functions that build on it read this.** [projectNames] and
+     * [isProjectFolder] deliberately do not: they list *projects*, and a branch is not one.
+     */
+    var activeBranch: String = AgentSession.MAIN
+
+    /** True when [project]'s open branch is not `main`, i.e. its files are somewhere other than its root. */
+    fun onBranch(project: String): Boolean =
+        activeBranch != AgentSession.MAIN && projectAt(listOf(project)) != null
+
+    /** The working tree of [project] on the branch that is open. */
+    fun treeOf(project: String): File =
+        Worktrees(this).dirOf(project, activeBranch)
+
+    /**
+     * The path of [file] from the account root, **or the branch path it stands for**, or null when it is
+     * below neither.
+     *
+     * **The inverse of [fileAt], and it has to exist for the same reason.** A file in a branch's worktree
+     * lives under `.muffy/worktrees/Shopping/feature/…`, and read literally that path names no project —
+     * so `projectOf` would answer null for it, and every rule that asks "is this inside a project?"
+     * would stop applying the moment a person opened a branch. Those rules include the ones that stop an
+     * agent rewriting `.git`, deleting the app's files, or leaving a project: they would go quiet exactly
+     * where a new agent is most likely to be running.
+     *
+     * A worktree path is therefore reported as `Shopping/feature-file.txt`, which is what the screen and
+     * the agent both call it.
+     */
     fun relative(file: File): List<String>? {
         val root = accountDir.canonicalFile.toPath()
         val target = try {
@@ -757,11 +791,52 @@ class Workspace(val accountDir: File) {
         }
         if (!target.startsWith(root)) return null
         val names = root.relativize(target).toString()
-        return if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
+        val parts = if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
+        // **A path inside a branch's worktree is reported as the project path it stands for.** Only the
+        // state folder can hold these, so nothing else is affected.
+        if (parts.size > 3 && parts[0] == STATE_DIR && parts[1] == Worktrees.WORKTREES) {
+            val project = parts[2]
+            val rest = parts.drop(3)
+            // `Shopping/feature/x/…` — the branch may itself have slashes, so the first segment that
+            // is a real branch wins; the branch list is asked rather than guessed.
+            val branch = (rest.size downTo 1).firstNotNullOfOrNull { n ->
+                val candidate = rest.take(n).joinToString("/")
+                candidate.takeIf { Worktrees(this).exists(project, it) }
+            }
+            if (branch != null) {
+                return listOf(project) + rest.drop(branch.count { it == '/' } + 1)
+            }
+            return listOf(project) + rest
+        }
+        return parts
     }
 
     /** The file at a path from the account root. */
-    fun fileAt(path: List<String>): File = path.fold(accountDir) { dir, name -> File(dir, name) }
+    /**
+     * The file a path names — **through the open branch's worktree, when there is one.**
+     *
+     * A path is written from the account root (`Shopping/notes.txt`) because that is what the browser
+     * shows and what the agent is told. On a branch, `Shopping` is not a folder holding the person's
+     * files: the branch's tree is `<account>/.muffy/worktrees/Shopping/<branch>`, and the root holds
+     * `main`. **This one function is where those two agree**, which is why it is the only place that
+     * knows about the redirection — every caller keeps saying `Shopping/notes.txt` and gets the branch's
+     * copy without being told there is a branch at all.
+     *
+     * The first segment is swapped only when it names a project; `system`, the app's own files and the
+     * hidden state are resolved exactly as before.
+     */
+    fun fileAt(path: List<String>): File {
+        val project = path.firstOrNull()
+        if (project != null && activeBranch != AgentSession.MAIN) {
+            val root = File(accountDir, project)
+            if (isProjectFolder(root)) {
+                return path.drop(1).fold(Worktrees(this).dirOf(project, activeBranch)) { dir, name ->
+                    File(dir, name)
+                }
+            }
+        }
+        return path.fold(accountDir) { dir, name -> File(dir, name) }
+    }
 
     /** A path from the account root as one string, as git names it. */
     fun pathString(path: List<String>): String = path.joinToString("/")

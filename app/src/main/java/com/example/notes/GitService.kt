@@ -2069,6 +2069,30 @@ object GitService {
     }
 
     /**
+     * **The branches holding commits `main` does not have** — the ones a row must say so about.
+     *
+     * The same question [deleteBranch] refuses on, asked once for the whole screen, so the caption and
+     * the refusal cannot disagree. **`main` is never in the answer**: it is what the others are compared
+     * to, and a row about main having work main does not have is meaningless.
+     *
+     * A branch whose tip cannot be read is left out rather than guessed at — a caption that says
+     * "merged" for a branch nobody could read is the one wrong answer here.
+     */
+    fun unmergedBranches(repo: Repository): Set<String> = try {
+        val mainTip = repo.resolve("refs/heads/main")
+        if (mainTip == null) {
+            emptySet()
+        } else {
+            localBranches(repo).filter { it != "main" }.filter { name ->
+                val tip = repo.exactRef("refs/heads/$name")?.objectId
+                tip != null && !isAncestor(repo, tip, mainTip)
+            }.toSet()
+        }
+    } catch (e: Throwable) {
+        emptySet()
+    }
+
+    /**
      * Deletes [name] from this phone, **and refuses the two deletions that lose work.**
      *
      * A branch that is not fully merged into `main` is work that exists nowhere else — deleting it

@@ -531,13 +531,12 @@ private fun AppRoot(viewModel: AppViewModel) {
         viewModel.choosingBranchFor != null -> BranchesScreen(
             project = viewModel.choosingBranchFor.orEmpty(),
             branches = viewModel.choosingBranches,
-            onEnter = { branch ->
-                // **Entering a branch opens the project's files.** Until worktrees exist (§13d step
-                // 3) every branch is the same working tree, so the honest thing is to open it and
-                // say which branch you chose — not to pretend there are separate folders yet.
-                viewModel.closeBranches()
-                viewModel.open(listOf(viewModel.choosingBranchFor.orEmpty()))
-            },
+            unmerged = viewModel.choosingUnmerged,
+            // **Entering a branch opens that branch's own worktree**, made on the spot if it is the
+            // first time. `enterBranch` also closes the branch screen, and it does so at the right
+            // moment — after the folder exists and before the listing is refreshed. Doing that here
+            // instead read `choosingBranchFor` *after* clearing it, which opened the account root.
+            onEnter = { branch -> viewModel.enterBranch(branch) },
             onAdd = { tap("add branch"); pending = Pending.NewBranch },
             onRemove = { branch -> tap("remove branch", branch); pending = Pending.RemoveBranch(branch) },
             onBack = { viewModel.closeBranches() },

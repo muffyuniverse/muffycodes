@@ -144,25 +144,46 @@ class WorktreesTest {
 
     @Test
     fun `a branch with a slash in its name gets its own folder and its own id`() {
-        // `feature/x` is a legal git branch name, so the folder nests — and git's own worktree ids are
-        // the last path segment, which would make `feature/x` and `x` share one. Flattened here.
+        // `topic/x` is a legal git branch name, so the folder nests — and git's own worktree ids are the
+        // last path segment, which would make `topic/x` and `x` share one. Flattened here.
+        //
+        // **Not `feature/x`, and the reason is a git rule worth knowing**: `projectWithBranch` already
+        // made `feature`, and git refuses `feature/x` beside it — a directory and a file cannot share a
+        // name in `refs/heads`. That is git's own refusal, passed through as a sentence; the app does not
+        // have to prevent it. This test failed with an exception from `createBranch` before the name was
+        // changed, which is the rule being discovered rather than assumed.
         val dir = projectWithBranch()
         GitService.openExisting(dir)!!.use { repo ->
-            GitService.createBranch(repo, "feature/x").getOrThrow()
+            GitService.createBranch(repo, "topic/x").getOrThrow()
         }
 
-        val tree = trees.make("Shopping", "feature/x").getOrThrow()
+        val tree = trees.make("Shopping", "topic/x").getOrThrow()
 
         assertEquals(
             "a nested folder, named for the whole branch",
-            File(File(workspace.stateDir, Worktrees.WORKTREES), "Shopping/feature/x"),
+            File(File(workspace.stateDir, Worktrees.WORKTREES), "Shopping/topic/x"),
             tree,
         )
-        assertEquals(
-            "and one id per branch",
-            "Shopping-feature-x",
-            trees.idOf("Shopping", "feature/x"),
-        )
+        assertEquals("and one id per branch", "Shopping-topic-x", trees.idOf("Shopping", "topic/x"))
+    }
+
+    @Test
+    fun `a branch cannot be made beside one whose name it extends`() {
+        // **`feature` and `feature/x` cannot both exist**, because `refs/heads/feature` and
+        // `refs/heads/feature/x` need a file and a folder with one name. git refuses it, and the refusal
+        // arrives as a sentence rather than as a crash - which is why the branch screen needs no rule of
+        // its own about slashes.
+        val dir = projectWithBranch()
+
+        GitService.openExisting(dir)!!.use { repo ->
+            val refused = GitService.createBranch(repo, "feature/x")
+
+            assertTrue("it was refused", refused.isFailure)
+            assertTrue(
+                "and said so: ${refused.exceptionOrNull()?.message}",
+                refused.exceptionOrNull()?.message.orEmpty().isNotBlank(),
+            )
+        }
     }
 
     @Test

@@ -5169,6 +5169,7 @@ class AppViewModel @JvmOverloads constructor(
         // **Signing in is an account change too**, so it forgets the branch screen for the same reason
         // `switchTo` does. This line was missing and only a test found it.
         forgetBranches()
+        backToMain()
         path = emptyList()
         if (adopted) {
             // Said once, because a person who had projects before signing in should be told they
@@ -5223,6 +5224,7 @@ class AppViewModel @JvmOverloads constructor(
     fun leaveAccount() {
         Trace.tap("leave account")
         forgetBranches()
+        backToMain()
         path = emptyList()
         editingPath = null
         historyPath = null
@@ -5269,6 +5271,49 @@ class AppViewModel @JvmOverloads constructor(
     fun closeBranches() = forgetBranches()
 
     /**
+     * **Enters [branch] of the project whose branches are on screen** — makes its worktree if it has
+     * none, and shows its files.
+     *
+     * This is the moment §13d stops being a list and becomes a place to work. Three things have to
+     * happen in this order, and the order matters:
+     *
+     * 1. **The worktree is made** (or found), because the folder has to exist before anything resolves a
+     *    path inside it. `main` needs nothing — its tree is the project folder — so choosing `main` is
+     *    the path every screen took before branches existed.
+     * 2. **`activeBranch` is set on the workspace**, which is what makes [Workspace.fileAt] answer the
+     *    branch's copy of a file. Set *before* `path`, because `open` refreshes the listing.
+     * 3. **The branch screen closes and the project's files open** — in that order, because
+     *    `choosingBranchFor` is what the screen draws and `path` is what it lists.
+     *
+     * **A branch that cannot be checked out says so and stays on the branch screen.** Leaving the person
+     * on a file screen that is really still main's would be the worst outcome here: every edit would go
+     * to the wrong branch while the title said otherwise.
+     */
+    fun enterBranch(branch: String) {
+        Trace.tap("enter branch", branch)
+        val project = choosingBranchFor ?: return
+        val ws = workspace ?: return
+        val dir = Worktrees(ws).make(project, branch)
+        val tree = dir.getOrElse { failure ->
+            message = failure.message ?: "That branch could not be opened."
+            return
+        }
+        ws.activeBranch = branch
+        forgetBranches()
+        open(listOf(project))
+        Trace.note("branch-enter", "$project · $branch · $tree")
+    }
+
+    /**
+     * **Which branch the files on screen belong to**, for the title that has to say so.
+     *
+     * Read off the workspace rather than kept here, because the workspace is what resolves the paths:
+     * two copies of this fact would eventually disagree, and the one the screen draws would be the
+     * wrong one.
+     */
+    val activeBranch: String get() = workspace?.activeBranch ?: AgentSession.MAIN
+
+    /**
      * **Drops the branch screen, without a trace line**, because the caller is already leaving.
      *
      * Extracted because **three** paths change which account is in force — `signIn`, `switchTo` and
@@ -5279,6 +5324,18 @@ class AppViewModel @JvmOverloads constructor(
     private fun forgetBranches() {
         choosingBranchFor = null
         choosingBranches = emptyList()
+        choosingUnmerged = emptySet()
+    }
+
+    /**
+     * **Back to `main`, for the paths where the branch a person was in cannot survive.**
+     *
+     * Deliberately *not* part of [forgetBranches]: closing the branch screen while staying in the same
+     * project must not move anybody's files back to `main`. It belongs with the account-changing paths
+     * (`signIn`/`switchTo`/`leaveAccount`), because a branch is a worktree of a project in one account.
+     */
+    private fun backToMain() {
+        workspace?.activeBranch = AgentSession.MAIN
     }
 
     /**
@@ -5293,12 +5350,33 @@ class AppViewModel @JvmOverloads constructor(
     var choosingBranches: List<String> by mutableStateOf(emptyList())
         private set
 
+    /**
+     * **The branches whose work is not on `main`**, so a row can say so before it is entered.
+     *
+     * Read at the same moment as [choosingBranches] and from the same repository, because they answer
+     * one question between them — *what is here, and which of it is not safe to lose* — and a second
+     * read could describe a repository that has moved on.
+     */
+    var choosingUnmerged: Set<String> by mutableStateOf(emptySet())
+        private set
+
     /** Re-reads the branch list. Answers the list, so a caller can report what happened. */
     fun refreshBranches() {
-        val project = choosingBranchFor ?: run { choosingBranches = emptyList(); return }
-        val repo = git?.open(project) ?: run { choosingBranches = emptyList(); return }
-        choosingBranches = try {
-            GitService.localBranches(repo)
+        val project = choosingBranchFor
+        if (project == null) {
+            choosingBranches = emptyList()
+            choosingUnmerged = emptySet()
+            return
+        }
+        val repo = git?.open(project)
+        if (repo == null) {
+            choosingBranches = emptyList()
+            choosingUnmerged = emptySet()
+            return
+        }
+        try {
+            choosingBranches = GitService.localBranches(repo)
+            choosingUnmerged = GitService.unmergedBranches(repo)
         } finally {
             repo.close()
         }
@@ -5361,6 +5439,7 @@ class AppViewModel @JvmOverloads constructor(
         // **The branch belongs to a project in the account you were in**, so switching accounts
         // must not leave the branch screen naming a project that is no longer there.
         forgetBranches()
+        backToMain()
         // One log, not one per account: a switch is a thing that happened in this
         // session, and splitting the stream would lose the line before it.
         Trace.note("switched-account", login)
