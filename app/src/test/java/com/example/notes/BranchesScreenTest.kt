@@ -275,11 +275,13 @@ class BranchesScreenTest {
         // `enterBranch` shows up as "the workspace is on main" and the reason it said is thrown away.
         assertNull("it opened, and said nothing: ${scene.viewModel.message}", scene.viewModel.message)
         assertEquals("the workspace is on the branch", "feature", scene.viewModel.activeBranch)
-        assertEquals(
-            "and the files shown are the project's",
-            "Shopping",
-            scene.viewModel.currentProject,
-        )
+        // **Every fact that decides this, in the message**, because a bare "expected Shopping" says
+        // nothing about which of the four inputs was wrong.
+        val why = "path=${scene.viewModel.path}" +
+            " branch=${scene.viewModel.activeBranch}" +
+            " dir=${scene.viewModel.currentDir}" +
+            " projects=${scene.viewModel.projectNames}"
+        assertEquals("and the files shown are the project's: $why", "Shopping", scene.viewModel.currentProject)
         assertTrue(
             "which live in the branch's own folder: ${scene.viewModel.currentDir}",
             scene.viewModel.currentDir!!.absolutePath.replace('\\', '/')
