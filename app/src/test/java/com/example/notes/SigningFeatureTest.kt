@@ -159,8 +159,10 @@ class SigningFeatureTest : FeatureTest() {
         scene.viewModel.fixSigning("groceries")
         scene.await("the send to finish", 60_000) { !scene.viewModel.busy }
 
+        // **One branch** — see plan §13b.1. The app restricts the signing environment to the branch it
+        // publishes from, and there is only one of those.
         assertEquals(
-            listOf("main", "development"),
+            listOf("main"),
             scene.github.branchesOf(refOf("groceries"), ReleaseKey.ENVIRONMENT),
         )
     }

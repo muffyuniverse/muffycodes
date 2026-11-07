@@ -106,7 +106,11 @@ object EncryptedLog {
         val around = lines.filter { !looksLikeBlob(it) }.joinToString("\n")
 
         val opened = open(blobLine, key)
-        return if (around.isEmpty()) opened else opened + "\n" + around
+        // **A log that cannot be opened is its reason, plus whatever the runner wrote around it.**
+        // The surrounding lines are still worth reading — they are often why the build stopped — so
+        // the reason leads and they follow, rather than the reason replacing them.
+        val text = if (opened.ok) opened.text else opened.reason.orEmpty()
+        return if (around.isEmpty()) text else text + "\n" + around
     }
 
     /** A blob is one long unbroken run of base64; anything with spaces is a sentence. */
@@ -120,31 +124,57 @@ object EncryptedLog {
      * that is actually true — never "could not decrypt", which would leave them to guess whether the
      * key was missing, wrong, or the blob was cut short.
      */
-    private fun open(blobLine: String, key: String?): String {
+    /**
+     * What an attempt to open a blob produced — **the text, or the reason there is none.**
+     *
+     * This is a pair rather than a sentence-as-sentinel because a sentence was being *decoded*.
+     * [openBytes] base64-decodes whatever [open] returns, and `getMimeDecoder` skips every character
+     * outside the base64 alphabet — so "This log is encrypted and this key does not open it" decoded
+     * to a short run of garbage bytes **without an exception**, and a caller holding a wrong key got
+     * a successful-looking answer full of noise. A failure has to say what happened; it must not be
+     * something a later step can mistake for data.
+     */
+    private data class Opened(val text: String = "", val reason: String? = null) {
+        val ok: Boolean get() = reason == null
+    }
+
+    private fun open(blobLine: String, key: String?): Opened {
         if (key.isNullOrBlank()) {
-            return "This log is encrypted, and the app has no key for it. The key is the one that was " +
-                "made when this project's CI was set up; without it the build's output cannot be read."
+            return Opened(
+                reason = "This log is encrypted, and the app has no key for it. The key is the one " +
+                    "that was made when this project's CI was set up; without it the build's output " +
+                    "cannot be read.",
+            )
         }
         if (blobLine.isEmpty()) {
-            return "This log says it is encrypted but carries nothing after the marker. The build " +
-                "most likely stopped before it could write its output."
+            return Opened(
+                reason = "This log says it is encrypted but carries nothing after the marker. The " +
+                    "build most likely stopped before it could write its output.",
+            )
         }
 
         val blob = try {
             java.util.Base64.getMimeDecoder().decode(blobLine)
         } catch (e: IllegalArgumentException) {
-            return "This log is encrypted and the text after the marker is not valid base64, so it " +
-                "was cut short or altered on its way here. " + (e.message ?: "")
+            return Opened(
+                reason = "This log is encrypted and the text after the marker is not valid base64, " +
+                    "so it was cut short or altered on its way here. " + (e.message ?: ""),
+            )
         }
 
         if (blob.size < SALTED.size + SALT + 16) {
-            return "This log is encrypted and only " + blob.size + " bytes arrived, which is too few " +
-                "to hold a salt and a single block. The build stopped part-way through writing it."
+            return Opened(
+                reason = "This log is encrypted and only " + blob.size + " bytes arrived, which is " +
+                    "too few to hold a salt and a single block. The build stopped part-way through " +
+                    "writing it.",
+            )
         }
         if (!blob.copyOfRange(0, SALTED.size).contentEquals(SALTED)) {
-            return "This log is encrypted, but what follows the marker is not the shape openssl " +
-                "writes (it does not begin with its salt marker). It was not produced by the step " +
-                "that this app knows how to read."
+            return Opened(
+                reason = "This log is encrypted, but what follows the marker is not the shape " +
+                    "openssl writes (it does not begin with its salt marker). It was not produced " +
+                    "by the step that this app knows how to read.",
+            )
         }
 
         val salt = blob.copyOfRange(SALTED.size, SALTED.size + SALT)
@@ -158,15 +188,17 @@ object EncryptedLog {
                 SecretKeySpec(material.copyOfRange(0, KEY), "AES"),
                 IvParameterSpec(material.copyOfRange(KEY, KEY + IV)),
             )
-            String(cipher.doFinal(cipherText), Charsets.UTF_8)
+            Opened(String(cipher.doFinal(cipherText), Charsets.UTF_8))
         } catch (e: Throwable) {
             // **A wrong key and a corrupt blob land here together, and that is honest.** Both mean
             // "this text cannot be opened with what I have", and the difference between them is not
             // knowable from the bytes: PKCS#5 padding fails for a wrong key exactly as it fails for a
             // damaged block. Claiming to tell them apart would be a guess dressed as a diagnosis.
-            "This log is encrypted and this key does not open it. The text is unreadable rather " +
-                "than wrong — a key from a different project, or a blob that arrived damaged, both " +
-                "look like this."
+            Opened(
+                reason = "This log is encrypted and this key does not open it. The text is " +
+                    "unreadable rather than wrong — a key from a different project, or a blob that " +
+                    "arrived damaged, both look like this.",
+            )
         }
     }
 
@@ -229,13 +261,17 @@ object EncryptedLog {
                 "This artifact says it is sealed but carries no ciphertext after the marker.",
             )
         val opened = open(blobLine, key)
+        // **A reason is thrown, never decoded.** This is the bug the pair exists to stop: a sentence
+        // put through a mime decoder becomes bytes without an error, so a wrong key used to answer a
+        // pile of noise and call it a file.
+        if (!opened.ok) throw IllegalStateException(opened.reason)
 
         // **`open` answers the plaintext, and the workflow sealed a FILE — so the plaintext is
         // base64 of the file's bytes.** `openssl ... -base64` writes base64, which is what makes the
         // blob one token that survives a log line; the file itself is the base64 decoded. Decoding
         // here rather than in `open` keeps one implementation for both carriers.
         return try {
-            java.util.Base64.getMimeDecoder().decode(opened.trim())
+            java.util.Base64.getMimeDecoder().decode(opened.text.trim())
         } catch (e: IllegalArgumentException) {
             // A log's plaintext is text, not base64, and `openBytes` is never given a log. Reaching
             // here means the bytes after the marker were not what this workflow writes.

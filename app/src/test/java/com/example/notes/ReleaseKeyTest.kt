@@ -222,16 +222,18 @@ class ReleaseKeyTest {
 
     @Test
     fun `the environment is restricted to the branches that build`() {
-        // **The gate that replaces a reviewer.** The agent only touches `development`, so an environment
-        // restricted to `main` and `development` is unreachable by anything the agent can do — no
-        // approval step, no reviewer, and no way for the agent to publish.
+        // **One branch, and the list says so.** There is no agent lane any more (§13b.1), so an
+        // environment restricted to `main` is the whole of the restriction — the gate is not "the agent
+        // cannot reach the branch", it is `ref == 'refs/heads/main'` in the workflow plus whatever
+        // reviewers the person puts on the environment.
         //
-        // `development` is in the list because `build-release` runs there too and signs its APK with the
-        // same key on purpose: a dev build installs over the release one.
+        // **`development` is gone from this list on purpose.** It was there because a second branch ran
+        // `build-release` and signed with the same key; with one branch that reason no longer exists,
+        // and leaving it would be a permission nothing needs.
         key().send(github, "a-key", ref).getOrThrow()
 
         assertEquals(
-            listOf("main", "development"),
+            listOf("main"),
             github.branchesOf(ref, "release"),
         )
     }

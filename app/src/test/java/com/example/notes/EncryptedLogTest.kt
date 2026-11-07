@@ -283,4 +283,40 @@ class EncryptedLogTest {
 
         assertArrayEquals(plain, EncryptedLog.openBytes(EncryptedLog.sealBytes(plain, key), key))
     }
+    /**
+     * **A wrong key must not answer bytes.** This is the defect the [EncryptedLog.Opened] pair exists
+     * to close: `open` used to return its reason as a *string*, `openBytes` then base64-decoded it, and
+     * `getMimeDecoder` silently skips everything outside the alphabet — so a wrong key produced a
+     * short run of noise and no exception, which a caller cannot tell from a file.
+     */
+    @Test
+    fun `a wrong key throws rather than answering decoded noise`() {
+        val sealed = EncryptedLog.sealBytes("the milk went sour".toByteArray(), "the-right-key")
+        val outcome = try {
+            val bytes = EncryptedLog.openBytes(sealed, "the-wrong-key")
+            "it answered ${bytes.size} bytes instead of refusing"
+        } catch (e: Throwable) {
+            e.message.orEmpty()
+        }
+
+        assertTrue("it refuses: $outcome", outcome.contains("does not open it"))
+    }
+
+    /**
+     * **And the refusal says which of the two things happened**, because "no key" and "wrong key" are
+     * different mistakes and only one of them is fixed by finding the key you already have.
+     */
+    @Test
+    fun `a sealed file with no key says the key is missing rather than wrong`() {
+        val sealed = EncryptedLog.sealBytes("anything".toByteArray(), "a-key")
+        val outcome = try {
+            EncryptedLog.openBytes(sealed, null)
+            "it opened without a key"
+        } catch (e: Throwable) {
+            e.message.orEmpty()
+        }
+
+        assertTrue("it names the missing key: $outcome", outcome.contains("has no key"))
+        assertFalse("and does not claim a wrong one: $outcome", outcome.contains("does not open it"))
+    }
 }

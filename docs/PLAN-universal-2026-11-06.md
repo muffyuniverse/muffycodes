@@ -1313,11 +1313,66 @@ in §13b.8.
 **So Settings already does what the operator asked.** The change is not to settings; it is to the
 **project list** and to the **vault's middle scope**.
 
-### 13c.2 The model
+### 13c.2 The model — accounts as folders, revised 2026-11-07
 
-**There is no selected account.** There is a list of added accounts, and a list of projects that spans
-all of them. A project's account is a **property of the project**, decided when it is made and stored
-beside it — not a mode the whole app is in.
+**The operator's refinement:** *"can we in main menu show a list of accounts and then user can simply
+enter or exit folders of different accounts and there see their projects? will it reduce the scope? and
+we can make it so that + button on accounts screen allows adding and removing accounts - so that we dont
+need account block in settings."*
+
+**Yes to all three, and it reduces the scope substantially. This replaces the "one flat list spanning
+all accounts" model below.**
+
+The main menu becomes **a list of accounts**. Entering one shows its projects; leaving it shows the
+accounts again. The `+` on that screen adds and removes accounts. Settings loses its account block.
+
+**Why this is better than the flat list, measured:**
+
+| fact | today | with folders |
+|---|---|---|
+| `AgentRunner` holds **one** `Workspace` (`AgentRunner.kt:24`) | the agent ticks only the active account's sessions | **unchanged — already correct** |
+| `tickAgents` says *"Nobody is signed in, so there is no account whose sessions could be due"* (`AppViewModel.kt:4602`) | one account is running | unchanged |
+| the agent's model key is `modelKeyKey(login)` (`CredentialStore.kt:292`) | per account | unchanged |
+| `activeLogin` (`AppViewModel.kt:151`) | a mode the app is in | **the account you entered** — still one at a time |
+
+**The flat list would have needed the agent to run every account's projects at once.** That means N
+runners, N WebViews (`WebViewBrowser` is bound to one Looper thread for life — the code already says
+two runners is already a compromise), and a question nobody asked: *should a project under an account
+you are not looking at be spending your tokens?* **The folder model keeps "one account active" true, so
+none of that is needed.**
+
+**What the person gains, in their own terms:** they can *enter and exit* accounts to navigate, rather
+than being trapped in whichever one is selected. That is the whole of the requested change, and it is
+navigation, not concurrency.
+
+#### The model, stated
+
+- **The main menu is the account list.** Each row is an account: its login, how many projects it holds,
+  and its state (signed in / provisional).
+- **Entering an account shows its projects** — the existing project screen, unchanged.
+- **Leaving it** (back) returns to the account list.
+- **`activeLogin` becomes "the account you are inside"**, set on enter, cleared on leave. It is
+  *derived from navigation*, never chosen from a picker up front.
+- **`+` on the accounts screen** adds an account (sign-in) and removes one. **Settings loses its account
+  block**, because the accounts screen is now the place accounts live.
+
+#### What this costs — and what it saves
+
+| place | change |
+|---|---|
+| `MainActivity` | one new screen state: `account: String?` null = the list; non-null = that account's projects |
+| `BrowserScreen` | the projects screen takes the account it is showing rather than reading `activeLogin` |
+| `SettingsScreen` | **the account block is deleted** — sign-in, switch and remove move to the accounts screen |
+| `AppViewModel` | `activeLogin` gains `enterAccount(login)` / `leaveAccount()`; the project list stays per-account |
+| `AccountStore` | **no change** — `accounts()` already lists them |
+
+**Saved:** the cross-account `ProjectRef` type, the union scan, the ~102 signatures question, and the
+multi-runner agent. **`Workspace.projectNames()` keeps listing one account's folders**, which is what it
+already does.
+
+**This is strictly less work than the flat list**, and the reason is the agent: one runner, one
+workspace, one active account was already true, and the folder model preserves it instead of fighting
+it.
 
 **Why the account cannot simply be dropped.** A repository is pushed as an identity, and the commit
 author is a person. So each project must remember which account it belongs to:
@@ -1333,7 +1388,27 @@ one is necessary at all.
 account. Today it feeds a picker; it will feed a **screen** — add, remove, see which projects each one
 holds. The accounts themselves, their tokens and their author details do not change.
 
-### 13c.3 The identity key
+### 13c.3 The identity key — dissolved by the folder model
+
+**With accounts as folders, a project never needs to carry its account.** You are inside one account at
+a time, so `Workspace.projectDir(name)` is unambiguous: the workspace you hold *is* that account's. The
+`ProjectRef(account, name)` type, the union scan and the 102-signature question **all disappear**.
+
+**What remains is one rule:** any action that outlives the screen must name its account, because
+`activeLogin` can change while it runs. Measured, that is **fewer places than it sounds**:
+
+| place | why it must name the account |
+|---|---|
+| `tickAgents` / `AgentRunner` | already holds one `Workspace`; **nothing to change** |
+| the agent service | already per-account via the runner |
+| a background job whose result lands after a leave | the `Background` result file is under a project folder, which is already account-relative |
+| account deletion | names its own login already |
+
+**So there is no refactor here at all** — the folder model means the ambiguity the flat list created
+never arises.
+
+<details>
+<summary>The flat-list version of this section, kept because the reasoning is reusable</summary>
 
 **Every project is addressed by `(account, name)`.** The menu shows `account/name` where it matters and
 `name` where it does not.
@@ -1361,6 +1436,8 @@ are called. What changes is **where the menu's list comes from** — a scan acro
 That is one new data type at the edge (`ProjectRef`) and a list that spans accounts, rather than a
 refactor of the whole tree. **The 102 signatures are the thing to avoid touching, and this avoids them.**
 
+</details>
+
 #### What it costs
 
 | place | change |
@@ -1373,48 +1450,65 @@ refactor of the whole tree. **The 102 signatures are the thing to avoid touching
 
 **No migration.** Project folders stay where they are; the account is already the parent folder.
 
-### 13c.4 The vault: three scopes, app / general / project
+### 13c.4 The vault: **four** scopes — app / general / account / project
 
-This **renames and redefines** §13b.8's middle scope. The `app` and `project` scopes are unchanged; the
-middle one stops being per-account and becomes **general**.
+**The operator's refinement:** *"this way we can add account secret scope between general and project,
+this way we dont need to remove account secret scope but just add general scope."*
+
+**Adopted, and it is better than what this section said before.** The earlier draft *replaced* the
+account scope with `general`, which would have thrown away a distinction that costs nothing to keep.
+**`general` is added; `account` stays.**
 
 | scope | key shape | who can read it | why |
 |---|---|---|---|
-| **app** | `token_$login`, `modelKeyKey(login)` | the app only | Still a **separate namespace**, so `http {auth:}` can never reach a token. That guarantee is structural and stays. |
-| **general** | `secret_general_$name` | **every agent, on every project, whatever the account** | A key several projects share. **This is the operator's point**: a shared service key is a fact about the app, not about the account you happened to be signed in to. |
-| **project** | `secret_project_${project}_$name` | agents in **this project only** | A key that belongs to one project |
+| **app** | `token_$login`, `modelKeyKey(login)` | the app only | A **separate namespace**, so `http {auth:}` can never reach a token. Structural, and it stays. |
+| **general** | `secret_general_$name` | **every agent, every project, every account** | A key shared across accounts — a service the whole app talks to |
+| **account** | `secret_${login}_$name` | every agent under **this account** | A key that belongs to one person's GitHub identity, shared by their projects but not by someone else's |
+| **project** | `secret_${login}_project_${project}_$name` | agents in **this project only** | A key that belongs to one project |
 
-**The login leaves the secret key.** Today's `secret_${login}_$name` made the same service key
-invisible from a project under another account — which is exactly the problem the operator is naming.
-A general secret is general.
+**The four are genuinely different questions**, and each is a real case:
 
-**Project scope is keyed by project name alone**, not `account/project`. Two accounts may hold projects
-of the same name; their secrets are then the same scope. That is a real ambiguity and it is accepted
-deliberately: **a secret is a blast-radius control, not a secrecy control** (§13b.8's own closing
-sentence), and adding the account to the key would mean renaming every existing key for a distinction
-that only matters in the one case where two same-named projects both use the same secret name for
-different values. If that case ever appears, the fix is a fourth scope, not a re-keying.
+- *general* — the same `stripe` key for every project the app has, whichever account made them
+- *account* — a client's key that belongs to one GitHub identity; a second account must not see it
+- *project* — one project's token, which should not be readable from a sibling
 
-#### Resolution order
+**Keeping `account` costs nothing** because §13b.8's key shape is already built and shipped this session.
+The only new key shape is `secret_general_$name`.
 
-`http {auth: "x"}` asks **project first, then general**:
+**The project key keeps its `project` marker and its login**, exactly as built — so `secret_${login}_x`
+(account) and `secret_${login}_project_${project}_x` (project) cannot collide, which was the reason the
+literal `project` segment exists.
 
-1. `secret_project_${project}_x`
-2. `secret_general_x`
-3. neither → the refusal names **both** places it looked
+#### Resolution order — narrowest first
 
-**A project secret shadows a general one of the same name**, unchanged from §13b.8: a project needing a
-different key for the same service says so without renaming.
+`http {auth: "x"}` asks **project → account → general**:
 
-#### Migration, and it is free
+1. `secret_${login}_project_${project}_x` — this project, this account
+2. `secret_${login}_x` — this account
+3. `secret_general_x` — everything
+4. none → the refusal names **all three** places it looked, so a person knows which scope to add it to
 
-**No general or project secrets exist yet.** §13b.8 landed `secret_${login}_project_${project}_$name`
-this session and nothing has been stored under it. The key shapes change now, before anything is in
-them.
+**Narrowest wins, and each step is a deliberate shadow**: a project that needs a different key for the
+same service says so without renaming; an account that needs a different key from the general one says
+so without touching every project.
 
-**Old account-scoped secrets** — if a build has any `secret_${login}_$name` — are **not** migrated
-automatically. They are read once at startup, offered in the window as "found under the old scope,
-keep it as general?" and then removed. That is a person's decision, because the scope *is* the decision.
+**Why not project-then-general, skipping account?** Because then an account-scoped secret could never
+override a general one, and a person with two accounts would have no way to say "this account's key, not
+the shared one" — the case the operator is preserving by keeping the scope.
+
+**A note on the `account` scope that the folder model makes sharper:** with accounts as folders, the
+account scope is exactly "the secrets of the account you are inside" — which is a coherent thing to show
+on that account's screen.
+
+#### Migration: **there is none**, and that is now literally true
+
+**No secret of any scope exists yet.** The project scope landed this session (`c36b68c`) and nothing
+has been stored under it; the general scope is new. **The account scope is unchanged** — same key shape,
+same meaning — so keeping it is what makes this section empty.
+
+The only work is **adding** `secret_general_$name` and a fourth row in the window. There is nothing to
+re-key, nothing to offer a person at startup, and no "found under the old scope" prompt — which the
+earlier draft needed only because it was renaming a scope that had no reason to be renamed.
 
 ### 13c.5 The order, revised
 
@@ -1423,15 +1517,86 @@ means writing keys that 13c then renames.
 
 | # | Step | Why here |
 |---|---|---|
-| 1 | Vault: `general`/`project` key shapes, resolution order, migration prompt | Nothing else reads secrets yet; the shapes are cheapest to settle now |
-| 2 | The project list spans accounts; `ProjectRef` at the menu; `activeLogin` set by opening a project | The visible change; independent of the agent |
-| 3 | Add-project asks which account; deletion names the account | Follows from 2 |
-| 4 | Settings: **verify it is already app-wide** and say so in the window | Measured above; it may need only a sentence, not code |
-| 5 | The accounts screen: add, remove, see each one's projects | The picker's replacement; largest UI change, goes last |
+| 1 | Vault: add the `general` scope, four-scope resolution order | Pure addition; the three existing scopes are untouched |
+| 2 | **The accounts screen**: the main menu becomes the account list, `+` adds and removes, entering shows that account's projects | The visible change, and it is navigation only |
+| 3 | **Delete the account block from Settings** | Follows from 2 — it is the block 2 replaces |
+| 4 | `activeLogin` becomes "the account you entered": `enterAccount` / `leaveAccount` | The mechanism under 2; small and testable on its own |
+| 5 | The secrets window gains its fourth scope row and selector | Last, because it shows all four and the screens above decide which is default |
 
-**The agent is untouched by 13c**, which is the point of choosing A+C: `AgentTools` keeps taking the
-project it is in, and the account is already right by then.
+**The agent is untouched by 13c**, which is the point: `AgentRunner` already holds one `Workspace`, and
+the folder model keeps that true. Nothing about `AgentTools`, `Agent`, `AgentWiring` or the 102
+`project: String` signatures changes.
 
+**What the earlier draft would have cost, for the record:** a `ProjectRef` type at the menu edge, a scan
+across every account on every refresh, and — the expensive part — **the agent needing to run every
+account's projects at once**, which means N runners and N WebViews. The folder model asks none of that.
+
+
+### 13c.6 Several projects' agents at once — measured, and it is already safe
+
+**The operator's question:** *"will it be problematic to keep agents from several projects working at
+the same time?"*
+
+**No, and it is what happens today.** Measured, in `AgentRunner.kt`:
+
+| fact | where | what it means |
+|---|---|---|
+| **one `Workspace`** | `AgentRunner.kt:24` | a runner is one account's — this is why accounts-as-folders costs nothing |
+| **`tick()` loops every session** | `AgentRunner.kt` `for (session in sessions.read())` | several projects **are** woken in one tick |
+| **`worker = newSingleThreadExecutor()`** | `AgentRunner.kt:158` | …and they run **one at a time**, in order |
+| **`inFlight` is a set of agent ids** | `AgentRunner.kt:171` | per-agent, not global — the design already allows more than one |
+| **`RepoLocks`** | `RepoLocks.kt` | git writes are serialised **per repository**, shared by the editor, the sync and every agent |
+
+So the answer has three parts, and only one of them is a real constraint:
+
+#### 1. It is already happening, within an account
+
+`tick()` iterates every session in the account and wakes each one that is due. The thing that stops
+three simultaneous requests is **not** a limit of one project — it is `newSingleThreadExecutor()`.
+
+#### 2. Serial is a decision, and the comment already states the trade
+
+`AgentRunner.kt:140` — *"serial is easier to manage, predictable and simple"* — with the two costs that
+would otherwise be paid:
+
+- **Three projects due is three requests in flight**, and a ping's whole point is buying warmth cheaply.
+  Three at once is three times the bill for the same warmth, and a phone doing three simultaneous
+  completions gets hot.
+- **Concurrency needs a queue policy that can be explained**: what happens when four are due, which goes
+  first, whether a person's turn may jump a ping. Serial answers all of that by not asking it.
+
+The cost is honest: **a ping on a slow model makes the next project wait.**
+
+#### 3. What is *not* serialised, and why that matters here
+
+- a **`background` call** gets its own thread (`Background.real`)
+- a **turn from the screen** does not run on the runner's worker at all
+- **git writes** are serialised per repository, not globally — so two projects committing at once do
+  not wait on each other, and two agents in one project cannot corrupt an index
+
+**So "several projects at once" is already the design.** The folder model does not add a project to the
+set — it adds a *second account's* projects, and that is the only genuinely new thing.
+
+#### The one real question the folder model raises
+
+**Should a project under an account you are not inside be spending your tokens?**
+
+With accounts as folders, `AgentRunner` holds one `Workspace`, so only the account you entered is
+ticked. That is not a limitation to work around — **it is the right default**, and it is the reason the
+folder model is cheaper than the flat list:
+
+| model | agents running | cost |
+|---|---|---|
+| **flat list** (superseded) | every account's, all the time | N runners, N WebViews (`WebViewBrowser` is bound to one Looper thread for life — the code already calls two runners a compromise), and a bill for projects nobody is looking at |
+| **accounts as folders** (adopted) | the account you entered | **one runner, exactly as today** |
+
+**If cross-account concurrency is ever wanted**, the honest way is explicit: a per-account switch, or a
+"run in background" mark on a project — not an accident of the menu showing everything. **Nothing in the
+current design forecloses it**, because `inFlight` is already keyed per agent and `RepoLocks` per
+repository; what would need deciding is the bill and the queue policy, and that is a person's decision,
+not a menu's.
+
+**Answer: no problem, nothing to build, and the folder model keeps it that way.**
 
 ## 14. What this does not solve
 

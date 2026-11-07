@@ -410,7 +410,10 @@ class ArchiveTest {
     @Test
     fun `opening with the wrong key is refused and says so`() {
         write("notes.txt", "the milk went sour")
-        call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}""")
+        // **Sealed with one key, opened with another** — and the first call must actually run. It was
+        // written without `tools().run(...)` here, so nothing was sealed and the "wrong key" was being
+        // tried against a plain file.
+        tools().run(call("""{"path":"notes.txt","seal":true,"key":"${EncryptedLog.newKey()}"}"""))
 
         val said = tools().run(call("""{"path":"notes.txt.enc","seal":false,"key":"${EncryptedLog.newKey()}"}"""))
         assertTrue("it is refused: ${said}", said.startsWith(AgentLog.FAILURE))
