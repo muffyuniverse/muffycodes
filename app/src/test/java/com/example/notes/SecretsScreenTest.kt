@@ -203,4 +203,62 @@ class SecretsScreenTest {
         assertTrue(secretProblem("n", "v", "https://x/y")!!.contains("scheme"))
         assertNull("and a good one passes", secretProblem("n", "v", "api.github.com"))
     }
+    // ---- scope: which projects can read this value --------------------------
+
+    /**
+     * **The cycle, and the wrap.** Tapping must reach every scope and come back, because a selector
+     * that gets stuck is one a person works around by deleting and re-adding the secret.
+     */
+    @Test
+    fun `the scope selector cycles through all projects and back`() {
+        val projects = listOf("acme", "shop")
+
+        // null -> acme -> shop -> null. Each step asserted, because a cycle that skips a scope is
+        // the failure a person would work around by deleting and re-adding the secret.
+        assertEquals("all projects -> the first project", "acme", nextScope(null, projects))
+        assertEquals("acme -> shop", "shop", nextScope("acme", projects))
+        assertEquals("shop wraps back to all projects", null, nextScope("shop", projects))
+    }
+
+    /**
+     * **A project that vanished does not crash the dialog.** The scope is a project name, and a
+     * project can be deleted from another screen while this dialog is open; the answer must be a
+     * valid scope rather than an exception or a scope that no longer exists.
+     */
+    @Test
+    fun `a scope naming a project that no longer exists starts over`() {
+        assertEquals(null, nextScope("gone", listOf("acme")))
+        assertEquals(null, nextScope("gone", emptyList()))
+    }
+
+    /** The two labels, because "all projects" and a project's name are the whole answer. */
+    @Test
+    fun `a scope reads as all projects or as the one project`() {
+        assertEquals("all projects", scopeLabel(null))
+        assertEquals("only acme", scopeLabel("acme"))
+    }
+
+    /**
+     * **A project-scoped secret says so on its row.** The scope decides who can read the value, so it
+     * belongs beside the host rather than behind a tap — a scope nobody can see is a scope nobody
+     * checks.
+     */
+    @Test
+    fun `a project-scoped secret shows its scope on the row`() {
+        scene.viewModel.saveSecret("acme-api", "tok_1", "api.acme.test", "acme")
+        screen()
+
+        compose.onNodeWithText("acme-api").assertIsDisplayed()
+        compose.onNodeWithText("only acme", substring = true).assertIsDisplayed()
+    }
+
+    /** And an account-wide one says that instead, so the two are never confused. */
+    @Test
+    fun `an account-wide secret says all projects`() {
+        scene.viewModel.saveSecret("stripe", "tok_1", "api.stripe.com")
+        screen()
+
+        compose.onNodeWithText("all projects", substring = true).assertIsDisplayed()
+    }
+
 }

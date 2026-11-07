@@ -91,8 +91,31 @@ interface Credentials {
      */
     fun secret(name: String, host: String): String? = null
 
+    /**
+     * [name]'s secret for [project], falling back to the account-wide one.
+     *
+     * **Project first, then account.** A project that needs a different key for the same service can
+     * say so without renaming anything, and a key several projects share is written once.
+     */
+    fun secret(project: String?, name: String, host: String): String? = secret(name, host)
+
     /** Keeps [value] as [name]'s secret for the active account, usable **only** at [host]. */
     fun setSecret(name: String, value: String, host: String) {}
+
+    /** Keeps [value] for [project] only when [project] is not null; otherwise account-wide. */
+    fun setSecret(project: String?, name: String, value: String, host: String) =
+        setSecret(name, value, host)
+
+    /**
+     * Forgets every secret scoped to [project], answering how many went.
+     *
+     * **Called when a project is deleted**, before its folder is. A secret whose project no longer
+     * exists is a row nothing can ever read, and leaving it would be a leak nobody can see.
+     */
+    fun forgetProjectSecrets(project: String): Int = 0
+
+    /** The project a secret is scoped to, or null when it is account-wide. */
+    fun secretProject(name: String): String? = null
 
     /**
      * The names of this account's secrets, **never their values**, so a person (and the agent) can see what
@@ -327,6 +350,63 @@ class CredentialStore(context: Context) : Credentials {
         prefs.edit().putString(secretKey(login, name), packed).apply()
     }
 
+    override fun secret(project: String?, name: String, host: String): String? {
+        val login = activeLogin ?: return null
+        // **Project first, then account.** The order is the whole feature: a project that needs a
+        // different key for the same service says so by storing one, and nothing else changes.
+        if (project != null) {
+            val scoped = prefs.getString(projectSecretKey(login, project, name), null)
+            if (scoped != null) return openedAt(scoped, host)
+        }
+        val account = prefs.getString(secretKey(login, name), null) ?: return null
+        return openedAt(account, host)
+    }
+
+    override fun setSecret(project: String?, name: String, value: String, host: String) {
+        val login = activeLogin ?: return
+        val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
+        val key = if (project == null) secretKey(login, name) else projectSecretKey(login, project, name)
+        prefs.edit().putString(key, packed).apply()
+    }
+
+    override fun forgetProjectSecrets(project: String): Int {
+        val login = activeLogin ?: return 0
+        val prefix = projectSecretPrefix(login, project)
+        val doomed = prefs.all.keys.filter { it.startsWith(prefix) }
+        if (doomed.isEmpty()) return 0
+        val edit = prefs.edit()
+        for (key in doomed) edit.remove(key)
+        edit.apply()
+        return doomed.size
+    }
+
+    override fun secretProject(name: String): String? {
+        val login = activeLogin ?: return null
+        // Read off the key rather than stored beside the value: the key is the scope, and a second
+        // copy of it could disagree with the one the lookup uses.
+        val prefix = "secret_${login}_project_"
+        val suffix = "_${java.net.URLEncoder.encode(name, "UTF-8")}"
+        val hit = prefs.all.keys.firstOrNull { it.startsWith(prefix) && it.endsWith(suffix) }
+            ?: return null
+        val middle = hit.removePrefix(prefix).removeSuffix(suffix)
+        return try {
+            java.net.URLDecoder.decode(middle, "UTF-8")
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** One secret, unpacked: the host is checked, the value is decrypted. */
+    private fun openedAt(packed: String, host: String): String? {
+        val (allowed, encrypted) = splitHost(packed) ?: return null
+        if (!hostMatches(host, allowed)) return null
+        return try {
+            decrypt(encrypted)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /**
      * The names, sorted, read straight from the keys.
      *
@@ -337,8 +417,12 @@ class CredentialStore(context: Context) : Credentials {
     override fun secretNames(): List<String> {
         val login = activeLogin ?: return emptyList()
         val prefix = "secret_${login}_"
+        // **Project-scoped keys are excluded**, because they share this prefix. `secret_dev_project_x`
+        // would otherwise be listed as a secret called `project_x` — a name nothing stored and no
+        // article names, so it could never be used and would look like a broken row.
+        val projectMarker = "secret_${login}_project_"
         return prefs.all.keys
-            .filter { it.startsWith(prefix) }
+            .filter { it.startsWith(prefix) && !it.startsWith(projectMarker) }
             .mapNotNull { key ->
                 try {
                     java.net.URLDecoder.decode(key.removePrefix(prefix), "UTF-8")
@@ -377,6 +461,24 @@ class CredentialStore(context: Context) : Credentials {
      */
     private fun secretKey(login: String, name: String): String =
         "secret_${login}_${java.net.URLEncoder.encode(name, "UTF-8")}"
+
+    /**
+     * A prefs key per (account, project, name).
+     *
+     * **The literal word `project` is in the key, and it is load-bearing.** Account keys are
+     * `secret_${login}_<name>`, so a project *called* `project` would otherwise make
+     * `secret_dev_project_x` mean two different things depending on who wrote it. The marker makes
+     * the two shapes unambiguous, and [secretNames]' own prefix still excludes these, so a
+     * project-scoped secret never appears as an account one.
+     *
+     * Both the project and the name are percent-encoded, because a project called `a_b` and one
+     * called `a/b` would otherwise be one key.
+     */
+    private fun projectSecretKey(login: String, project: String, name: String): String =
+        projectSecretPrefix(login, project) + java.net.URLEncoder.encode(name, "UTF-8")
+
+    private fun projectSecretPrefix(login: String, project: String): String =
+        "secret_${login}_project_${java.net.URLEncoder.encode(project, "UTF-8")}_"
 
     /**
      * Splits a stored secret into the host it is bound to and the ciphertext.

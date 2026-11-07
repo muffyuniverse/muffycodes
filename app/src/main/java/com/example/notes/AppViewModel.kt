@@ -1512,15 +1512,35 @@ class AppViewModel @JvmOverloads constructor(
      *
      * @return null when the secret is kept, or the sentence to show when it is not.
      */
-    fun saveSecret(name: String, value: String, host: String): String? {
+    /**
+     * The project a secret is scoped to, or null when it is account-wide.
+     *
+     * **On the row, not behind a tap.** Which projects can read a value is the fact a person needs in
+     * order to answer "why can this project see that token", and a scope that is only visible after
+     * opening an editor is a scope nobody checks.
+     */
+    fun secretProject(name: String): String? = credentials.secretProject(name)
+
+    /**
+     * Every project, for the scope selector.
+     *
+     * **The system project is excluded**: it holds the account's own settings and cannot be deleted,
+     * so a secret scoped to it would be a secret nobody can ever remove by deleting its project.
+     */
+    fun scopeProjects(): List<String> = projectNames.filterNot { Workspace.isSystem(it) }.sorted()
+
+    fun saveSecret(name: String, value: String, host: String, project: String? = null): String? {
         val login = activeLogin
             ?: return "There is no account signed in on this phone, so there is nobody to keep a secret for."
         val problem = secretProblem(name, value, host)
         if (problem != null) return problem
         val trimmedHost = Secrets.hostOf(host).ifEmpty { host.trim().lowercase() }
-        credentials.setSecret(name.trim(), value, trimmedHost)
-        return if (credentials.secret(name.trim(), trimmedHost) != null) {
-            Trace.note("secret-kept", "$name for $trimmedHost")
+        credentials.setSecret(project, name.trim(), value, trimmedHost)
+        return if (credentials.secret(project, name.trim(), trimmedHost) != null) {
+            Trace.note(
+                "secret-kept",
+                "$name for $trimmedHost" + (project?.let { " (project $it)" } ?: " (all projects)"),
+            )
             Trace.said("The secret $name is kept for $trimmedHost")
             secretSaved++
             null
@@ -3766,6 +3786,12 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Deletes a project. [everywhere] also deletes the repository on GitHub;
      * without it only this phone's copy goes and the add button brings it back.
+     *
+     * **[everywhere] no longer deletes the repository**, because `delete_repo` is gone from the
+     * token's required scopes — it was the one irreversible capability in the set, and the app does
+     * not need it. What it does instead is *say* that the remote is still there, because a person
+     * who chose "everywhere" and found a repository still on GitHub would think the delete had
+     * failed.
      */
     fun deleteProject(project: String, everywhere: Boolean) {
         val ws = workspace ?: return
@@ -3777,24 +3803,24 @@ class AppViewModel @JvmOverloads constructor(
             message = "\"$project\" is where this account's settings live, so it stays"
             return
         }
-        val api = github
-        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
-        val login = activeLogin
         busy = true
         onWorker {
-            var note = ""
-            if (everywhere && api != null && login != null) {
-                val deleted = api.deleteRepo(token, login, project)
-                // A repository already gone is not a failure: the local side goes.
-                // Asked by status, not by whether the message happens to contain
-                // "404" — see GitHubResult.isGone.
-                if (deleted.error != null && !deleted.isGone) note = deleted.error
-            }
+            // **The project's own secrets go with it**, before the folder does. A secret whose
+            // project no longer exists is a row nothing can ever read, and leaving it would be a
+            // leak nobody can see. Account-scope secrets are untouched — they were never this
+            // project's.
+            //
+            // Ordered secrets-first because the reverse leaves a window where the folder is gone and
+            // the secrets are not, and nothing then knows which project they belonged to.
+            val forgotten = credentials.forgetProjectSecrets(project)
             ws.delete(ws.projectDir(project))
             main.post {
                 busy = false
-                message = note.ifBlank {
-                    if (everywhere) "Deleted $project everywhere" else "Deleted $project from this phone"
+                message = if (everywhere) {
+                    "Deleted $project from this phone, and ${forgotten} of its secret(s). " +
+                        "Its repository is still on GitHub - delete it there if you want it gone."
+                } else {
+                    "Deleted $project from this phone, and ${forgotten} of its secret(s)."
                 }
                 if (currentProject == project) path = emptyList()
                 // **The row must be gone before the sentence about it is read.** The delete window

@@ -4043,16 +4043,24 @@ class AgentTools(
             if (credentials == null) {
                 return refusal("This app has no store for secrets, so \"$authName\" cannot be looked up.")
             }
-            val value = credentials.secret(authName, host)
+            // **This project's secret first, then the account's.** A project that needs a
+            // different key for the same service stores one, and nothing else changes.
+            val value = credentials.secret(project, authName, host)
                 ?: return refusal(
-                    if (credentials.secretNames().contains(authName)) {
+                    if (credentials.secretNames().contains(authName) ||
+                        credentials.secretProject(authName) != null
+                    ) {
                         // **The host is the reason, and it is named.** The secret exists and is simply not
                         // for this host, which is a very different fact from "there is no such secret" —
                         // and saying "401" instead would send the model to retry the same thing.
+                        // **The scope is named too**, because "stored for another host" and "stored
+                        // for another project" are different facts and only one of them is fixed by
+                        // editing a host. A person reading this needs to know which row to open.
                         "The secret \"$authName\" is not for $host. It is stored for " +
-                            "${credentials.secretHost(authName).orEmpty().ifEmpty { "this phone only" }}, " +
-                            "and the app will not send it anywhere else. Add a secret for $host if one is " +
-                            "needed."
+                            "${credentials.secretHost(authName).orEmpty().ifEmpty { "this phone only" }}" +
+                            (credentials.secretProject(authName)?.let { " (project \"$it\")" }.orEmpty()) +
+                            ", and the app will not send it anywhere else. Add a secret for $host if " +
+                            "one is needed."
                     } else {
                         "There is no secret called \"$authName\" on this phone. Its names are: " +
                             credentials.secretNames()

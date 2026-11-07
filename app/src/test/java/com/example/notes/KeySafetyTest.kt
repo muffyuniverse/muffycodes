@@ -457,4 +457,114 @@ class KeySafetyTest {
         )
     }
 
+    // ---- a secret belongs to a project, or to every project ----------------
+
+    /**
+     * **The feature, stated as the thing it must not do.** A secret stored for one project must not
+     * be readable from another, because that is the whole reason the scope exists: project A's agent
+     * should not be able to read project B's key.
+     */
+    @Test
+    fun `a project's secret is not handed to another project`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("acme", "acme-api", "tok_1", "api.acme.test")
+
+        assertNull(
+            "another project gets nothing",
+            credentials.secret("other", "acme-api", "api.acme.test"),
+        )
+        assertEquals(
+            "and the project it was stored for gets it",
+            "tok_1",
+            credentials.secret("acme", "acme-api", "api.acme.test"),
+        )
+    }
+
+    /**
+     * **Project first, then account.** A project that needs a different key for the same service
+     * stores one and shadows the shared one — that is the point of the order, and a lookup that tried
+     * the account first would make the project scope unusable for exactly the case it exists for.
+     */
+    @Test
+    fun `a project's secret shadows the account one of the same name`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("stripe", "tok_shared", "api.stripe.com")
+        credentials.setSecret("acme", "stripe", "tok_acme", "api.stripe.com")
+
+        assertEquals(
+            "the project's own key wins",
+            "tok_acme",
+            credentials.secret("acme", "stripe", "api.stripe.com"),
+        )
+        assertEquals(
+            "and another project still sees the shared one",
+            "tok_shared",
+            credentials.secret("other", "stripe", "api.stripe.com"),
+        )
+        assertEquals(
+            "as does the account scope itself",
+            "tok_shared",
+            credentials.secret(null, "stripe", "api.stripe.com"),
+        )
+    }
+
+    /**
+     * **The host rule applies to a project secret too.** Two independent checks that must both pass:
+     * a secret stored for `api.acme.test` must not travel to `evil.example` merely because it is
+     * scoped to the right project.
+     */
+    @Test
+    fun `a project's secret is still refused for a host it was not stored for`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("acme", "acme-api", "tok_1", "api.acme.test")
+
+        assertNull(
+            "the project matches and the host does not",
+            credentials.secret("acme", "acme-api", "evil.example"),
+        )
+    }
+
+    /**
+     * **Deleting a project takes its secrets with it**, and leaves the account's alone. A secret
+     * whose project no longer exists is a row nothing can ever read.
+     */
+    @Test
+    fun `forgetting a project's secrets removes exactly those, and counts them`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("acme", "one", "a", "api.acme.test")
+        credentials.setSecret("acme", "two", "b", "api.acme.test")
+        credentials.setSecret("other", "three", "c", "api.acme.test")
+        credentials.setSecret("shared", "d", "api.stripe.com")
+
+        assertEquals("two went", 2, credentials.forgetProjectSecrets("acme"))
+        assertNull("and they are gone", credentials.secret("acme", "one", "api.acme.test"))
+        assertEquals(
+            "another project's secret survives",
+            "c",
+            credentials.secret("other", "three", "api.acme.test"),
+        )
+        assertEquals(
+            "and so does the account-wide one",
+            "d",
+            credentials.secret(null, "shared", "api.stripe.com"),
+        )
+    }
+
+    /**
+     * **A project called `project` must not be readable as an account secret.** The pref key shapes
+     * are `secret_<login>_<name>` and `secret_<login>_project_<project>_<name>`, so without the
+     * literal marker those two could collide. This test is the reason the marker is there.
+     */
+    @Test
+    fun `a project-scoped secret never appears as an account secret`() {
+        val credentials = MemoryCredentials().apply { activeLogin = "someone" }
+        credentials.setSecret("acme", "acme-api", "tok_1", "api.acme.test")
+
+        assertFalse(
+            "the account list does not show it: ${credentials.secretNames()}",
+            credentials.secretNames().contains("acme-api"),
+        )
+        assertEquals("but the scope is answerable", "acme", credentials.secretProject("acme-api"))
+    }
+
 }

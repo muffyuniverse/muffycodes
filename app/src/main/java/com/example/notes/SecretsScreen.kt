@@ -40,6 +40,11 @@ import androidx.compose.ui.unit.dp
  * **The host is asked for, because a secret is not usable without one.** The vault binds each value
  * to a host and refuses any other, so the host is part of what the secret *is* rather than a setting
  * beside it. Asking for it here is the only way that rule is true of every secret.
+ *
+ * **One vault, three scopes.** The app's own keys (the GitHub token, the model key) live in a
+ * separate namespace that `auth:` cannot name at all. Everything here is either **all projects** or
+ * **one project**, and the row says which — because "why can this project see that token" is a
+ * question a person has to be able to answer by looking.
  */
 @Composable
 fun SecretsScreen(
@@ -50,6 +55,10 @@ fun SecretsScreen(
     var names by remember { mutableStateOf(viewModel.secretNames()) }
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<String?>(null) }
+    // **The projects a secret may be scoped to**, which is also the list the selector offers. Read
+    // once: a project cannot be made from inside this screen, so the list cannot go stale while it
+    // is open.
+    val projects = remember { viewModel.scopeProjects() }
 
     Column(modifier = Modifier.padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -84,8 +93,12 @@ fun SecretsScreen(
                         // **The host is shown, because it is the half of the rule a person has to
                         // be able to check.** A secret whose host was mistyped looks identical in
                         // every other respect, and would refuse the request it was made for.
+                        // **The scope, beside the host.** "all projects" and a project's name are
+                        // the two answers, and which one it is decides who can read the value — so
+                        // it belongs on the row, not behind a tap.
                         Text(
-                            viewModel.secretHost(name).orEmpty().ifEmpty { "used by this phone only" },
+                            viewModel.secretHost(name).orEmpty().ifEmpty { "used by this phone only" } +
+                                " · " + scopeLabel(viewModel.secretProject(name)),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -101,9 +114,10 @@ fun SecretsScreen(
 
     if (adding) {
         AddSecretDialog(
+            projects = projects,
             onDismiss = { adding = false },
-            onSave = { name, value, host ->
-                viewModel.saveSecret(name, value, host)
+            onSave = { name, value, host, project ->
+                viewModel.saveSecret(name, value, host, project)
                 names = viewModel.secretNames()
                 adding = false
             },
@@ -149,12 +163,16 @@ fun SecretsScreen(
  */
 @Composable
 fun AddSecretDialog(
+    /** Every project, for the scope selector. Empty when there are none yet. */
+    projects: List<String> = emptyList(),
     onDismiss: () -> Unit,
-    onSave: (name: String, value: String, host: String) -> Unit,
+    onSave: (name: String, value: String, host: String, project: String?) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var host by remember { mutableStateOf("") }
+    // **Null is "all projects"**, which is the wider scope and therefore the one that needs saying.
+    var project by remember { mutableStateOf<String?>(null) }
     val problem = secretProblem(name, value, host)
 
     AlertDialog(
@@ -200,6 +218,20 @@ fun AddSecretDialog(
                         Text("Where it may be used, like api.github.com. Nowhere else, ever.")
                     },
                 )
+                // **The scope, as a button rather than a dropdown.** A dropdown inside an
+                // AlertDialog is a second popup over the first, which is both fiddly to drive and
+                // awkward to read; a button that cycles through "all projects" and each project is
+                // one line, always visible, and says its current answer.
+                if (projects.isNotEmpty()) {
+                    TextButton(
+                        onClick = { project = nextScope(project, projects) },
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) {
+                        Text(
+                            "Scope: " + scopeLabel(project) + " (tap to change)",
+                        )
+                    }
+                }
                 if (problem != null) {
                     Text(
                         problem,
@@ -213,12 +245,32 @@ fun AddSecretDialog(
         confirmButton = {
             TextButton(
                 enabled = problem == null,
-                onClick = { onSave(name.trim(), value, host.trim()) },
+                onClick = { onSave(name.trim(), value, host.trim(), project) },
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/**
+ * The scope after [current] when the selector is tapped.
+ *
+ * **`null` is "all projects" and comes first**, so the cycle is: all projects → each project in turn
+ * → back to all projects. A separate function rather than a lambda because it is the one part of the
+ * dialog that can be wrong in a way a person would not notice until they had saved a secret to the
+ * wrong scope.
+ */
+fun nextScope(current: String?, projects: List<String>): String? {
+    val order = listOf<String?>(null) + projects
+    val at = order.indexOf(current)
+    // An unknown current value (a project deleted while the dialog was open) starts from the
+    // beginning rather than crashing or silently keeping a scope that no longer exists.
+    return order[((at + 1).takeIf { at >= 0 } ?: 0) % order.size]
+}
+
+/** How a scope reads on a row: the fact, not the null. */
+fun scopeLabel(project: String?): String =
+    project?.let { "only $it" } ?: "all projects"
 
 /**
  * Why this secret cannot be saved yet, or null when it can.

@@ -95,6 +95,54 @@ open class MemoryCredentials : Credentials {
         secrets.remove(name)
         secretHosts.remove(name)
     }
+
+    /**
+     * Project-scoped secrets, keyed `project/name`.
+     *
+     * **A separate map, not a prefix in [secrets]** — the real store keeps them under a different pref
+     * key and [secretNames] excludes them, so a fake that merged the two would pass a test the phone
+     * fails.
+     */
+    private val projectSecrets = LinkedHashMap<String, String>()
+    private val projectHosts = LinkedHashMap<String, String>()
+
+    override fun secret(project: String?, name: String, host: String): String? {
+        if (project != null) {
+            val key = "$project/$name"
+            val allowed = projectHosts[key]
+            if (allowed != null && hostMatches(allowed, host)) return projectSecrets[key]
+        }
+        return secret(name, host)
+    }
+
+    override fun setSecret(project: String?, name: String, value: String, host: String) {
+        if (project == null) {
+            setSecret(name, value, host)
+            return
+        }
+        projectSecrets["$project/$name"] = value
+        projectHosts["$project/$name"] = host
+    }
+
+    override fun forgetProjectSecrets(project: String): Int {
+        val doomed = projectSecrets.keys.filter { it.startsWith("$project/") }
+        for (key in doomed) {
+            projectSecrets.remove(key)
+            projectHosts.remove(key)
+        }
+        return doomed.size
+    }
+
+    override fun secretProject(name: String): String? =
+        projectSecrets.keys.firstOrNull { it.endsWith("/$name") }?.substringBeforeLast('/')
+
+    /** The same rule the real store applies, so a test cannot pass where the phone would leak. */
+    private fun hostMatches(allowed: String, asked: String): Boolean {
+        val a = asked.trim().lowercase()
+        val s = allowed.trim().lowercase()
+        if (s.isEmpty() || a.isEmpty()) return a == s
+        return a == s || a.endsWith(".$s")
+    }
 }
 
 /**
