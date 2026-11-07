@@ -932,6 +932,7 @@ class ProjectGitTest {
      */
     @Test
     fun `a new project has main and only main`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
 
         val repo = git.open("Shopping")!!
@@ -948,6 +949,7 @@ class ProjectGitTest {
      */
     @Test
     fun `a branch is made from main and appears in the list`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
         val repo = git.open("Shopping")!!
 
@@ -966,6 +968,7 @@ class ProjectGitTest {
     /** Making the same branch twice is refused, because the second one would be a silent no-op. */
     @Test
     fun `a branch that already exists is refused`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
         val repo = git.open("Shopping")!!
         GitService.createBranch(repo, "feature").getOrThrow()
@@ -985,6 +988,7 @@ class ProjectGitTest {
      */
     @Test
     fun `main cannot be deleted`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
         val repo = git.open("Shopping")!!
 
@@ -1000,29 +1004,29 @@ class ProjectGitTest {
      */
     @Test
     fun `a branch with unmerged work cannot be deleted`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
         val repo = git.open("Shopping")!!
         GitService.createBranch(repo, "feature").getOrThrow()
 
-        // Commit on the branch, so it is ahead of main.
+        // **A real commit on the branch, so it is genuinely ahead of main.** Written with JGit's own
+        // plumbing rather than by touching the working tree: what is being tested is the branch's
+        // reachability from main, which is a property of the commit graph and nothing else.
         val head = repo.resolve("refs/heads/feature")!!
-        repo.updateRef("refs/heads/feature").apply {
-            val tree = org.eclipse.jgit.lib.ObjectId.fromString(
-                repo.resolve("refs/heads/main^{tree}").toString(),
-            )
-            val builder = org.eclipse.jgit.lib.CommitBuilder().apply {
-                setTreeId(tree)
-                setAuthor(author.let { org.eclipse.jgit.lib.PersonIdent(it.name, it.email) })
-                setCommitter(author.let { org.eclipse.jgit.lib.PersonIdent(it.name, it.email) })
-                setMessage("only on feature")
-                setParentId(head)
-            }
-            val inserter = repo.newObjectInserter()
-            val id = inserter.insert(builder)
-            inserter.flush()
-            inserter.close()
-            setNewObjectId(id)
-        }.update()
+        val tree = repo.resolve("refs/heads/main^{tree}")!!
+        val builder = org.eclipse.jgit.lib.CommitBuilder().apply {
+            setTreeId(tree)
+            val who = author.ident()
+            setAuthor(who)
+            setCommitter(who)
+            setMessage("only on feature")
+            setParentId(head)
+        }
+        val inserter = repo.newObjectInserter()
+        val id = inserter.insert(builder)
+        inserter.flush()
+        inserter.close()
+        repo.updateRef("refs/heads/feature").apply { newObjectId = id }.update()
 
         val refused = GitService.deleteBranch(repo, "feature")
         assertTrue("refused: $refused", refused.isFailure)
@@ -1037,6 +1041,7 @@ class ProjectGitTest {
     /** And a branch with nothing of its own goes quietly, because nothing is lost. */
     @Test
     fun `a branch with no work of its own is deleted`() {
+        val git = gitFor()
         git.init("Shopping").getOrThrow()
         val repo = git.open("Shopping")!!
         GitService.createBranch(repo, "scratch").getOrThrow()
