@@ -1029,7 +1029,10 @@ class ProjectGitTest {
         val id = inserter.insert(builder)
         inserter.flush()
         inserter.close()
-        repo.updateRef("refs/heads/feature").apply { newObjectId = id }.update()
+        // **`setNewObjectId`, not `newObjectId =`** — the property is a read-only val on RefUpdate;
+        // the setter is the method, and assigning to the property is a compile error that names the
+        // reassignment rather than the missing setter.
+        repo.updateRef("refs/heads/feature").apply { setNewObjectId(id) }.update()
 
         val refused = GitService.deleteBranch(repo, "feature")
         assertTrue("refused: $refused", refused.isFailure)
