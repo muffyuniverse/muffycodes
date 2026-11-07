@@ -2561,6 +2561,96 @@ class AgentTest {
         assertEquals("the middle line is gone", "circle red\nstar gold", shapes.readText())
     }
 
+    // ---- an agent is worktree-scoped (§13d) ---------------------------------
+
+    /**
+     * A project with one commit on `main` and a `feature` branch made from it, plus the worktree.
+     *
+     * Written here rather than shared because the point is the *fixture*: the two trees hold different
+     * text under the same name, so a read that answers the wrong one is visible as a wrong value and
+     * not as a missing file.
+     */
+    private fun branchWithWorktree(): File {
+        // A second commit on main, so both trees have a file whose text differs per branch.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
+        git.commit("shopping", "main's text")
+        GitService.openExisting(ws.repoOf("shopping"))!!.use { repo ->
+            GitService.createBranch(repo, "feature").getOrThrow()
+        }
+        val worktrees = Worktrees(ws)
+        val tree = worktrees.make("shopping", "feature").getOrThrow()
+        File(tree, "milk.txt").writeText("three litres")
+        return tree
+    }
+
+    @Test
+    fun `a write on a branch lands in the branch's tree and leaves main alone`() {
+        // **The bug this exists for, stated as the two halves that can go wrong.** An agent on
+        // `feature` used to write main's files while the screen said `feature` — so the assertion is
+        // not "the file exists" (it did) but *which* file exists.
+        val tree = branchWithWorktree()
+        val onFeature = AgentTools(ws, "shopping", git, log, branch = "feature")
+
+        val body = onFeature.run(Call("c1", "write", """{"path":"notes.txt","text":"from feature"}"""))
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals(
+            "the branch's tree has it",
+            "from feature",
+            File(tree, "notes.txt").readText(),
+        )
+        assertFalse(
+            "and main's tree does not",
+            File(ws.repoOf("shopping"), "notes.txt").exists(),
+        )
+    }
+
+    @Test
+    fun `a read on a branch answers the branch's text, not main's`() {
+        // **The other direction, and the one a person notices as "the agent is lying".** Both trees
+        // hold `milk.txt`; the answer has to be the one in the tree the agent is standing in.
+        branchWithWorktree()
+        val onFeature = AgentTools(ws, "shopping", git, log, branch = "feature")
+
+        val body = onFeature.run(Call("c1", "read", """{"path":"milk.txt"}"""))
+
+        assertTrue("it read: $body", body.contains("three litres"))
+        assertFalse("not main's copy", body.contains("two litres"))
+    }
+
+    @Test
+    fun `a commit on a branch moves that branch and leaves main's history where it was`() {
+        // **The half that would have looked like success.** A commit made from the branch's tree that
+        // opens the project's root commits main's index — which has nothing staged, so it reports
+        // "nothing to do" or, worse, records the wrong tree under a message that sounds right.
+        val tree = branchWithWorktree()
+        val onFeature = ProjectGit(ws, { null }, { author }).onBranch("feature")
+        File(tree, "notes.txt").writeText("from feature\n")
+
+        val outcome = onFeature.commitOutcome("shopping", "a branch commit")
+
+        assertTrue("the commit was written: ${outcome.error}", outcome.ok)
+        // **The branches' tips, compared by commit id** — which is the fact, rather than a message
+        // read back through another API. `feature` moved; `main` did not.
+        GitService.openExisting(ws.repoOf("shopping"))!!.use { repo ->
+            val main = repo.resolve("refs/heads/main")
+            val feature = repo.resolve("refs/heads/feature")
+            assertEquals(
+                "main's tip still says what it said",
+                "main's text",
+                GitService.commitInfo(repo, main.name)?.message?.trim(),
+            )
+            assertEquals(
+                "and the branch's tip says the new thing",
+                "a branch commit",
+                GitService.commitInfo(repo, feature.name)?.message?.trim(),
+            )
+        }
+        // **The file is not in main's tree at all**, which is the difference between a branch and a
+        // second commit on the same branch.
+        assertFalse(File(ws.repoOf("shopping"), "notes.txt").exists())
+    }
+
     // ---- telling the screens that the folder changed -------------------------
 
     @Test

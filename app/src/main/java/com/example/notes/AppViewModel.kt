@@ -578,7 +578,7 @@ class AppViewModel @JvmOverloads constructor(
      * queue that has been told where the account is, so there is no arrangement in which a commit
      * asks a queue that was never configured. Calling it repeatedly is free.
      */
-    private fun indexer(ws: Workspace): (String, String) -> Unit {
+    private fun indexer(ws: Workspace): (String, String, String) -> Unit {
         IndexQueue.configure(
             ws = ws,
             // **Built here rather than in the constructor**, because the key is read from
@@ -4112,7 +4112,6 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The open conversation as a session is keyed: `project/branch`. */
     val openChatKey: String get() = AgentSession.keyOf(chatProject.orEmpty(), chatBranch)
-        private set
 
     /**
      * **What has happened to the open project's context**, for the settings block.
