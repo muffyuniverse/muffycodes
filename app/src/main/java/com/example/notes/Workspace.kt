@@ -915,6 +915,50 @@ class Workspace(val accountDir: File) {
      * the agent both call it.
      */
     fun relative(file: File): List<String>? {
+        val parts = partsOf(file) ?: return null
+        // **A path inside a branch's worktree is reported as the project path it stands for.** Only the
+        // state folder can hold these, so nothing else is affected.
+        if (parts.size > 3 && parts[0] == STATE_DIR && parts[1] == Worktrees.WORKTREES) {
+            val project = parts[2]
+            val rest = parts.drop(3)
+            // **The same branch reading [branchOf] does**, because the two must agree: a path that
+            // `branchOf` calls `feature/x` and `relative` calls `feature` is a file that commits in one
+            // tree and is shown as another's.
+            val branch = branchOf(file)
+            if (branch != AgentSession.MAIN) {
+                return listOf(project) + rest.drop(branch.count { it == '/' } + 1)
+            }
+            return listOf(project) + rest
+        }
+        return parts
+    }
+
+    /**
+     * **Which branch [file] belongs to** — `main` for anything in the account except a worktree.
+     *
+     * The same reading [relative] does, exposed because a commit needs it: a save is committed by the
+     * tree the file is in, and a file in `.muffy/worktrees/Shopping/feature/x` is `feature`'s. Without
+     * this the editor saved a branch file and committed **main's** tree, which has nothing staged — so
+     * the save reported success and the history recorded nothing at all.
+     *
+     * A worktree path is matched against the branches that exist, longest first, because a branch name
+     * may itself contain a slash: `feature/x` is a branch, not a branch called `feature`.
+     */
+    fun branchOf(file: File): String {
+        val parts = partsOf(file) ?: return AgentSession.MAIN
+        if (parts.size <= 3 || parts[0] != STATE_DIR || parts[1] != Worktrees.WORKTREES) {
+            return AgentSession.MAIN
+        }
+        val project = parts[2]
+        val rest = parts.drop(3)
+        return (rest.size downTo 1).firstNotNullOfOrNull { n ->
+            val candidate = rest.take(n).joinToString("/")
+            candidate.takeIf { Worktrees(this).exists(project, it) }
+        } ?: AgentSession.MAIN
+    }
+
+    /** The account-relative segments of [file], or null when it is outside the account. */
+    private fun partsOf(file: File): List<String>? {
         val root = accountDir.canonicalFile.toPath()
         val target = try {
             file.canonicalFile.toPath()
@@ -923,24 +967,7 @@ class Workspace(val accountDir: File) {
         }
         if (!target.startsWith(root)) return null
         val names = root.relativize(target).toString()
-        val parts = if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
-        // **A path inside a branch's worktree is reported as the project path it stands for.** Only the
-        // state folder can hold these, so nothing else is affected.
-        if (parts.size > 3 && parts[0] == STATE_DIR && parts[1] == Worktrees.WORKTREES) {
-            val project = parts[2]
-            val rest = parts.drop(3)
-            // `Shopping/feature/x/…` — the branch may itself have slashes, so the first segment that
-            // is a real branch wins; the branch list is asked rather than guessed.
-            val branch = (rest.size downTo 1).firstNotNullOfOrNull { n ->
-                val candidate = rest.take(n).joinToString("/")
-                candidate.takeIf { Worktrees(this).exists(project, it) }
-            }
-            if (branch != null) {
-                return listOf(project) + rest.drop(branch.count { it == '/' } + 1)
-            }
-            return listOf(project) + rest
-        }
-        return parts
+        return if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
     }
 
     /** The file at a path from the account root. */

@@ -48,7 +48,7 @@ class IndexQueueTest {
     private lateinit var git: ProjectGit
 
     /** What the commit hook asked for, which is the fact the hook is responsible for. */
-    private val asked = mutableListOf<Pair<String, String>>()
+    private val asked = mutableListOf<Triple<String, String, String>>()
 
     @Before
     fun setUp() {
@@ -61,7 +61,9 @@ class IndexQueueTest {
             ws,
             { null },
             { GitAuthor("Muffy", "muffy@example.com") },
-            index = { project, why -> asked += project to why },
+            // **(project, branch, why)** — the branch is part of the ask (§13d), because each worktree
+            // has its own index and coalescing by project would leave one branch's index stale.
+            index = { project, branch, why -> asked += Triple(project, branch, why) },
         )
         git.init("shopping")
     }
@@ -83,7 +85,8 @@ class IndexQueueTest {
 
         assertEquals("one ask", 1, asked.size)
         assertEquals("for this project", "shopping", asked.single().first)
-        assertTrue("and it says what prompted it: ${asked.single().second}", "saved" in asked.single().second)
+        assertEquals("on main's tree, because that is where the commit happened", "main", asked.single().second)
+        assertTrue("and it says what prompted it: ${asked.single().third}", "saved" in asked.single().third)
     }
 
     @Test
@@ -120,8 +123,8 @@ class IndexQueueTest {
         assertEquals("one ask", 1, asked.size)
         assertEquals("for the project that arrived", "arriving", asked.single().first)
         assertTrue(
-            "and it says the project arrived: ${asked.single().second}",
-            "added" in asked.single().second,
+            "and it says the project arrived: ${asked.single().third}",
+            "added" in asked.single().third,
         )
     }
 

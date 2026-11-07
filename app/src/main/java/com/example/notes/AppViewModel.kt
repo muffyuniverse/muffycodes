@@ -2697,7 +2697,24 @@ class AppViewModel @JvmOverloads constructor(
     private fun commitProjectOf(file: File, what: String) {
         val ws = workspace ?: return
         if (!ws.inWorktree(file)) return
-        commitProject(ws.projectOf(file) ?: return, what)
+        commitProject(ws.projectOf(file) ?: return, what, ws.branchOf(file))
+    }
+
+    /**
+     * **The repository as the file's own tree sees it.**
+     *
+     * A save is committed by the tree the file is in. `git` is main's view, so a file written in
+     * `feature`'s worktree was saved, then a commit was attempted against main's index — which held
+     * nothing from this edit — and the app reported a successful save with no version behind it. That
+     * is the one promise the app makes, broken quietly.
+     *
+     * The branch is read from the **file**, not from [activeBranch], because the two can disagree: the
+     * person can leave a branch and act on a file that is still inside it.
+     */
+    private fun gitFor(file: File): ProjectGit? {
+        val g = git ?: return null
+        val ws = workspace ?: return g
+        return g.onBranch(ws.branchOf(file))
     }
 
     /**
@@ -2706,11 +2723,15 @@ class AppViewModel @JvmOverloads constructor(
      * Used for a change that spans two repositories — a move across the boundary —
      * where the file that changed is no longer in one of them.
      */
-    private fun commitProject(project: String, what: String) {
+    private fun commitProject(
+        project: String,
+        what: String,
+        branch: String = AgentSession.MAIN,
+    ) {
         val g = git ?: return
         val login = activeLogin
         onWorker {
-            if (login != null && accounts.exists(login)) g.commit(project, what)
+            if (login != null && accounts.exists(login)) g.onBranch(branch).commit(project, what)
             // The row's count was read *before* this commit, so it still says the
             // change is waiting after it has been recorded. Ask again, now that the
             // answer has changed.
@@ -3147,7 +3168,9 @@ class AppViewModel @JvmOverloads constructor(
             // this app's design is about.
             var refused: String? = null
             if (login != null && accounts.exists(login)) {
-                val outcome = project?.let { g?.commitOutcome(it, CommitMessage.SAVE) }
+                // **The tree the file was written into**, not the project's root — see [gitFor].
+                val here = g?.onBranch(ws.branchOf(file))
+                val outcome = project?.let { here?.commitOutcome(it, CommitMessage.SAVE) }
                 if (outcome != null && !outcome.ok) refused = outcome.error
             }
             // **The save answers itself here, and not after the hop to the screen.** A save
@@ -3212,7 +3235,9 @@ class AppViewModel @JvmOverloads constructor(
                     // A photograph that existed only on the phone would be the one kind of work this
                     // app does not record.
                     val project = ws.projectOf(file)
-                    project?.let { git?.commitOutcome(it, "Photographed ${file.name}") }
+                    project?.let {
+                        git?.onBranch(ws.branchOf(file))?.commitOutcome(it, "Photographed ${file.name}")
+                    }
                     Trace.answered(
                         tap,
                         "Photographed ${file.name} as $name " +
@@ -3297,7 +3322,13 @@ class AppViewModel @JvmOverloads constructor(
             }
             var refused: String? = null
             if (login != null && accounts.exists(login)) {
-                val outcome = project?.let { g?.commitOutcome(it, CommitMessage.SAVE) }
+                // **The picture's own tree**, for the same reason as a text save: a picture written in
+                // a branch's worktree must be committed there, or the save has no version behind it.
+                // Asked of `into` — the file that was just written — and not of the source it came from,
+                // which may be a picture in another folder.
+                val outcome = project?.let {
+                    g?.onBranch(ws.branchOf(into))?.commitOutcome(it, CommitMessage.SAVE)
+                }
                 if (outcome != null && !outcome.ok) refused = outcome.error
             }
             val answer = if (refused != null) {
