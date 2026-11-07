@@ -268,8 +268,12 @@ class BranchesScreenTest {
         scene.viewModel.newBranch("feature")
         scene.viewModel.openBranches("Shopping")
 
+        scene.viewModel.message = null
         scene.viewModel.enterBranch("feature")
 
+        // **Asked first, so a refusal is read rather than guessed at.** Without this, a failed
+        // `enterBranch` shows up as "the workspace is on main" and the reason it said is thrown away.
+        assertNull("it opened, and said nothing: ${scene.viewModel.message}", scene.viewModel.message)
         assertEquals("the workspace is on the branch", "feature", scene.viewModel.activeBranch)
         assertEquals(
             "and the files shown are the project's",
@@ -295,7 +299,9 @@ class BranchesScreenTest {
         scene.viewModel.openBranches("Shopping")
         scene.viewModel.newBranch("feature")
         scene.viewModel.openBranches("Shopping")
+        scene.viewModel.message = null
         scene.viewModel.enterBranch("feature")
+        assertNull("it opened, and said nothing: ${scene.viewModel.message}", scene.viewModel.message)
         val onBranch = scene.file("notes.txt", "the branch's copy")
 
         assertNotEquals("two different files", onMain.absolutePath, onBranch.absolutePath)

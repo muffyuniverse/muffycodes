@@ -483,15 +483,15 @@ class AgentRunner(
      * What the two share is the session write, and it is here so the notification cannot invent a
      * second meaning for "the person stopped it".
      */
-    fun stop(project: String) {
-        val session = sessionOf(project) ?: return
+    fun stop(project: String, branch: String = AgentSession.MAIN) {
+        val session = sessionOf(project, branch) ?: return
         Trace.tap("stop agent", project)
         // **Through [put], not `sessions.put`.** This line wrote the session directly, which made
         // "every stop goes through one place" false: the reset lived in [put] and this door walked
         // past it. The operator's rule is every trigger, so every write of a stopped session has to
         // be the same write.
         put(session.stopped(AgentSession.StopReason.BY_OPERATOR))
-        Trace.note("agent-state", "$project · stopped by you")
+        Trace.note("agent-state", "${AgentSession.keyOf(project, branch)} · stopped by you")
         changed(sessions.read())
     }
 
@@ -586,8 +586,15 @@ class AgentRunner(
     }
 
     /** The session of [project] as the file has it, or null. */
-    private fun sessionOf(project: String): AgentSession? =
-        sessions.read().firstOrNull { it.project == project }
+    /**
+     * One worktree's session.
+     *
+     * **The branch is matched, not assumed.** It used to be "the first session for this project", which
+     * was exactly right with one agent per project and is a coin toss with two: `main` sorts first, so
+     * stopping `feature` would have stopped main's agent and left feature's running.
+     */
+    private fun sessionOf(project: String, branch: String = AgentSession.MAIN): AgentSession? =
+        sessions.read().firstOrNull { it.project == project && it.branch == branch }
 
     /** Stops the runner's worker. Nothing else holds a thread, and closing twice is not an error. */
     fun close() {

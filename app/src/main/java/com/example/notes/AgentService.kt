@@ -125,8 +125,12 @@ class AgentService : Service() {
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val project = intent?.getStringExtra(EXTRA_PROJECT)
+        // **The branch comes with the project**, because two branches of one project are two agents
+        // (§13d). Without it, "Stop this session" on `feature` would stop `main`'s agent — the one
+        // thing a person pressing Stop would not expect.
+        val branch = intent?.getStringExtra(EXTRA_BRANCH) ?: AgentSession.MAIN
         if (intent?.action == ACTION_STOP && !project.isNullOrBlank()) {
-            runner?.stop(project)
+            runner?.stop(project, branch)
         }
         return START_STICKY
     }
@@ -174,7 +178,7 @@ class AgentService : Service() {
         val text = session.notice() ?: return
         val manager = getSystemService(NotificationManager::class.java) ?: return
         manager.notify(
-            idFor(session.project),
+            idFor(session),
             Notification.Builder(this, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle("The agent needs you")
@@ -186,23 +190,31 @@ class AgentService : Service() {
                     Notification.Action.Builder(
                         null,
                         "Stop this session",
-                        stop(session.project),
+                        stop(session),
                     ).build(),
                 )
                 .build(),
         )
     }
 
-    /** The id a project's notification lives at: stable, so a reminder replaces its own. */
-    private fun idFor(project: String): Int = ASKED_ID + (project.hashCode() and 0x7FFF)
+    /**
+     * The id a worktree's notification lives at: stable, so a reminder replaces its own.
+     *
+     * **Keyed by the session key, not the project**, because two branches of one project have two
+     * agents and therefore two notifications. Keyed by project alone, `feature`'s notice would replace
+     * main's — and the person would be told about one agent while looking at the other.
+     */
+    private fun idFor(session: AgentSession): Int =
+        ASKED_ID + (AgentSession.keyOf(session.project, session.branch).hashCode() and 0x7FFF)
 
-    /** What **Stop this session** sends: the project, to the one door that stops a session. */
-    private fun stop(project: String): PendingIntent = PendingIntent.getService(
+    /** What **Stop this session** sends: the worktree, to the one door that stops a session. */
+    private fun stop(session: AgentSession): PendingIntent = PendingIntent.getService(
         this,
-        project.hashCode(),
+        AgentSession.keyOf(session.project, session.branch).hashCode(),
         Intent(this, AgentService::class.java)
             .setAction(ACTION_STOP)
-            .putExtra(EXTRA_PROJECT, project),
+            .putExtra(EXTRA_PROJECT, session.project)
+            .putExtra(EXTRA_BRANCH, session.branch),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -238,6 +250,9 @@ class AgentService : Service() {
         /** What **Stop this session** sends, and the project it names. */
         const val ACTION_STOP = "com.example.notes.agent.STOP"
         const val EXTRA_PROJECT = "project"
+
+        /** Which branch's agent, because two branches of one project are two agents (§13d). */
+        const val EXTRA_BRANCH = "branch"
 
         /** True while an instance of this service is alive in this process. */
         @Volatile
