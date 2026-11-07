@@ -4537,8 +4537,17 @@ class AppViewModel @JvmOverloads constructor(
     private var serviceWanted: Boolean? = null
 
     /** The session of [project], or null when the agent is not running there. */
-    fun sessionOf(project: String): AgentSession? =
-        agentSessions.firstOrNull { it.project == project }
+    /**
+     * The session for [project] on [branch], and **the branch is named rather than assumed.**
+     *
+     * It used to be `firstOrNull { it.project == project }`, which was exactly right while a project
+     * had one agent. With worktree-scoped agents (§13d) a project has one per branch, so "the first
+     * session for this project" would answer whichever happened to be written first — `main` sorting
+     * before `feature` — and the screen for `feature` would draw main's state. A default of `main`
+     * keeps every caller that predates branches honest rather than lucky.
+     */
+    fun sessionOf(project: String, branch: String = AgentSession.MAIN): AgentSession? =
+        agentSessions.firstOrNull { it.project == project && it.branch == branch }
 
     /**
      * The session as it stands **on disk**, which is not always what the screen has.
@@ -4548,8 +4557,11 @@ class AppViewModel @JvmOverloads constructor(
      * just watched finish has to read the store, or it reads the moment before the answer arrived.
      * [sessionOf] stays for the screen, which wants exactly the snapshot it drew.
      */
-    fun readSession(project: String): AgentSession? = workspace
-        ?.let { AgentSessions(it.accountDir).read().firstOrNull { s -> s.project == project } }
+    fun readSession(project: String, branch: String = AgentSession.MAIN): AgentSession? = workspace
+        ?.let { account ->
+            AgentSessions(account.accountDir).read()
+                .firstOrNull { s -> s.project == project && s.branch == branch }
+        }
 
     /**
      * Switches the agent on for [project], with nothing said yet.

@@ -194,4 +194,99 @@ class AgentSessionsTest {
 
         assertNull("a running session has no reason", store.read().single().reason)
     }
+
+    // ---- two branches are two agents (§13d) --------------------------------
+
+    @Test
+    fun `two branches of one project are two sessions, and neither overwrites the other`() {
+        // **The whole point of the keying change.** Before this, `agents.json` was keyed by project, so
+        // starting an agent on `feature` would have replaced main's session — and main's agent would
+        // have disappeared with no message. The second write is the one that used to win.
+        store.put(AgentSession("Shopping", state = AgentSession.State.RUNNING))
+        store.put(AgentSession("Shopping", branch = "feature", state = AgentSession.State.IDLE))
+
+        val read = store.read()
+
+        assertEquals("two rows", 2, read.size)
+        assertEquals("main first, because it sorts first", "main", read[0].branch)
+        assertEquals("then the branch", "feature", read[1].branch)
+        assertEquals(
+            "and main's state survived the second write",
+            AgentSession.State.RUNNING,
+            read[0].state,
+        )
+    }
+
+    @Test
+    fun `removing one branch leaves the other branch and the project alone`() {
+        // **The two silent mistakes this signature prevents**: forgetting main when feature was meant
+        // leaves an agent running, and forgetting the whole project kills an agent nobody asked about.
+        store.put(AgentSession("Shopping"))
+        store.put(AgentSession("Shopping", branch = "feature"))
+
+        store.remove("Shopping", "feature")
+
+        val read = store.read()
+        assertEquals("one row left", 1, read.size)
+        assertEquals("and it is main", "main", read[0].branch)
+    }
+
+    @Test
+    fun `a file written before branches existed loads as a session on main`() {
+        // **No migration, and that is a claim worth a test.** Every phone that has run this app has an
+        // `agents.json` keyed by bare project name. If those keys stopped matching, every running agent
+        // would vanish on upgrade - and it would look like the app had crashed, not like a format change.
+        file.parentFile?.mkdirs()
+        file.writeText(
+            """{"Shopping":{"state":"RUNNING","sub":"WAITING","retries":0}}""",
+        )
+
+        val read = store.read()
+
+        assertEquals("it is main's session", 1, read.size)
+        assertEquals("the project", "Shopping", read[0].project)
+        assertEquals("and the branch is main", "main", read[0].branch)
+        assertEquals("with its state intact", AgentSession.State.RUNNING, read[0].state)
+    }
+
+    @Test
+    fun `a legacy key and a branch key live side by side in one file`() {
+        // The upgrade moment itself: an old row is still there while a new branch row appears.
+        file.parentFile?.mkdirs()
+        file.writeText("""{"Shopping":{"state":"RUNNING"}}""")
+        store.put(AgentSession("Shopping", branch = "feature"))
+
+        val read = store.read()
+
+        assertEquals("both rows", 2, read.size)
+        assertTrue(
+            "main and feature, not two of one: ${read.map { it.project to it.branch }}",
+            read.map { it.branch }.containsAll(listOf("main", "feature")),
+        )
+    }
+
+    @Test
+    fun `a branch whose name contains a slash keeps its whole name`() {
+        // **`feature/x` is legal git**, so the key cannot be split on the last slash — and it must not
+        // be split on every slash either. The project name cannot contain one, so the FIRST slash is
+        // the boundary and everything after it is the branch.
+        val session = AgentSession("Shopping", branch = "feature/x")
+        store.put(session)
+
+        val read = store.read().single()
+
+        assertEquals("the project is the part before the first slash", "Shopping", read.project)
+        assertEquals("and the branch is everything after it", "feature/x", read.branch)
+    }
+
+    @Test
+    fun `the key is the bare project name for main and project-slash-branch otherwise`() {
+        // The rule itself, asserted directly: it is what makes the old file readable.
+        assertEquals("Shopping", AgentSession.keyOf("Shopping", "main"))
+        assertEquals("Shopping/feature", AgentSession.keyOf("Shopping", "feature"))
+        assertEquals("Shopping/feature/x", AgentSession.keyOf("Shopping", "feature/x"))
+        assertEquals("Shopping", AgentSession.projectOf("Shopping"))
+        assertEquals("main", AgentSession.branchOf("Shopping"))
+        assertEquals("feature/x", AgentSession.branchOf("Shopping/feature/x"))
+    }
 }

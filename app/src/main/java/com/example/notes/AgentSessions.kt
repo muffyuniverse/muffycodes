@@ -17,8 +17,12 @@ import java.io.File
  * person's history. Nothing here is written into the project, so an agent being on is not a
  * change the project can see.
  *
- * One file, `<account>/.muffy/agents.json`, keyed by project. A file per project would be a
- * directory to keep in step; a project that is renamed or deleted simply loses its key.
+ * One file, `<account>/.muffy/agents.json`, keyed by **project and branch**. A file per worktree
+ * would be a directory to keep in step; a project or branch that is deleted simply loses its key.
+ *
+ * **Two branches of one project are two agents** (§13d): a branch is a separate worktree and the agent
+ * is worktree-scoped, so each has its own diary and its own turn in flight. `main` keeps the bare
+ * project name as its key, so a file written before branches existed needs no conversion.
  */
 class AgentSessions(private val accountDir: File) {
 
@@ -51,14 +55,23 @@ class AgentSessions(private val accountDir: File) {
             // start from nothing, and the record still holds every turn that happened.
             return emptyList()
         }
-        return root.keys().asSequence().mapNotNull { name ->
-            root.optJSONObject(name)?.let { readOne(name, it) }
-        }.sortedBy { it.project }.toList()
+        return root.keys().asSequence().mapNotNull { key ->
+            root.optJSONObject(key)?.let { readOne(key, it) }
+        }.sortedWith(compareBy({ it.project }, { it.branch })).toList()
     }
 
-    private fun readOne(project: String, json: JSONObject): AgentSession? = try {
+    /**
+     * One session from its **key**, which is where the branch comes from.
+     *
+     * The key is the only place the branch is stored, deliberately: a session that also carried a
+     * `"branch"` field could disagree with its own key, and then `put` would write one session under
+     * another's name. `AgentSession.branchOf` reads a bare key as `main`, so a file from before
+     * branches existed loads as it always did.
+     */
+    private fun readOne(key: String, json: JSONObject): AgentSession? = try {
         AgentSession(
-            project = project,
+            project = AgentSession.projectOf(key),
+            branch = AgentSession.branchOf(key),
             state = enumOr(json.optString("state"), AgentSession.State.IDLE),
             sub = enumOr(json.optString("sub"), AgentSession.Sub.WAITING),
             reason = json.optString("reason").takeIf { it.isNotEmpty() }
@@ -83,21 +96,34 @@ class AgentSessions(private val accountDir: File) {
         null
     }
 
-    /** Writes one session, and forgets any other key for the same project. */
+    /**
+     * Writes one session, **under its project and branch**.
+     *
+     * `root.put` replaces, so writing the same key twice is one row — which is what "forgets any other
+     * key for the same project" used to mean. It now means "for the same worktree", because two
+     * branches are two agents and one must not overwrite the other.
+     */
     fun put(session: AgentSession) {
         synchronized(guard) {
             val root = objectOf()
-            root.put(session.project, one(session))
+            root.put(AgentSession.keyOf(session.project, session.branch), one(session))
             write(root)
         }
     }
 
-    /** Forgets a project's session. */
-    fun remove(project: String) {
+    /**
+     * Forgets **one worktree's** session.
+     *
+     * The branch is a parameter rather than an optional one, because the two ways to get it wrong are
+     * both silent: forgetting `main` when `feature` was meant leaves an agent running, and forgetting
+     * every branch of a project when one was meant kills agents nobody asked about.
+     */
+    fun remove(project: String, branch: String = AgentSession.MAIN) {
         synchronized(guard) {
+            val key = AgentSession.keyOf(project, branch)
             val root = objectOf()
-            if (!root.has(project)) return
-            root.remove(project)
+            if (!root.has(key)) return
+            root.remove(key)
             write(root)
         }
     }

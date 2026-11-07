@@ -28,6 +28,18 @@ package com.example.notes
  */
 data class AgentSession(
     val project: String,
+    /**
+     * The branch this agent works on this project's **worktree** (§13d).
+     *
+     * **A branch is a separate worktree, and the agent is worktree-scoped** — it has no `checkout` and
+     * never switches. So this is not "where the agent is looking"; it is *which agent this is*. Two
+     * branches of one project are two agents, each with its own diary, its own search index and its own
+     * turn in flight.
+     *
+     * **Defaults to `main` so every existing file and every existing call site keeps working**, and so
+     * a project that has never had a branch made reads exactly as it did before.
+     */
+    val branch: String = MAIN,
     val state: State = State.IDLE,
     /** What an idle agent is doing: nothing yet, waiting, or getting its network back. */
     val sub: Sub = Sub.WAITING,
@@ -131,6 +143,30 @@ data class AgentSession(
     }
 
     companion object {
+        /** The branch a project is made of, and the one whose sessions keep the old key. */
+        const val MAIN = "main"
+
+        /**
+         * How a session is keyed in `agents.json` — **project and branch in one string.**
+         *
+         * `main` keeps the **bare project name**, which is why this file needs no migration: every
+         * session written before branches existed is a session on main, and it reads back unchanged.
+         * A file written by an older version of the app is not a file to convert.
+         *
+         * **`/` is the separator because a project name cannot contain one** — `Workspace.nameProblem`
+         * refuses a slash, because a project is a folder. A branch *can* contain a slash (`feature/x`
+         * is a legal git name), so [projectOf] and [branchOf] split on the **first** one only.
+         */
+        fun keyOf(project: String, branch: String): String =
+            if (branch == MAIN) project else "$project/$branch"
+
+        /** The project half of a key, which is everything before the first slash. */
+        fun projectOf(key: String): String = key.substringBefore('/')
+
+        /** The branch half of a key, and `main` for a key written before branches existed. */
+        fun branchOf(key: String): String =
+            if (key.contains('/')) key.substringAfter('/') else MAIN
+
         /** The poll interval: four minutes, and it is the design's number, not a tuning knob. */
         /**
          * The app's own interval, for an agent that did not say what it wanted.
