@@ -1014,9 +1014,12 @@ class ProjectGitTest {
         // reachability from main, which is a property of the commit graph and nothing else.
         val head = repo.resolve("refs/heads/feature")!!
         val tree = repo.resolve("refs/heads/main^{tree}")!!
+        // **`who` is built OUTSIDE the `apply` block**, because inside it `this` is the
+        // CommitBuilder — which has its own `author` property, so `author.ident()` there resolves to
+        // JGit's `PersonIdent` and fails. The test's own field is only reachable unshadowed.
+        val who = author.ident()
         val builder = org.eclipse.jgit.lib.CommitBuilder().apply {
             setTreeId(tree)
-            val who = author.ident()
             setAuthor(who)
             setCommitter(who)
             setMessage("only on feature")
