@@ -275,18 +275,16 @@ class BranchesScreenTest {
         // `enterBranch` shows up as "the workspace is on main" and the reason it said is thrown away.
         assertNull("it opened, and said nothing: ${scene.viewModel.message}", scene.viewModel.message)
         assertEquals("the workspace is on the branch", "feature", scene.viewModel.activeBranch)
-        // **Every fact that decides this, in the message**, because a bare "expected Shopping" says
-        // nothing about which of the four inputs was wrong.
-        val why = "path=${scene.viewModel.path}" +
-            " branch=${scene.viewModel.activeBranch}" +
-            " dir=${scene.viewModel.currentDir}" +
-            " projects=${scene.viewModel.projectNames}"
-        assertEquals("and the files shown are the project's: $why", "Shopping", scene.viewModel.currentProject)
+        // **Three separate assertions, so the failing LINE says which value is wrong.** CI reports only
+        // the exception class and the line — the message never reaches the log, and the sealed report is
+        // deliberately unreadable — so the discrimination has to be in the structure of the test.
+        assertEquals("the project is open", listOf("Shopping"), scene.viewModel.path)
         assertTrue(
-            "which live in the branch's own folder: ${scene.viewModel.currentDir}",
+            "the folder resolved is the branch's worktree",
             scene.viewModel.currentDir!!.absolutePath.replace('\\', '/')
                 .contains(".muffy/worktrees/Shopping/feature"),
         )
+        assertEquals("and it is still the project", "Shopping", scene.viewModel.currentProject)
     }
 
     @Test
@@ -304,6 +302,12 @@ class BranchesScreenTest {
         scene.viewModel.message = null
         scene.viewModel.enterBranch("feature")
         assertNull("it opened, and said nothing: ${scene.viewModel.message}", scene.viewModel.message)
+        // The folder first, so a wrong folder and a shared folder fail on different lines.
+        assertTrue(
+            "the branch has its own folder",
+            scene.viewModel.currentDir!!.absolutePath.replace('\\', '/')
+                .contains(".muffy/worktrees/Shopping/feature"),
+        )
         val onBranch = scene.file("notes.txt", "the branch's copy")
 
         assertNotEquals("two different files", onMain.absolutePath, onBranch.absolutePath)
