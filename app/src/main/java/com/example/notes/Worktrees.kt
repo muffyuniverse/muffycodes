@@ -120,6 +120,9 @@ class Worktrees(private val workspace: Workspace) {
                 Beside.write(File(private, "gitdir"), File(dir, ".git").absolutePath + "\n")
                 Beside.write(File(private, "HEAD"), "ref: refs/heads/$branch\n")
                 populate(dir, tip)
+                // **The system folder comes with the checkout** (§13f). Done here rather than waiting
+                // for the next refresh, because a person who opens a branch is about to look at it.
+                workspace.linkSystem(dir)
             } catch (t: Throwable) {
                 // **Half a worktree is worse than none**: git would list it, the branch screen would
                 // offer it, and it would open empty. Nothing is kept on a failure.
@@ -173,14 +176,17 @@ class Worktrees(private val workspace: Workspace) {
      */
     fun remove(project: String, branch: String) {
         if (branch == mainBranch) return
-        dirOf(project, branch).deleteRecursively()
-        commonEntry(project, branch).deleteRecursively()
+        // **`deleteTree`, not `deleteRecursively`.** The folder holds the `system` link, and
+        // `deleteRecursively` walks whatever `listFiles()` answers - which for a symlink is the target,
+        // so the account's system folder would be emptied on the way. `deleteTree` deletes the link.
+        Workspace.deleteTree(dirOf(project, branch))
+        Workspace.deleteTree(commonEntry(project, branch))
     }
 
     /** Removes every branch folder of [project], for a project that is being deleted or renamed. */
     fun removeAll(project: String) {
         val root = File(worktreesRoot(), project)
-        root.deleteRecursively()
+        Workspace.deleteTree(root)
         // git's own per-worktree entries go with the repository; only the folders are ours to clear.
     }
 

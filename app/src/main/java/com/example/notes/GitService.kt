@@ -1746,7 +1746,10 @@ object GitService {
             val tree = treeFor(repo, walk, null, revisionId)
             val found = TreeWalk.forPath(repo, clean, *arrayOf<AnyObjectId>(tree))
             if (found == null) {
-                target.deleteRecursively()
+                // **`Workspace.deleteTree`, because the target may be the `system` link.** Restoring a
+                // path that is not in the commit removes what is there - and for `system` that means a
+                // link to the account's own folder, whose contents `deleteRecursively()` would empty.
+                Workspace.deleteTree(target)
                 return
             }
             found.use {
@@ -1787,7 +1790,7 @@ object GitService {
                     inside.parentFile?.mkdirs()
                     inside.writeBytes(bytes)
                 }
-                target.deleteRecursively()
+                Workspace.deleteTree(target)
                 if (!partial.renameTo(target)) {
                     throw IllegalStateException("Could not put the version back into place")
                 }

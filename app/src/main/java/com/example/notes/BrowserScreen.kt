@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import java.io.File
 
 /** What the browser asks the app to do, so the screen stays free of state. */
 class BrowserActions(
@@ -420,7 +421,7 @@ fun BrowserScreen(
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
-            } else if (Workspace.isSystem(viewModel.currentProject.orEmpty())) {
+            } else if (Workspace.isSystemPath(viewModel.path.joinToString("/"))) {
                 // **Nothing can be added to the system project**, so the button is not offered.
                 // The operator: "+ button should be hidden in system project." It is the app's own
                 // folder — a person reads it and clones from it, and every write there comes from
@@ -864,7 +865,13 @@ private fun ProjectList(
     onExport: (String) -> Unit,
 ) {
     val names = viewModel.projectNames
-    if (names.isEmpty()) {
+    // **The system folder is a row here, and it is not a project** (§13f). It lives at the account root,
+    // so a person must be able to reach it from the root; but it has no repository, no remote and no
+    // menu, and calling it a project is exactly the "dangling row" the operator reported. So it is drawn
+    // last, as a folder, and tapping it opens the folder.
+    val system = viewModel.workspace?.let { File(it.accountDir, Workspace.SYSTEM_PROJECT) }
+        ?.takeIf { it.isDirectory }
+    if (names.isEmpty() && system == null) {
         EmptyState(
             title = "No projects yet",
             text = "The add button makes one on GitHub, brings in a repository you already " +
@@ -991,6 +998,31 @@ private fun ProjectList(
                                 },
                             )
                         }
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+        // **Last, and as a folder.** No menu, no change count, no "up to date": the only things a person
+        // can do here are read it and clone out of it, and every write is the app's. It opens through
+        // [AppViewModel.open] with the path spelled out, which is the same door the browser uses for any
+        // folder - and it is the door onboarding already sends a first-time reader through.
+        if (system != null) {
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.open(listOf(Workspace.SYSTEM_PROJECT)) }
+                        .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(Workspace.SYSTEM_PROJECT, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            text = "the app's own folder — read me, prompts, templates",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
                 HorizontalDivider()

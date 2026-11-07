@@ -121,7 +121,7 @@ class AccountStore(private val filesDir: File) {
         val hasContent = from.isDirectory &&
             (from.listFiles() ?: emptyArray()).any { it.name != STATE }
         if (!hasContent) {
-            from.deleteRecursively()
+            Workspace.deleteTree(from)
             return false
         }
         if (to.exists()) return false
@@ -189,7 +189,9 @@ class AccountStore(private val filesDir: File) {
 
     /** Removes everything this phone holds for [login]. */
     fun remove(login: String) {
-        dirOf(login).deleteRecursively()
+        // The whole account goes, so following a link here would delete nothing that is not already
+        // being deleted - but the same function is used for both, so it uses the safe walk.
+        Workspace.deleteTree(dirOf(login))
     }
 
     /**
@@ -201,7 +203,11 @@ class AccountStore(private val filesDir: File) {
      * app's own folder inside it: the identity, the history, the pretend GitHub.
      */
     fun forget(login: String) {
-        stateDir(login).deleteRecursively()
+        // **`Workspace.deleteTree`, because this folder holds links to something that survives.**
+        // `.muffy/worktrees/<project>/<branch>/system` points at the account's own system folder, and
+        // `deleteRecursively()` follows a symlink - so forgetting an account while keeping its files
+        // would have emptied the settings folder that "keep the files" is supposed to leave alone.
+        Workspace.deleteTree(stateDir(login))
         val dir = dirOf(login)
         if (dir.isDirectory && dir.listFiles().isNullOrEmpty()) dir.delete()
     }

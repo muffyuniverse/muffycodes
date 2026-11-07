@@ -100,6 +100,74 @@ class Workspace(val accountDir: File) {
     fun ensure() {
         accountDir.mkdirs()
         ensureSystemFolder()
+        ensureSystemLinks()
+    }
+
+    /**
+     * Puts a `system` link in every working tree on this phone (§13f).
+     *
+     * **Every worktree, because that is the point of the link**: the system folder is one place at the
+     * account root, and a person or an agent browsing a project should find it there, beside that
+     * project's files, without being told a path outside the tree. `main`'s tree is the project folder,
+     * and a branch's tree is under `.muffy/worktrees/<project>/<branch>` — which may itself be nested,
+     * because a branch name can hold a slash.
+     *
+     * **Cheap enough for a refresh.** It is one `exists()` per tree, and it stops descending at the
+     * link: walking into it would relink the system folder from inside itself.
+     */
+    private fun ensureSystemLinks() {
+        val projects = projectNames()
+        projects.forEach { linkSystem(projectDir(it)) }
+        linkAllUnder(File(stateDir, Worktrees.WORKTREES), 0)
+    }
+
+    /** Descends [dir] looking for working trees, stopping at the link and at a depth no branch reaches. */
+    private fun linkAllUnder(dir: File, depth: Int) {
+        if (depth > MAX_BRANCH_DEPTH) return
+        (dir.listFiles() ?: return).forEach { child ->
+            // **Not into the link.** It is a directory as far as `isDirectory` is concerned, and the
+            // folder it points at is the one being linked.
+            if (!child.isDirectory || isSystem(child.name)) return@forEach
+            if (File(child, GIT_DIR).isFile) linkSystem(child)
+            linkAllUnder(child, depth + 1)
+        }
+    }
+
+    /**
+     * Makes `system` in [worktree] point at the account's system folder, and says whether it did.
+     *
+     * **Nothing already there is replaced.** A folder a person made called `system` holds their files,
+     * and a link is a convenience: it is never a reason to delete. A link that is already there is
+     * answered `false` for the same reason a refresh should not touch it - and a *broken* link is
+     * replaced, because the folder it pointed at is gone and the link now names nothing.
+     *
+     * The target is written **relative**, computed from the two canonical paths rather than counted in
+     * `../`. A branch called `feature/x` puts a tree one level deeper than `feature` does, so a hand
+     * counted depth would be right for one branch and wrong for the next.
+     */
+    fun linkSystem(worktree: File): Boolean {
+        val link = File(worktree, SYSTEM_PROJECT)
+        val exists = try {
+            java.nio.file.Files.isSymbolicLink(link.toPath())
+        } catch (t: Throwable) {
+            false
+        }
+        // A real folder, or a real file, is left alone; a working link is left alone.
+        if (link.exists() || (exists && link.isDirectory)) return false
+        val target = File(accountDir, SYSTEM_PROJECT)
+        return try {
+            worktree.mkdirs()
+            target.mkdirs()
+            if (exists) link.delete()  // a broken link: the folder it named is gone
+            val relative = worktree.canonicalFile.toPath().relativize(target.canonicalFile.toPath())
+            java.nio.file.Files.createSymbolicLink(link.toPath(), relative)
+            true
+        } catch (t: Throwable) {
+            // **Silence is right here.** A filesystem that refuses a link (external storage does) still
+            // has a working app: every system read goes through [projectDir], and the link is only for
+            // a person browsing. Reporting it would be a promise about a convenience.
+            false
+        }
     }
 
     /**
@@ -243,20 +311,81 @@ class Workspace(val accountDir: File) {
      * nothing to exclude from until `ProjectGit` has made one.
      */
     fun ensureIgnore(projectDir: File) {
-        val git = File(projectDir, ".git")
-        if (!git.isDirectory) return
-        val file = File(git, "info" + File.separator + "exclude")
+        val file = excludeFile(projectDir) ?: return
+        addExcludeLines(
+            file,
+            APP_IGNORES,
+            "# The app's own bookkeeping: the agent's record and its flags. Not shipped.",
+        )
+    }
+
+    /**
+     * git's `info/exclude` for the repository [projectDir] is a working tree of, **in the common
+     * directory**, or null when there is no repository yet.
+     *
+     * **The common directory, not `.git`.** A linked worktree's `.git` is a *file* holding
+     * `gitdir: <common>/.git/worktrees/<id>`, so `File(projectDir, ".git/info/exclude")` does not exist
+     * there — and the old `if (!git.isDirectory) return` made both exclude writers silent no-ops in
+     * every branch's tree. `info/exclude` lives beside the objects, once, and git and JGit both read it
+     * from there: measured, an entry written to the common file is honoured in main's tree and in a
+     * linked worktree at the same time, with `Status` reporting the path as ignored rather than
+     * untracked.
+     */
+    fun excludeFile(projectDir: File): File? {
+        val common = commonDir(projectDir) ?: return null
+        return File(File(common, "info"), "exclude")
+    }
+
+    /**
+     * The directory git keeps the repository's shared state in — `.git` for an ordinary repository, the
+     * **common** directory for a worktree.
+     *
+     * Read from the files git itself writes ([GIT_DIR], `gitdir: …`, `commondir`), never guessed:
+     * a worktree's `.git` file is a pointer, and `commondir` inside it points back out.
+     */
+    fun commonDir(projectDir: File): File? {
+        val dotGit = File(projectDir, GIT_DIR)
+        val gitDir = when {
+            dotGit.isDirectory -> dotGit
+            dotGit.isFile -> {
+                val said = try {
+                    dotGit.readText().trim()
+                } catch (t: Throwable) {
+                    return null
+                }
+                val target = said.removePrefix("gitdir:").trim()
+                if (target.isEmpty()) return null
+                File(target).let { if (it.isAbsolute) it else File(projectDir, target) }
+            }
+            else -> return null
+        }
+        val common = File(gitDir, "commondir")
+        if (!common.isFile) return gitDir
+        val said = try {
+            common.readText().trim()
+        } catch (t: Throwable) {
+            return gitDir
+        }
+        if (said.isEmpty()) return gitDir
+        val dir = File(said).let { if (it.isAbsolute) it else File(gitDir, said) }
+        return try {
+            dir.canonicalFile
+        } catch (t: Throwable) {
+            dir
+        }
+    }
+
+    /** Adds any of [lines] that [file] does not already hold, with [header] on a file that is empty. */
+    private fun addExcludeLines(file: File, lines: List<String>, header: String) {
         val current = if (file.isFile) read(file) else ""
-        val missing = APP_IGNORES.filter { line ->
+        val missing = lines.filter { line ->
             current.lineSequence().none { it.trim() == line }
         }
         if (missing.isEmpty()) return
         val text = buildString {
             append(current)
             if (current.isNotEmpty() && !current.endsWith("\n")) append("\n")
-            if (current.isEmpty()) {
-                appendLine("# The app's own bookkeeping: the agent's record and its flags. Not shipped.")
-            }
+            if (current.isEmpty()) appendLine(header)
             missing.forEach { appendLine(it) }
         }
         file.parentFile?.mkdirs()
@@ -278,25 +407,13 @@ class Workspace(val accountDir: File) {
      * that is not there yet costs nothing and stops the file travelling the moment it is.
      */
     fun ensureSecretIgnores(projectDir: File) {
-        val git = File(projectDir, ".git")
-        if (!git.isDirectory) return
-        val file = File(git, "info" + File.separator + "exclude")
-        val current = if (file.isFile) read(file) else ""
-        val missing = SECRET_PATTERNS.filter { line ->
-            current.lineSequence().none { it.trim() == line }
-        }
-        if (missing.isEmpty()) return
-        val text = buildString {
-            append(current)
-            if (current.isNotEmpty() && !current.endsWith("\n")) appendLine()
-            if (current.isEmpty()) {
-                appendLine("# Anything that holds a credential: the app locks these and keeps them")
-                appendLine("# out of the repository, because a key that is pushed cannot be recalled.")
-            }
-            missing.forEach { appendLine(it) }
-        }
-        file.parentFile?.mkdirs()
-        put(file, text)
+        val file = excludeFile(projectDir) ?: return
+        addExcludeLines(
+            file,
+            SECRET_PATTERNS,
+            "# Anything that holds a credential: the app locks these and keeps them\n" +
+                "# out of the repository, because a key that is pushed cannot be recalled.",
+        )
     }
 
     /** The folder's contents, hidden things left out: folders first, then names. */
@@ -705,12 +822,20 @@ class Workspace(val accountDir: File) {
     fun isProjectFolder(file: File): Boolean =
         file.isDirectory && file.parentFile?.canonicalFile == accountDir.canonicalFile &&
             !isHidden(file.name) &&
-            // **The system project is a project before it has a repository.** Its folder is made
-            // by [ensure], which runs on every refresh and has no author or git library to make a
-            // repository with; the repository follows the first time a file in it is saved. Without
-            // this clause the row would be missing from the list for exactly as long as nobody had
-            // written anything in it, which reads as "the system project does not exist yet".
-            (File(file, ".git").exists() || isSystem(file.name))
+            // **A project is a repository, and nothing else is.** This used to carry a second clause -
+            // `|| isSystem(file.name)` - so that the system folder counted as a project before its
+            // repository existed. Measured, that clause was the whole of the "dangling project": a row
+            // in the list, a name `projectOf` answered with, and no repository behind either, so every
+            // write inside tried to commit and nothing was committed. The system folder is not a
+            // project (§13f); it is a folder at the account root, reachable from every worktree through
+            // a link, and this predicate is back to one question.
+            //
+            // **`!isSystem` is stated rather than inherited from "it has no `.git`".** An account made
+            // before this change can hold a `system/.git` written when a file in it was saved - the
+            // old rule made the folder a project, so committing in it made a repository - and without
+            // this clause that leftover would quietly turn the folder back into a project. The rule is
+            // the app's invariant; the folder's contents are not evidence about it.
+            !isSystem(file.name) && File(file, GIT_DIR).exists()
 
     /** The names of the projects on this phone, in display order. */
     fun projectNames(): List<String> =
@@ -1243,6 +1368,10 @@ class Workspace(val accountDir: File) {
             to.mkdirs()
             from.listFiles()?.forEach { child ->
                 if (deadline.expired) throw StoppedException(Stopped.body("copy", deadline))
+                // **A link is the app's, not the project's.** `system` points at the account's own
+                // folder, so copying a project would copy that folder's files into the copy and then
+                // the copy would get a link of its own - the same content twice, one of them false.
+                if (isLink(child)) return@forEach
                 copyTree(child, File(to, child.name), deadline)
             }
         } else {
@@ -1266,15 +1395,10 @@ class Workspace(val accountDir: File) {
      * question is asked per entry so the answer stays current, and the exception it throws says
      * exactly that — [Stopped.partway], not "nothing was kept".
      */
-    private fun removeTree(file: File, deadline: Deadline): Boolean {
-        if (deadline.expired) throw StoppedException(Stopped.partway("delete", deadline))
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { child ->
-                if (!removeTree(child, deadline)) return false
-            }
+    private fun removeTree(file: File, deadline: Deadline): Boolean =
+        deleteTree(file) {
+            if (deadline.expired) throw StoppedException(Stopped.partway("delete", deadline))
         }
-        return file.delete()
-    }
 
     /** Why [name] cannot be used, or null when it can. */
     /** The locked paths. Read once and kept, because every write asks. */
@@ -1635,6 +1759,15 @@ class Workspace(val accountDir: File) {
          */
         const val SYSTEM_PROJECT = "system"
 
+        /**
+         * How deep a branch's folder can be below `.muffy/worktrees/`.
+         *
+         * `project` is one, the branch is the rest — and a branch name may hold slashes, so `feature/x`
+         * costs two. Four is far past any branch anybody writes and still stops a symlink loop that
+         * somehow escaped the name check.
+         */
+        private const val MAX_BRANCH_DEPTH = 4
+
         /** The app's own introduction, in the system project. */
         const val README = "README.md"
 
@@ -1813,6 +1946,35 @@ class Workspace(val accountDir: File) {
          */
         const val ONBOARDING_STAMP = "onboarding_revision"
 
+        /**
+         * Deletes [file] and everything under it, **and never walks into a link.**
+         *
+         * `File.deleteRecursively()` looks equivalent and is not: `File.isDirectory` and `listFiles()`
+         * both follow a symlink, so the obvious recursion deletes the *target's* contents and then the
+         * link. Measured, that turns "delete this project" into "empty the account's `system` folder",
+         * because every worktree holds a link to it.
+         *
+         * [between] is asked before each entry, which is how a delete that a person stopped can say so
+         * instead of finishing silently.
+         */
+        fun deleteTree(file: File, between: (() -> Unit)? = null): Boolean {
+            between?.invoke()
+            if (isLink(file)) return file.delete()
+            if (file.isDirectory) {
+                file.listFiles()?.forEach { child ->
+                    if (!deleteTree(child, between)) return false
+                }
+            }
+            return file.delete()
+        }
+
+        /** True when [file] is a symlink, **whatever its target** — including a broken one. */
+        fun isLink(file: File): Boolean = try {
+            java.nio.file.Files.isSymbolicLink(file.toPath())
+        } catch (t: Throwable) {
+            false
+        }
+
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
 
@@ -1873,7 +2035,15 @@ class Workspace(val accountDir: File) {
          * grows whether or not anybody is using the app. Left unignored it would be the single
          * noisiest thing in the working tree.
          */
-        val APP_IGNORES = listOf("agent/", ".muffy/", "requests/")
+        /**
+         * What the app keeps out of a project's repository.
+         *
+         * **`system` has no trailing slash, and that is the whole reason it is called out.** The other
+         * three are folders; `system` inside a worktree is a **symlink**, and git's `.gitignore` form
+         * `system/` matches only a directory — measured: with `system/` the link stayed untracked, with
+         * `system` it was ignored. A rule written by analogy would have been a rule that did nothing.
+         */
+        val APP_IGNORES = listOf("agent/", ".muffy/", "requests/", SYSTEM_PROJECT)
 
         /**
          * The folder a person keeps binaries in, stored through LFS.

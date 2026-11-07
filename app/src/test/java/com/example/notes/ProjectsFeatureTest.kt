@@ -133,9 +133,9 @@ class ProjectsFeatureTest : FeatureTest() {
             "the app says why",
             scene.viewModel.message!!.contains("already a project"),
         )
-        // **`shopping` was refused, so it is not here.** The list is the one project that was made
-        // and the settings project, in the order `projectNames` sorts by: lowercase name.
-        assertEquals("and made nothing", listOf("Shopping", "system"), scene.viewModel.projectNames)
+        // **`shopping` was refused, so it is not here.** The list is the one project that was made -
+        // the settings folder is not a project and has no row of its own (§13f).
+        assertEquals("and made nothing", listOf("Shopping"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -143,7 +143,9 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.createProject("bad/name", "mit")
 
         assertTrue("the app says no", scene.viewModel.message != null)
-        assertEquals("and made nothing but the settings project", listOf("system"), scene.viewModel.projectNames)
+        // **Empty, and that is the point**: a folder at the account root with no repository is not a
+        // project, and the settings folder never was one (§13f).
+        assertEquals("and made no project", emptyList<String>(), scene.viewModel.projectNames)
     }
 
     @Test
@@ -301,7 +303,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.viewModel.deleteProject("Shopping", everywhere = false)
         scene.await("the delete to finish") { !scene.viewModel.busy }
-        assertEquals("nothing but the settings project", listOf("system"), scene.viewModel.projectNames)
+        assertEquals("no projects left at all", emptyList<String>(), scene.viewModel.projectNames)
 
         val url = scene.github.cloneUrlFor(scene.login, "Shopping")
         scene.viewModel.pullRepository(Repo("Shopping", "${scene.login}/Shopping", false, url))
@@ -348,7 +350,7 @@ class ProjectsFeatureTest : FeatureTest() {
                 !File(dir, ".gitignore").exists(),
         )
         assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
-        assertEquals("its name is the one typed", listOf("scratch", "system"), scene.viewModel.projectNames)
+        assertEquals("its name is the one typed", listOf("scratch"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -435,22 +437,29 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the system project is a row you can open, and the one project you cannot delete`() {
-        // **A project, not a hidden folder.** The settings that belong to the whole account live in
-        // it, and the report that asked for it was explicit about why: "system prompt is outdated.
-        // Another reason why it should be an editable file inside system project instead of a
-        // hidden one". A hidden file is one nobody edits, and a prompt nobody edits goes stale.
-        assertTrue("the account has a system project", scene.viewModel.projectNames.any {
-            it.equals("system", ignoreCase = true)
-        })
-        assertTrue("it is local, so nothing in it is ever pushed", scene.viewModel.isLocalProject("system"))
+    fun `the system folder is reachable at the root and is not a project`() {
+        // **A folder, not a hidden one** - the settings that belong to the whole account live in it,
+        // and the report that asked for it was explicit: "system prompt is outdated. Another reason why
+        // it should be an editable file inside system project instead of a hidden one." A hidden file
+        // is one nobody edits, and a prompt nobody edits goes stale.
+        //
+        // **But it is not a project, and that is the operator's correction** (§13f): as a project it had
+        // no repository, so the row promised a history, a status and a remote that did not exist - a
+        // dangling row. It is a folder at the account root, it is listed as an entry there, and every
+        // project can reach it through a link.
+        assertFalse("no project row", scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) })
+        assertTrue("but it is a folder in the root listing", scene.names().contains("system"))
+        assertTrue(
+            "and the folder is really there",
+            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
+        )
 
         scene.viewModel.message = null
         scene.viewModel.deleteProject("system", everywhere = false)
         assertTrue("and it cannot be deleted", scene.viewModel.message != null)
         assertTrue(
-            "the row is still there",
-            scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) },
+            "the folder is still there",
+            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
         )
     }
 
@@ -464,7 +473,7 @@ class ProjectsFeatureTest : FeatureTest() {
         assertTrue("it cannot be renamed away", scene.viewModel.message != null)
         assertTrue(
             "and it still has its own name",
-            scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) },
+            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
         )
 
         scene.project("groceries")

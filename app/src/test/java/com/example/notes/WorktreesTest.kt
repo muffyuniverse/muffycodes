@@ -274,6 +274,74 @@ class WorktreesTest {
         assertEquals("and it is the same folder", first, again.getOrThrow())
     }
 
+    // ---- the system folder, which every tree can see (§13f) ----
+
+    @Test
+    fun `a new worktree gets a link to the account's system folder`() {
+        // **The operator's ask, as an assertion**: *"for each worktree to have a symlink to it so that
+        // system is displayed as a gitignored folder in every worktree."* The link is what makes the
+        // one shared folder reachable from inside a branch, without a second copy of it.
+        projectWithBranch()
+        workspace.ensure()
+
+        val tree = trees.make("Shopping", "feature").getOrThrow()
+
+        val link = File(tree, Workspace.SYSTEM_PROJECT)
+        assertTrue("the link is a symlink, not a folder", Workspace.isLink(link))
+        assertTrue("and it resolves to a folder", link.isDirectory)
+        assertTrue(
+            "the account's own system folder: ${link.canonicalPath}",
+            link.canonicalPath ==
+                File(workspace.accountDir, Workspace.SYSTEM_PROJECT).canonicalPath,
+        )
+    }
+
+    @Test
+    fun `the link is not a change in git, in main's tree or in a branch's`() {
+        // **Measured, because the obvious rule was wrong.** `.gitignore` form `system/` matches only a
+        // directory, and a symlink is not one — so a rule written by analogy would have left the link
+        // untracked and every project would have read "1 to send" for a file the app made. The exclude
+        // entry is written without the slash and lives in the common directory, so it covers a linked
+        // worktree too.
+        val dir = projectWithBranch()
+        workspace.ensure()
+        workspace.ensureIgnore(dir)
+        val tree = trees.make("Shopping", "feature").getOrThrow()
+
+        for (where in listOf(dir, tree)) {
+            GitService.openExisting(where)!!.use { repo ->
+                org.eclipse.jgit.api.Git(repo).use { git ->
+                    val status = git.status().call()
+                    assertTrue(
+                        "nothing untracked in ${where.name}: ${status.untracked}",
+                        status.untracked.isEmpty(),
+                    )
+                    assertTrue(
+                        "and the link is what is ignored: ${status.ignoredNotInIndex}",
+                        status.ignoredNotInIndex.contains(Workspace.SYSTEM_PROJECT),
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `deleting a worktree removes the link and leaves the system folder alone`() {
+        // **The dangerous one.** `File.deleteRecursively()` follows a symlink: it walks the *target* and
+        // deletes its contents before deleting the link. So removing a branch - or a project - would
+        // have emptied the account's system folder. The probe is a file inside it that must survive.
+        projectWithBranch()
+        workspace.ensure()
+        val tree = trees.make("Shopping", "feature").getOrThrow()
+        val readme = File(File(workspace.accountDir, Workspace.SYSTEM_PROJECT), Workspace.README)
+        assertTrue("the folder the link points at has a file in it", readme.isFile)
+
+        trees.remove("Shopping", "feature")
+
+        assertFalse("the tree is gone", tree.exists())
+        assertTrue("and the system folder's file is still there", readme.isFile)
+    }
+
     @Test
     fun `a project with no repository is refused with a sentence about the project`() {
         // Not a crash: a project whose repository has not been made yet is a normal state, and the

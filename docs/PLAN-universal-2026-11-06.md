@@ -1076,35 +1076,69 @@ Three designs were considered and all are rejected:
 That choice already exists — `PRIVATE_LICENCE` is the default in the licence window (`Dialogs.kt:490`),
 and a licensed repository is public. No work needed.
 
-#### What `EncryptedLog` is, and what it is not — corrected
+#### The operator's decision, 2026-11-07: encryption is an example, not machinery — and the pipeline was removed
 
-**The operator asked, and the answer matters because I described it badly:** *"what is this encrypted
-log? we dont encrypt artifacts or logs, right? those are just workflow examples that can be dispatched
-by everyone - those are example files, not built-in parts of the application, RIGHT!?"*
+**The operator:** *"why do you seal anything, especially logs or artefacts — we explored the opportunity of
+encryption but I explicitly rejected it and left to be just an example of what can be added to a
+workflow."*
 
-**Right, and the wording above overstated it.** The measured facts:
+**The app was already clean. This repository's pipeline was not.** §13b.5 decided no encryption for a
+project's bytes, and that held: nothing in the app encrypts its own output, `CiSetup` writes no workflow
+file, and `EncryptedLog.read` passes an unsealed file through untouched. But `build-and-release.yml` did
+what the decision forbids — it sealed its own artifacts — and three things grew around that:
 
-| claim | true? | evidence |
-|---|---|---|
-| The app encrypts logs or artifacts | **No** | `EncryptedLog` is a **reader** (`openBytes`, `read`) plus, as of this session, a **writer** (`sealBytes`). Nothing in the app calls the writer on its own output. |
-| The app forces a user's project to seal anything | **No** | `CiSetup` **writes no workflow file at all** — it only sets an environment secret. `Workflows.kt` only *detects* sealing (`text.contains("openssl enc")`) to describe what a workflow can reach. |
-| Sealing happens by default | **No** | It happens only in **this repository's own** `.github/workflows/build-and-release.yml`, which is muffycodes' CI, not a template shipped to users. |
-| An unsealed artifact is mishandled | **No** | `openBytes` returns it **as it arrived**: *"Not sealed is not a failure."* The reader is a pass-through for anything it did not seal. |
-| A user's workflow can seal | **Yes, optionally** | Sealing is a **shell command in a workflow file** — `openssl enc`, or `gpg --encrypt`. Whoever writes the workflow chooses it. It is a technique the app can read, not a feature it imposes. |
+| what was there | why it was wrong |
+|---|---|
+| `Seal the scenarios` and `Seal the test report`, AES-256-CBC under `MUFFY_LOG_KEY` | The pipeline encrypted its own output. A rejected design kept in the one place nobody re-reads. |
+| `Open the scenarios` in `deliver`, decrypting them again in the same run | The artifact was sealed and opened inside one pipeline, so the seal protected nothing from anyone. |
+| `environment: ci` on two jobs, carrying **only** `MUFFY_LOG_KEY` | An environment exists to gate a secret. Its only secret was the one that sealed. |
+| `tools/check-workflow.py`'s `check_encrypted_log` | It **refused a workflow that encrypted without reaching its key** — a rule enforcing the rejected design, and it refused this repository's own edit the first time. |
 
-**So the honest one-sentence version: sealing is a thing a workflow author may do, and the app can read
-it. The app never does it to you, and never requires it.**
+**What sealing cost, measured.** The test report is the only place a failing assertion's message,
+expected value and `file:line` ever appear: Gradle's console omits the message, and the report was
+sealed with a key a person does not hold — "the app opens it; a person cannot, and that is the point".
+Every red run in this session therefore cost an extra round of guessing, because the one artifact that
+would have named the cause was deliberately unreadable. A diagnostic channel that only a machine can
+open is a channel that does not exist.
 
-**Why it exists at all, since §13b.5 says "no encryption anywhere":** those are different questions.
-§13b.5 rejects encrypting **git history at rest or in transit** — a project's bytes. `EncryptedLog` is
-about **a public runner's log**, where a failing test prints the expected and actual values and a
-stranger reads them. That is the one place encryption is both possible (the plaintext never has to
-leave the runner) and pointed (the leak is real, in public, and permanent). It is a **CI hygiene
-option**, not a storage model, and the app works identically for a project that never uses it.
+**Removed** (commit `802427b`): both seal steps, the decrypt step, both `environment: ci` lines, the
+`ci` environment's only secret, and the check that enforced the sealing shape. `check_no_sealing` now
+**refuses** `openssl enc` in a workflow — a policy check, so the rejected design cannot quietly return.
+Artifacts upload as written: the scenarios folder and the report folders Gradle produced.
 
-**`seal`/`unseal` on `archive` (added this session)** is the same idea in the agent's hands: the agent
-may seal a file before putting it somewhere a stranger can see, and open one it was given the key for.
-Nothing about it is automatic.
+**What stays, and why it is not the same thing.** `EncryptedLog` remains a **reader**: a *user's* workflow
+may seal its own output (`openssl enc`, `gpg`), and the app can read it back. Sealing is a shell command a
+workflow author chooses, exactly the operator's framing — an example that can be added to a workflow. The
+app never does it to anyone and never requires it.
+
+### 13b.5b No migration, no back-compatibility shims
+
+**The operator's instruction, 2026-11-07:** *"no migration needed, instead of back compatibility choose the
+best architectural choices."*
+
+This is a rule about **how a change is shaped**, not a promise about data. It means: when a structure is
+replaced, the replacement is built as if the old one never existed, and the old one's shape does not
+survive inside it as a special case, a default, a fallback or a converter.
+
+**The first casualty was this session's own work.** `AgentSession.keyOf` had been written with `main` as a
+bare project name and every other branch as `project/branch`, so that a pre-branches `agents.json` would
+load unchanged. That is a migration hack: two key shapes in one string, and every reader has to know which
+it is holding. It is now one shape — `project/branch`, `main` included — and the tests that asserted the
+compatibility behaviour were **deleted rather than adapted**, because a test that asserts a shim is a test
+that keeps the shim alive (`802427b`).
+
+**Where this rule will bite next, stated so it is not rediscovered:**
+
+| place | the shim that must not be written |
+|---|---|
+| `isProjectFolder`'s `\|\| isSystem(...)` clause | It exists only because the system folder predated its repository. The folder becomes a non-project instead (§13f). |
+| `Worktrees` on a project that already has branches | No "convert an existing branch into a worktree" path: a branch is a worktree or it does not exist. |
+| `agents.json` from a pre-branch build | No converter. The key changes shape and old entries are simply not sessions. |
+| `EncryptedLog`'s `MUFFYLOG1` marker | Read, never written by the app; no version negotiation. |
+
+**What the rule does *not* license** is destroying a person's files. A project's contents are not a
+schema; "choose the best architecture" is about the app's own structures, and a data loss is never the
+cleaner option.
 
 ### 13b.6 Token separation: app token and agent token
 
@@ -2147,6 +2181,80 @@ channel and the next person to read this should not have to rediscover it.
   ownership is exactly what makes it work.
 - **A file with no `MediaStore` row** (dropped by a shell, or by an old app) is invisible to a
   `MediaStore` query but **visible through the SAF tree**, which is a second reason to prefer SAF.
+
+## 13f. The system folder is not a project, and every worktree can see it
+
+**The operator, 2026-11-07:** *"right now system 'project' is dangling, I want it to be a folder at the app
+root and for each worktree to have a symlink to it so that system is displayed as a gitignored folder (or
+completely outside of git folder) in every worktree (similar to downloads)."*
+
+### 13f.1 What "dangling" meant, measured
+
+`Workspace.ensure()` makes `<account>/system/` on **every refresh**, and `isProjectFolder` has said *"the
+system project is a project before it has a repository"* since before worktrees existed. So the folder
+exists, the list shows it as a project, and there is no repository behind it: `projectOf` answers
+`system`, every write inside tries to commit, and nothing is committed. That is the same shape as the
+bug this file already documents for any repository-less folder — a row that promises things the app
+cannot do — except here the app *opt-in'd* to it, in a clause written to keep a row visible.
+
+With branches the clause got worse. `worktree list` will never list `system` (nothing to check out), so on
+a branch the folder is invisible from inside the project the person is looking at, while the agent's
+`system/...` paths still resolve to the root.
+
+### 13f.2 The decision
+
+| | before | after |
+|---|---|---|
+| Where the files live | `<account>/system/` | `<account>/system/` — **unchanged**; the account folder *is* the app root |
+| Is it a project | yes, by a special clause | **no.** The clause is gone; `projectNames()` does not list it and `projectAt(["system"])` answers null |
+| Visible inside a project | no | a **symlink** named `system` in every worktree — main's tree and every branch's |
+| In git | untracked once a repository existed | excluded, and never in any commit |
+
+**Nothing moves on disk**, which is why this is a small change: `projectDir("system")` is
+`File(accountDir, "system")` and stays exactly that. What changes is the *classification* — and every
+reader of the system files goes through `projectDir`, so all of them keep working.
+
+### 13f.3 The mechanism, measured before it was written
+
+| question | measurement |
+|---|---|
+| Relative link from main's tree | `<account>/<project>/system` → `../system` |
+| Relative link from a branch's worktree | `<account>/.muffy/worktrees/<project>/<branch>/system` → `../../../../system` — **and deeper still when the branch name holds a slash**, so the depth is computed with `Path.relativize`, never counted by hand |
+| Does `.gitignore` hold `system/`? | **No.** A symlink is not a directory, so the trailing-slash form matches nothing. `system` and `/system` both work. |
+| Does JGit's `Status` honour the exclude file? | **Yes.** With `system` in `<gitDir>/info/exclude`, JGit reports `untracked=[]`, `ignored=[system]`, `isClean=true` — for main's tree **and** for a linked worktree, because `info/exclude` lives in the common directory |
+| Does real git agree? | Yes: `git status --porcelain` is empty in both trees |
+| Can Android make the link? | `minSdk = 26`, and `java.nio.file.Files.createSymbolicLink` is API 26 — the tests already use it (`AgentTest.kt:1620`) |
+
+**Why `info/exclude` and not a `.gitignore` line.** `.gitignore` is **tracked content**: a line added to
+it is a change on every branch, appears in every clone's history forever, and a project that never uses
+the system folder would carry it anyway. `info/exclude` is unversioned, lives once in the common directory,
+applies to every worktree at once and survives a branch switch. It is git's own answer to "ignore this
+here and never commit the rule", which is exactly what an app-made link needs.
+
+### 13f.4 What the app must therefore hold true
+
+1. **`system` is not a project.** No `|| isSystem(name)` clause in `isProjectFolder`; `projectNames()` is
+   the projects.
+2. **The link is made, not assumed.** `Workspace.ensureSystemLinks()` runs from `ensure()` — which is on
+   every refresh — and makes the link in every project folder and every worktree. `Worktrees.make` calls
+   it for the worktree it just made, because a refresh may be minutes away.
+3. **A real folder named `system` is left alone.** The link function returns early when the path exists at
+   all: replacing a folder a person made would delete their files, and the app never deletes to tidy up.
+4. **The link is never followed by the app's own walk.** Search and the project tree do not descend into
+   `system`: a project's search must not return the account's prompt as though it were the project's text,
+   and the same file listed under every project would make every search result a duplicate.
+5. **The system folder stays locked and app-owned.** `isSystemPath` already holds the whole subtree —
+   and because `relative()` resolves the canonical path, writing `Shopping/system/x` reports as
+   `system/x` and is held by the same rule. The link gives read access, never write access.
+6. **A missing link costs nothing.** Every system read goes through `projectDir`, not through the link. The
+   link is for a person browsing a project and an agent looking around; the app's own paths never need it.
+
+### 13f.5 What this does not fix
+
+The system folder is **not versioned** — and never really was, since it had no repository. Its README, its
+prompt and its workflow templates are app-written or person-edited text with no history. That is a real
+loss of the undo the rest of the app promises, and it is stated here rather than papered over: versioning
+it would mean making it a repository again, which is what "dangling" was.
 
 ## 14. What this does not solve
 

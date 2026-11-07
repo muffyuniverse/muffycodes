@@ -28,9 +28,10 @@ class VisibilityFeatureTest : FeatureTest() {
         File(scene.workspace!!.accountDir, "loose").mkdirs()
         scene.viewModel.refresh()
 
-        // **The system project is at the root too**, because it is a project like any other — it
-        // holds the settings that belong to the whole account, and a row is how a person reaches
-        // them. Folders sort before files, then by name, so it lands after `Shopping`.
+        // **The system folder is at the root too**, as a folder — it holds the settings that belong to
+        // the whole account, and a row is how a person reaches them. It is not a *project* (§13f);
+        // this list is the folder's contents, which is a different question from `projectNames`.
+        // Folders sort before files, then by name, so it lands after `Shopping`.
         // **`.muffy` is a folder at the root now**, because report 28 asked for the app's own things
         // to be visible and locked rather than hidden. Folders sort first by lowercase name.
         assertEquals(listOf(".muffy", "loose", "Shopping", "system", "notes.txt"), scene.names())

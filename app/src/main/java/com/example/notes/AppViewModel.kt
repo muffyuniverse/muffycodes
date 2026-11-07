@@ -1936,8 +1936,12 @@ class AppViewModel @JvmOverloads constructor(
             if (q.isEmpty()) return entries
             val project = currentProject ?: return emptyList()
             val ws = workspace ?: return emptyList()
+            // **The tree the person is looking at, not main's.** This was `projectDir`, so a search
+            // inside a branch read main's files and answered with paths the branch does not have —
+            // which is the same defect as an agent writing main's files from a branch, in the one
+            // place a person would notice it as "search is wrong".
             val root = ws.projectNames().firstOrNull { it == project }
-                ?.let { ws.projectDir(it) } ?: return emptyList()
+                ?.let { ws.treeOf(it) } ?: return emptyList()
             return search(root, q)
         }
 
@@ -1961,7 +1965,10 @@ class AppViewModel @JvmOverloads constructor(
                     (child.isFile && ws.kindOf(child) == EntryKind.TEXT &&
                         ws.read(child).contains(q, ignoreCase = true))
                 if (matched) found.add(Entry(child.name, child, ws.kindOf(child)))
-                if (child.isDirectory) stack.addLast(child)
+                // **Never into a link.** Every tree holds `system` pointing at the account's own folder
+                // (§13f); descending would return the prompt and the templates as though they were this
+                // project's text — and the same files again under every other project.
+                if (child.isDirectory && !Workspace.isLink(child)) stack.addLast(child)
             }
         }
         return found.take(SEARCH_RESULTS)
@@ -5617,7 +5624,9 @@ class AppViewModel @JvmOverloads constructor(
                 // its name counts as present exactly as a file's does. Collecting
                 // only files made every existing folder look gone.
                 onDisk += name
-                if (child.isDirectory) collect(child, name)
+                // A link is not a path in this repository's history (§13f), so descending would mark
+                // the system folder's files as "still there" inside a project that never had them.
+                if (child.isDirectory && !Workspace.isLink(child)) collect(child, name)
             }
         }
         collect(dir, "")

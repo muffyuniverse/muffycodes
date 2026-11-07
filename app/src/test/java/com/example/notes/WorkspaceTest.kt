@@ -33,6 +33,133 @@ class WorkspaceTest {
         root.deleteRecursively()
     }
 
+    // ---- the system folder is not a project (§13f) ----------------------------
+
+    @Test
+    fun `the system folder is not a project, even when it holds a repository`() {
+        // **Both halves, because the second is the one that can regress.** An account made before this
+        // change can hold `system/.git` - the old rule made the folder a project, so saving a file in it
+        // made a repository. `isProjectFolder` states the rule rather than inferring it from the folder's
+        // contents, or the leftover would turn it back into the "dangling" row the operator reported.
+        workspace.ensure()
+        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        assertTrue("the folder is made by ensure()", system.isDirectory)
+        assertFalse("and it is not in the project list", workspace.projectNames().contains("system"))
+        assertFalse("nor a project by the predicate", workspace.isProjectFolder(system))
+
+        // A repository inside it changes nothing, because the name decides.
+        File(system, ".git").mkdirs()
+        assertFalse("still not a project with a .git", workspace.isProjectFolder(system))
+        assertNull("and a path through it belongs to no project", workspace.projectOf(File(system, "README.md")))
+    }
+
+    @Test
+    fun `a project at the root is still a project, so the rule did not go too far`() {
+        // The falsification for the test above: removing the old `|| isSystem` clause must not have
+        // removed the `.git` test that makes every other folder a project.
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        assertFalse("a folder with no repository is not a project", workspace.isProjectFolder(proj))
+        File(proj, ".git").mkdirs()
+        assertTrue("with one it is", workspace.isProjectFolder(proj))
+        assertEquals("and it is listed", listOf("Shopping"), workspace.projectNames())
+    }
+
+    @Test
+    fun `every tree gets the link, including a folder a person already made`() {
+        workspace.ensure()
+        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        File(proj, ".git").mkdirs()
+
+        assertTrue("the link was made", workspace.linkSystem(proj))
+        assertTrue("and it is a link", Workspace.isLink(File(proj, Workspace.SYSTEM_PROJECT)))
+
+        // **A real folder is never replaced.** A person who made their own `system` folder keeps it;
+        // replacing it to make a link would delete their files, and a convenience is never a reason
+        // for that.
+        val own = File(workspace.accountDir, "Personal")
+        own.mkdirs()
+        val real = File(own, Workspace.SYSTEM_PROJECT)
+        real.mkdirs()
+        File(real, "mine.txt").writeText("mine\n")
+        assertFalse("no link was made over it", workspace.linkSystem(own))
+        assertFalse("and it is still a real folder", Workspace.isLink(real))
+        assertEquals("with its file", "mine\n", File(real, "mine.txt").readText())
+    }
+
+    @Test
+    fun `a broken link is replaced, because the folder it named is gone`() {
+        // The one case where an existing link *is* replaced. Its target was deleted outside the app, so
+        // the link names nothing - and a link that names nothing looks exactly like a folder that was
+        // removed from the screen.
+        workspace.ensure()
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        val link = File(proj, Workspace.SYSTEM_PROJECT)
+        try {
+            java.nio.file.Files.createSymbolicLink(link.toPath(), File("gone").toPath())
+        } catch (t: Throwable) {
+            return  // a filesystem with no links: nothing to test, and nothing to claim
+        }
+        assertFalse("it is broken", link.exists())
+
+        assertTrue("so it was replaced", workspace.linkSystem(proj))
+        assertTrue("and now resolves", link.isDirectory)
+    }
+
+    @Test
+    fun `the exclude file is written in the common directory, so a worktree reads it too`() {
+        // **`if (!git.isDirectory) return` made both exclude writers silent no-ops in every worktree**,
+        // because a worktree's `.git` is a file. The fix is the common directory, which is also why one
+        // entry covers main's tree and every branch's at once.
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        File(proj, ".git/worktrees/x").mkdirs()
+        assertEquals(
+            "a plain repository answers its own .git",
+            File(proj, ".git").canonicalPath,
+            workspace.commonDir(proj)?.canonicalPath,
+        )
+
+        // A worktree, written the way git writes one: `.git` is a FILE holding the pointer, and the
+        // private folder holds a `commondir` that points back out at the shared `.git`.
+        val tree = File(workspace.accountDir, ".muffy/worktrees/Shopping/feature")
+        tree.mkdirs()
+        val private = File(proj, ".git/worktrees/Shopping-feature")
+        private.mkdirs()
+        File(tree, ".git").writeText("gitdir: " + private.absolutePath + "\n")
+        File(private, "commondir").writeText("../..\n")
+        assertEquals(
+            "a worktree answers the common directory, not the pointer",
+            File(proj, ".git").canonicalPath,
+            workspace.commonDir(tree)?.canonicalPath,
+        )
+    }
+
+    @Test
+    fun `deleting a project does not empty the system folder it links to`() {
+        // **The defect the link would have introduced.** `File.deleteRecursively()` follows a symlink, so
+        // deleting a project would walk into the account's system folder and delete its contents first.
+        workspace.ensure()
+        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val readme = File(system, Workspace.README)
+        assertTrue("the folder has something in it", readme.isFile)
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        File(proj, ".git").mkdirs()
+        File(proj, "note.txt").writeText("mine\n")
+        assertTrue("with a link", workspace.linkSystem(proj))
+
+        val deleted = workspace.delete(proj)
+
+        assertTrue("the project went: $deleted", deleted.isSuccess)
+        assertFalse("its folder is gone", proj.exists())
+        assertTrue("and the system folder's readme survived", readme.isFile)
+        assertTrue("the folder itself survived", system.isDirectory)
+    }
+
     // ---- onboarding: written, versioned, and locked ---------------------------
 
     /** The folder the pages go in. */
