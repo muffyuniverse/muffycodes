@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -720,4 +721,36 @@ class CiToolsTest {
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and it says the file is still there: $body", body.contains("report.md"))
     }
+    // ---- op: setup, the door CiSetup did not have --------------------------
+
+    @Test
+    fun `op setup makes the environment, writes the key, and never shows it`() {
+        // **The door that was missing.** `CiSetup` was written and tested and called by nothing, so
+        // the one thing that prevents "green build, unreadable artifacts" could not be done from
+        // inside the app at all. This is the wiring, and the assertion that matters is the last one:
+        // the key is a secret, so it must not appear in the answer.
+        val body = call("ci", """{"op":"setup"}""")
+
+        assertTrue("it worked: $body", body.startsWith("0"))
+        assertTrue("and says what it did: $body", body.contains("environment"))
+        assertTrue(
+            "and the key is NOT in the answer: $body",
+            credentials.secret(EncryptedLog.KEY_NAME, "")?.let { it !in body } ?: true,
+        )
+    }
+
+    @Test
+    fun `op setup stores the key where a log can be read with it`() {
+        // **The read-back, not the write.** `setSecret` returns Unit, so "it was saved" is a claim
+        // only a read can support — and a setup that wrote to the repository but not to this phone
+        // leaves every future log unreadable, which is the exact failure the function exists to
+        // prevent.
+        call("ci", """{"op":"setup"}""")
+
+        assertNotNull(
+            "the key is on this phone",
+            credentials.secret(EncryptedLog.KEY_NAME, ""),
+        )
+    }
+
 }

@@ -555,7 +555,7 @@ class AgentTools(
             "shot" to setOf("url", "full", "eval"),
             "look" to setOf("paths"),
             "query" to setOf("sql", "path"),
-            "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
+            "ci" to setOf("workflow", "branch", "limit", "event", "inputs", "op"),
             "runs" to setOf("run", "job", "grep", "word"),
             "artifact" to setOf("run", "name"),
             // **Three acts, three verbs.** Report 37: *"what is downloads command? shouldn't it be 2
@@ -3221,6 +3221,48 @@ class AgentTools(
      * put "no GitHub" in the same channel as a network failure. They are different: one is a fact
      * about the project, the other is something to retry.
      */
+    /**
+     * Sets up the sealing environment and its key, and stores the key on this phone.
+     *
+     * **The key never appears in the answer.** It goes into the vault under `MUFFY_LOG_KEY`, which is
+     * what `ci`, `runs` and `artifact` read to open a seal — and it is stored with an **empty host**,
+     * because it travels nowhere: it is used on this phone to decrypt, and sending it anywhere would
+     * be the one thing the vault exists to prevent.
+     */
+    private fun ciSetup(): String {
+        val there = when (val w = ciWhere()) {
+            is Where.Refused -> return refusal(w.said)
+            is Where.Found -> w
+        }
+        val key = EncryptedLog.newKey()
+        val done = CiSetup.run(there.gh, there.token, there.ref, key).getOrElse {
+            return refusal(Secrets.describe(it))
+        }
+        // **Saved before it is reported.** A setup that made the environment and the secret but
+        // forgot the phone's own copy would leave every future log unreadable — the exact failure
+        // this function exists to prevent. No vault is not a failure of the setup: the workflow side
+        // is done either way, and the answer says what could not be kept.
+        //
+        // **Read back, not assumed.** `setSecret` returns Unit, so "it was saved" is a claim only a
+        // read can support — the same discipline `saveModelKey` follows. A store that silently did
+        // nothing would otherwise be reported as a success.
+        credentials?.setSecret(EncryptedLog.KEY_NAME, done.key, host = "")
+        val kept = credentials?.secret(EncryptedLog.KEY_NAME, host = "") == done.key
+        return success(
+            "CI is set up for this project.\n\n" +
+                done.steps.joinToString("\n") { "- $it" } +
+                if (kept) {
+                    "\n\nThe key is stored on this phone and is not shown. It is the same key the " +
+                        "workflows seal with, so a log or an artifact can be read with `ci`, `runs` " +
+                        "and `artifact`."
+                } else {
+                    "\n\n**The key was not kept on this phone**, because there is no vault here. " +
+                        "The repository side is set up, but a log or an artifact cannot be read " +
+                        "until a key is stored."
+                },
+        )
+    }
+
     private sealed class Where {
         data class Found(val gh: GitHub, val ref: RepoRef, val token: String) : Where()
         data class Refused(val said: String) : Where()
@@ -3248,6 +3290,11 @@ class AgentTools(
      * runs costs nothing and answers the question the agent actually has while it is working.
      */
     private fun ci(args: JSONObject, deadline: Deadline): String {
+        // **`op: "setup"` is the door `CiSetup` did not have.** It was written, tested, and called by
+        // nothing — so the one thing that prevents "green build, unreadable artifacts" could not be
+        // done from inside the app at all. Every step is idempotent or reads the current state
+        // first, so running it twice is running it once.
+        if (args.optString("op").trim().lowercase() == "setup") return ciSetup()
         val event = args.optString("event").trim()
         // **The dispatch branch is entered only by saying `event`**, so a call that only reads never
         // consults the guard — a read costs nothing and has nothing to protect.
