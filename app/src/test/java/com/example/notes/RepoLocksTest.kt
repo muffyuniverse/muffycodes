@@ -202,17 +202,17 @@ class RepoLocksTest {
     /**
      * **Two worktrees of one repository are ONE lock** (§13d).
      *
-     * This is the test the whole change exists for. A linked worktree's `repo.directory` is
+     * This is the test the whole JGit upgrade was for. A linked worktree's `repo.directory` is
      * `.git/worktrees/<id>`, which is per branch — so a lock keyed on the directory would let two
      * branches of one repository commit at once, and the loser would have its live `index.lock`
      * deleted by `clearStaleLock`, which is exactly the bug this class was written to fix.
      *
-     * The worktree is made with `git` in the test, not by the app: this proves the app's lock agrees
-     * with git's own layout, which is the compatibility direction that matters.
+     * **The worktree is made by hand, in git's own four-file format**, because `git` is not on
+     * Android and a test that shelled out to it would prove nothing about the phone. It is also the
+     * only place that format is exercised.
      */
     @Test
     fun `two worktrees of one repository share a lock`() {
-        // A real repository with a real linked worktree.
         GitService.initOrOpen(dir, GitAuthor("T", "t@t")).use { repo ->
             val inserter = repo.newObjectInserter()
             val tree = inserter.insert(org.eclipse.jgit.lib.TreeFormatter())
@@ -228,10 +228,8 @@ class RepoLocksTest {
             repo.updateRef("refs/heads/main").apply { setNewObjectId(id) }.update()
         }
 
-        // **The worktree is made by hand, in git's own format** — the same four files the app will
-        // have to write (§13d.2), because `git` is not available on Android and a test that shelled
-        // out to it would prove nothing about the phone. This is also the first place that format is
-        // exercised, so a mistake in it fails here rather than on a device.
+        // git's own layout for a linked worktree: four files, and `commondir` is the one that makes
+        // the shared refs reachable — which is precisely what JGit 6.10.1 did not follow.
         val worktree = File(root, "groceries-feature").apply { mkdirs() }
         val common = File(dir, ".git")
         val private = File(common, "worktrees/groceries-feature").apply { mkdirs() }
@@ -242,18 +240,18 @@ class RepoLocksTest {
         File(common, "refs/heads").mkdirs()
         File(common, "refs/heads/feature").writeText(File(common, "refs/heads/main").readText())
 
-        // **JGit agrees it is a worktree of this repository**, which is what makes the lock's answer
-        // about the common directory meaningful rather than incidental.
+        // **JGit resolves the worktree to the shared repository**, which is the fact the lock
+        // depends on. If this assertion ever fails, the upgrade regressed.
         GitService.initOrOpen(worktree, GitAuthor("T", "t@t")).use { linked ->
             assertEquals(
                 "JGit resolves the worktree to the shared repository",
                 common.canonicalPath,
-                linked.commonDirectory.canonicalPath,
+                linked.getCommonDirectory().canonicalPath,
             )
         }
 
-        // **Held in one, and the other cannot take it.** The two paths are different directories
-        // with different `repo.directory`, and the lock is the same one.
+        // **Held in one, and the other cannot take it.** Different directories, different
+        // `repo.directory`, one lock.
         val held = CountDownLatch(1)
         val released = CountDownLatch(1)
         val thread = Thread {
@@ -265,8 +263,7 @@ class RepoLocksTest {
 
         assertTrue("the first holder started", held.await(10, TimeUnit.SECONDS))
         assertTrue("the other worktree sees it held", RepoLocks.isHeld(worktree))
-        val got = RepoLocks.tryHold(worktree, "second", 0L) { }
-        assertFalse("and cannot take it", got)
+        assertFalse("and cannot take it", RepoLocks.tryHold(worktree, "second", 0L) { })
 
         released.countDown()
         thread.join(10_000)

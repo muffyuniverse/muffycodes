@@ -1742,6 +1742,107 @@ otherwise leaving the worktree in the merging state for the agent to resolve.
 **Answer: yes, and the parts are all either already built or verified below.** But it is not free, and
 the costs are stated rather than glossed.
 
+### 13d.0 The correction: JGit 6.10.1 cannot open a linked worktree, so §13d is on hold
+
+**§13d.1's measurements were taken against the wrong jar.** The probes ran on
+`org.eclipse.jgit-7.2.1.202505142326-r`, which was what `javap` found first in the Gradle
+distribution — **the project builds against 6.10.1** (`app/build.gradle.kts:357`). Re-measured against
+6.10.1, the picture is different in the way that matters.
+
+**What 6.10.1 actually does**, on a worktree made by real `git` (`git worktree add ../wt1 -b feature`):
+
+| probe | result |
+|---|---|
+| `findGitDir(wt).build()` | `getDirectory()` = `…/.git/worktrees/wt1` — **found correctly** |
+| `getWorkTree()` | **throws `NoWorkTreeException`** — "bare repository has neither a working tree, nor an index" |
+| `findGitDir(wt).setWorkTree(wt)` | `getBranch()` = `feature` — the private `HEAD` reads fine |
+| `resolve("refs/heads/feature")` | **`null`** |
+| `getRefDatabase().getRefsByPrefix("refs/")` | **`[]`** — empty |
+| `Repository.getCommonDirectory()` | **does not exist** (arrives in 7.x) |
+| `RepositoryBuilder.setIndexFile` | **does not exist** |
+
+**The reason is one line of git's layout that 6.10.1 does not follow.** A worktree's private
+`…/.git/worktrees/wt1/` contains `commondir` pointing at `../..`; that is how every ref and object is
+reached. 6.10.1 uses a `RefDirectory` rooted at the *private* directory, finds no `refs/` there, and
+therefore reports **zero refs and zero branches**. The worktree is not merely awkward — **it is empty**.
+
+**Pointing at the common `.git` instead** (`setGitDir(common).setWorkTree(wt1)`) does read the refs
+correctly — but its `getIndexFile()` is the **main worktree's index**, so it is a repository that would
+commit into the wrong working tree. That is worse than not working.
+
+**So §13d's conclusion was withdrawn at 6.10.1** — and the reason is worth keeping: *the API was
+measured on a version the project did not use.* The lesson is the same shape as the one this project
+keeps re-learning — **read the dependency, not a plausible copy of it.**
+
+### 13d.0b The upgrade, measured: 7.8.1 makes worktrees work
+
+**The operator asked whether JGit could be upgraded, then said "do the bump and measure".** Both
+artifacts are now `7.8.1.202611041320-r` (core and `.lfs`, together — a mismatched pair fails at run
+time through the LFS SPI, not at build time).
+
+**Re-measured against 7.8.1, on the same worktree real `git` made:**
+
+| probe | 6.10.1 | 7.8.1 |
+|---|---|---|
+| `findGitDir(wt)` → `getWorkTree()` | **throws** `NoWorkTreeException` | `…/wt1` ✅ |
+| `getCommonDirectory()` | **absent** | `…/repo/.git` ✅ |
+| `getIndexFile()` | absent | `…/worktrees/wt1/index` ✅ |
+| `refs/heads/*` | **`[]`** | both branches ✅ |
+| `resolve("refs/heads/feature")` | `null` | the commit ✅ |
+
+**`findGitDir(wt).build()` alone is now enough** — no `setWorkTree` needed, because 7.x follows
+`commondir`. That is the single line that was missing.
+
+**Java 17 is not an obstacle, and was never the real question.** This app already compiles to
+`VERSION_17` / `JVM_17`, so CI has been dexing major-61 bytecode on every build. Checked for the two
+things that could still bite:
+
+- **Records and Java 17 APIs**: 7.8.1's records live in `dfs`/`midx`, unreachable from
+  `FileRepository`. **Zero** uses of `String.isBlank`, `List.of`, `Files.readString`, `Stream.toList`
+  — nothing needing core-library desugaring.
+- **Sealed classes**: 18, including `MergeResult.MergeStatus`, which this app uses
+  (`GitService.kt:617`, `CONFLICTING`). The constant still exists in 7.8.1. R8 on sealed classes is a
+  **build-time** failure if it happens — CI says so in six minutes, not a device mystery.
+
+**What this restores**, both of which were reverted at 6.10.1:
+
+- `RepoLocks` keys on `getCommonDirectory()`, so two worktrees of one repository are one lock.
+- `LfsStore.dirOf` uses `getCommonDirectory()`, so LFS objects are shared across branches.
+
+Both are proven by `RepoLocksTest`, whose worktree is written by hand in git's four-file format (no
+`git` binary on Android) and which asserts JGit resolves that hand-written worktree to the shared
+repository.
+
+**The LFS network client is NOT obsolete, and this was measured rather than assumed.** The new
+`LfsConnectionFactory$AuthCache` looks like a credential cache and is not one: it holds an
+`ExpiringAction` — the batch response's own expiry — and the request still sets exactly three headers
+(`Accept`, `Accept-Encoding`, `Content-Type`), with **no `Authorization` anywhere in the class's
+constant pool**. Upstream `eclipse-jgit/jgit#11` is still open with no fix version. So the split
+stands: JGit for the pointer format, the clean filter and the blob loader; `LfsClient` for the batch
+API, because it is the only half that can send a token.
+
+**What this leaves standing from §13d:**
+
+- **`GitService.merge` already does merge-only-if-clean** (`:591`). That is true at 6.10.1 and is the
+  one part of §13d that needs nothing from worktrees.
+- **The branches screen is worth keeping and is already built** (`BranchesScreen`, `localBranches`,
+  `createBranch`, `deleteBranch`). It lists and makes branches in *one* working tree. Checking a
+  branch out switches that tree, which is what the app can do today.
+- **The `RepoLocks` and `LfsStore` "common directory" fixes are reverted**, because the API they need
+  does not exist. Both files say so, and point here.
+
+**The options, when the operator wants branches-with-separate-working-copies:**
+
+1. **Upgrade JGit to 7.x.** `getCommonDirectory()` then exists, and `RepoLocks`/`LfsStore` can be
+   keyed correctly. **Still unproven**: 7.2.1's `getCommonDirectory()` was confirmed present, but a
+   worktree's refs were not re-probed there, so this is the first thing to measure if it is chosen.
+2. **Upgrade git itself on the device** — not possible; the app ships JGit.
+3. **Keep one worktree and switch branches in it.** No new mechanism, and the branches screen already
+   works. The cost is that two agents cannot work on two branches at once, which is the whole point of
+   §13d — so this is a fallback, not the answer.
+4. **Write the worktree bookkeeping by hand and make JGit see it.** Not available: the blocker is
+   `RefDirectory` not following `commondir`, which is inside JGit and not something a caller can fix.
+
 ### 13d.1 What was measured, on this machine, with the app's own JGit
 
 | question | answer | how |

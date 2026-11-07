@@ -36,6 +36,9 @@ object LfsStore {
      * would give every branch its own LFS objects, and a picture checked out on one branch would be a
      * missing object on another. Objects are content-addressed and shared; that is what
      * `getCommonDirectory()` names, and for a repository with no worktrees it is the same path.
+     *
+     * **This needed JGit 7.x** (§13d.0): 6.10.1 has no such method, so the store was keyed on the
+     * worktree directory and a worktree could not have been supported at all.
      */
     fun dirOf(repo: Repository): File = File(repo.getCommonDirectory(), "lfs/objects")
 

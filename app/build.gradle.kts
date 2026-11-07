@@ -354,7 +354,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
-    implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r")
 
     // **LFS is in the build, and JGit's own client is only half of it.**
     //
@@ -372,7 +372,14 @@ dependencies {
     // the app's own token, and `LfsSync` orders the two so that objects reach GitHub before the ref
     // that names them does.
     //
-    // Upstream: eclipse-jgit/jgit#11 is open with no fix version, and reports the same `rc=401`.
+    // **Re-measured on 7.8.1, 2026-11-07: still not fixed, so this client stays.** The new
+    // `LfsConnectionFactory$AuthCache` looks like a credential cache and is not one — it holds an
+    // `ExpiringAction` (the batch response's own expiry), and the request still sets exactly three
+    // headers: `Accept`, `Accept-Encoding`, `Content-Type`. No `Authorization` anywhere in the
+    // class's constant pool. Upstream eclipse-jgit/jgit#11 remains open with no fix version.
+    //
+    // So the split is unchanged: JGit for the pointer format, the clean filter and the blob loader;
+    // `LfsClient` for the batch API, because it is the only half that can send a token.
 
     // **Large files, in Java, with no `git-lfs` binary.** The official client is a Go program and
     // there is no android-arm64 build of it — but JGit's own implementation is pure Java and this is
@@ -390,7 +397,7 @@ dependencies {
     // `Runtime.exec`, and the only one that spawns anything is `InstallBuiltinLfsCommand`, which this
     // app never calls.
     //
-    implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:6.10.1.202505221210-r")
+    implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:7.8.1.202611041320-r")
     implementation("com.google.code.gson:gson:2.11.0")
 
     // **GitHub's secret API needs libsodium's sealed box**, and there is no way around it: the
