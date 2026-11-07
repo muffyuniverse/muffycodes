@@ -127,6 +127,7 @@ private sealed interface Pending {
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
     /** Local -> synced: a repository, seeded with the licence the person picks. */
+    data class Release(val project: String) : Pending
     data class PublishProject(val project: String) : Pending
     /** Synced -> local: the remote goes, every version stays. */
     data class KeepLocal(val project: String) : Pending
@@ -558,6 +559,9 @@ private fun AppRoot(viewModel: AppViewModel) {
                 // **The same function the agent's `downloads` tool calls**, so a person's export and
                 // the agent's are the same bytes from the same place.
                 onRowExport = { project -> tap("export", project); viewModel.exportArtifact(project) },
+                // **The release button on the project's strip.** It is offered only when nothing is
+                // unsent, so the window is reached exactly when a version can honestly be named.
+                onRelease = { project -> tap("publish release", project); pending = Pending.Release(project) },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onCreateImage = { tap("new image"); viewModel.currentDir?.let { pending = Pending.NewImage(it) } },
@@ -825,6 +829,15 @@ private fun Dialogs(
                       Trace.tap("confirm rename project", pending.project)
                       viewModel.renameProject(pending.project, name)
                   },
+        )
+
+        is Pending.Release -> ReleaseDialog(
+            project = pending.project,
+            onDismiss = dismiss,
+            onRelease = { version, devBuild ->
+                Trace.tap("confirm publish release", version)
+                viewModel.startRelease(version, devBuild)
+            },
         )
 
         is Pending.PublishProject -> PublishProjectUI(

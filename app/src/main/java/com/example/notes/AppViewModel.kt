@@ -3600,6 +3600,16 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val project = path.firstOrNull() ?: return
+        // **The button is offered only when nothing is unsent, and this is the same rule stated where
+        // it cannot be bypassed.** A version published from a tree with unsent work would name a commit
+        // GitHub does not have — the release would be of different code from the one the person is
+        // looking at, and nothing on GitHub would say so.
+        val unsent = changesOf(project)
+        if (unsent > 0) {
+            message = "$project has $unsent change(s) not sent yet, so a release would name a " +
+                "version of code GitHub does not have"
+            return
+        }
         val ref = RepoRef.of(git?.remoteUrl(project).orEmpty())
         if (ref == null) {
             message = "$project has no GitHub repository, so there is nothing to release"

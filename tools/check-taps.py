@@ -83,6 +83,8 @@ VOCABULARY = {
     "publish", "keep local", "confirm publish", "confirm keep local",
     # a project's newest artifact out to the phone, through the same function the agent's tool uses
     "export",
+    # publishing a release from inside the app (§13b.7): the strip's button, then the window's press
+    "publish release", "confirm publish release",
     # the account
     "add account", "confirm add account", "remove account", "use test account",
     # entering and leaving an account's folder — the main menu is the list of them (§13c.2)

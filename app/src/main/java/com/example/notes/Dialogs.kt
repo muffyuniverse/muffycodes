@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1636,5 +1637,84 @@ fun ModelKeyDialog(
                 Text(if (signIn) "Back" else "Cancel")
             }
         },
+    )
+}
+
+/**
+ * **Publishing a release: one field, one checkbox, and the rule as you type.**
+ *
+ * The operator chose this shape (§13b.7): a button in the sync slot, offered only when nothing is
+ * unsent, because *"a version published from a tree with unsent work would name a commit GitHub does
+ * not have"*. This is the window behind it.
+ *
+ * **`Release.nameProblem` is shown while the person types, not after they press.** The name becomes a
+ * git tag and a release title, so an em dash in it is refused by git ten seconds into a pipeline —
+ * and the workflow refuses it too, which is a pipeline spent to learn something a regular expression
+ * answers now. The same function is what the workflow's rule was written from, so the two cannot
+ * disagree about what a version name is.
+ *
+ * **Tested as a function, never driven.** `AlertDialog`'s enter animation never reports idle under
+ * Robolectric in this repository, so every dialog here is asserted at the rule and never typed into.
+ */
+@Composable
+fun ReleaseDialog(
+    project: String,
+    onDismiss: () -> Unit,
+    onRelease: (versionName: String, devBuild: Boolean) -> Unit,
+) {
+    var version by remember { mutableStateOf("") }
+    // **Off by default.** A dev build is an extra copy of the same APK for installing over a release;
+    // a person publishing a version has not asked for one, and a checkbox left ticked from a previous
+    // release would quietly double what the pipeline produces.
+    var devBuild by remember { mutableStateOf(false) }
+    val problem = Release.nameProblem(version.trim())
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Publish a release of $project") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "The workflow builds and signs the app, then attaches it to a release named " +
+                        "after this version. It takes about ten minutes, and it publishes only " +
+                        "from ${Release.BRANCH}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = version,
+                    onValueChange = { version = it },
+                    label = { Text("Version, for example 1.5") },
+                    singleLine = true,
+                    isError = version.isNotEmpty() && problem != null,
+                    supportingText = {
+                        // **Silent while empty.** "Say what version this is" under an untouched field
+                        // is the app scolding somebody for not having typed yet.
+                        if (version.isNotEmpty() && problem != null) Text(problem)
+                    },
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { devBuild = !devBuild },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(checked = devBuild, onCheckedChange = { devBuild = it })
+                    Text(
+                        "Also build a dev copy",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = problem == null && version.isNotBlank(),
+                onClick = {
+                    onRelease(version.trim(), devBuild)
+                    onDismiss()
+                },
+            ) { Text("Publish") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

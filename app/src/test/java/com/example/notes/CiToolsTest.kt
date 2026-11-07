@@ -559,19 +559,21 @@ class CiToolsTest {
     }
 
     @Test
-    fun `naming a branch this project does not have is refused, and says which one it has`() {
-        // **A typo check, not a permission question.** With one branch there is nothing to protect,
-        // but a model that asked for `development` believed something about this project that is not
-        // true — and silently substituting `main` would let it go on believing it.
+    fun `a named branch is dispatched as asked, and an unnamed one uses the agent's own`() {
+        // **This used to be a refusal that called every name but `main` a typo**, and that was true
+        // while a project had one branch. With branches (§13d) a name the model gives is a real
+        // branch, and whether a workflow may *run* on it is the environment's rule — a rule GitHub
+        // enforces and this tool cannot see. A second check here would be a second answer that could
+        // disagree with the one that decides.
         workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
 
-        val body = call(
+        val named = call(
             "ci",
             """{"event":"workflow_dispatch","workflow":"build.yml","branch":"development"}""",
         )
 
-        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("it names the branch this project has: $body", body.contains("`main`"))
+        assertTrue("it was dispatched: $named", named.startsWith(AgentLog.SUCCESS))
+        assertTrue("on the branch that was asked for: $named", named.contains("development"))
     }
 
     @Test

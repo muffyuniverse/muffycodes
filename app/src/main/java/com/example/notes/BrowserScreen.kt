@@ -313,6 +313,14 @@ fun BrowserScreen(
     onRowChat: (String) -> Unit,
     /** Exports the project's newest artifact, or the project's own files when it has none. */
     onRowExport: (String) -> Unit = {},
+    /**
+     * Opens the window that publishes a release of [project] (§13b.7).
+     *
+     * **A parameter because the window is the app's.** Every other menu item here already reaches the
+     * app through one of these callbacks; the release button on the strip is the same act as the menu
+     * items beside it, so it takes the same road rather than reaching into a dialog of its own.
+     */
+    onRelease: (String) -> Unit = {},
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
     /** Local -> synced. Asks for a licence first, because publishing is a decision. */
@@ -505,7 +513,19 @@ fun BrowserScreen(
         ChangesWindow(viewModel)
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
-                ProjectSlimRow(viewModel)
+                // **The release door, one level up.** The row draws the button when there is nothing
+                // unsent; what the button opens is the app's window, which the screen does not own.
+                ProjectSlimRow(
+                    viewModel,
+                    // **A release is published from `main`, so it is offered on main's tree only.** A
+                    // button on a branch would dispatch `main` while the person is looking at
+                    // `feature` — a version named after code they cannot see, from a tree whose count
+                    // is about a different folder. The work has to reach main first, and that is the
+                    // person's act, not a button here.
+                    onRelease = viewModel.currentProject
+                        ?.takeIf { viewModel.activeBranch == AgentSession.MAIN }
+                        ?.let { project -> { onRelease(project) } },
+                )
 
                 // **One line, and only when a key on the phone is missing from CI.** The person has
                 // the material, the build cannot see it, and their next release would be unsigned —
