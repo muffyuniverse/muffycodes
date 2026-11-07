@@ -953,6 +953,276 @@ asserts a sentence is only as good as the fake's ability to produce it.
 
 ---
 
+## 13b. One branch, one actor, no theatre — the settled decisions
+
+Recorded 2026-11-07 after a long conversation with the operator. **Most of this section is deletion.**
+The tree gets smaller, and several features that looked like safety turn out to be claims rather than
+guarantees.
+
+### 13b.1 One branch: `main`
+
+The two-lane split (person → `main`, agent → `development`) was the operator's own earlier decision,
+and it is ended: *"lets keep only main"*.
+
+- `AgentTools.AGENT_BRANCH` → `AgentTools.BRANCH = "main"`. The dispatch guard stays, but it is now a
+  **typo check, not a boundary** — there is only one branch for it to agree with.
+- `.github/workflows/build-and-release.yml`: `branches: [main, development]` → `[main]`.
+- `ReleaseKey.BRANCHES` → `listOf("main")`.
+- **The `development`-only steps become dead** and go with it: the dev-APK job condition
+  (`ref_name != 'main'`) can never be true, so `dev-apk` and `build-bundle` stop being produced by a
+  push. They stay reachable through `workflow_dispatch`'s `dev_build` input, which is the only
+  remaining way to get a debug build from CI.
+- **The publish guard stays `ref == 'refs/heads/main'` and does NOT gain an event condition.** A draft
+  of this change added `event_name == 'push'`, reasoning that the branch was the only thing stopping an
+  agent from publishing. That reasoning was right about the mechanism and wrong about the intent: the
+  operator wants the agent able to make releases, and `Release.start` publishes through
+  `workflow_dispatch`. Adding the condition would have broken the app's own release button.
+
+### 13b.2 The workflow lock gate is deleted
+
+`start()` refuses to dispatch a workflow that names an environment unless a person has **locked** the
+file. The operator's argument, and it is decisive:
+
+> *"I hate workflow approval gate... relying on human to check the code before it is dispatched isnt a
+> guarantee and a bad experience — better to trust the agent more and just prevent accidental mistakes
+> with http auth."*
+
+**The gate's premise is that a person audits the YAML, and that premise fails three ways:**
+
+1. **The YAML is not the danger.** `run: ./script.sh` — the danger is in the script, which the agent
+   wrote and can rewrite after the lock. Locking a file that calls a file locks nothing.
+2. **It does not scale.** Every new workflow needs a press. The natural response is to lock
+   everything, which is the same as locking nothing.
+3. **It inverts the trust model.** The agent can already push a workflow file and let `push` trigger
+   it — no gate, no press. So the gate blocks the *dispatch* path while leaving the *push* path open.
+
+**What is kept:** `isLocked` still means "the agent may not overwrite this file". That is a different,
+useful rule about *writing*, and it stays.
+
+**What replaces the gate:** nothing in the app. The only mechanism that actually constrains a runner is
+**required reviewers on the `release` environment**, which GitHub enforces whatever started the run.
+That is a press on an *act*, not an audit of *bytes*.
+
+### 13b.3 No workflow split
+
+The idea was `build.yml` (`contents: read`, artifacts) + `release.yml` (`contents: write`, releases).
+**It buys nothing**, because the agent can write a workflow declaring `contents: write` itself. One
+actor, one capability. **One workflow file.**
+
+### 13b.4 GitHub secrets are theatre, except one
+
+The operator's argument, which is airtight:
+
+> *if secrets available on github are not secrets then we dont even need to hide them... only http
+> secrets make sense because they are protected with destination guard.*
+
+The chain: a secret in a runner is readable by the code in that runner; the agent writes that code;
+therefore **any secret the agent's workflows can use, the agent can read**.
+
+- **No GitHub-secret management UI.** The two API calls it would need
+  (`GET /repos/{o}/{r}/actions/secrets/public-key`, `PUT .../secrets/{name}`) are not written.
+- **No environment secrets beyond signing.** `MUFFY_LOG_KEY` moves to a gitignored project file, where
+  it is honestly not a secret rather than dishonestly one.
+- **The signing key stays an environment secret with required reviewers**, and it is the *only* one.
+  Its danger is not "the agent learns it" — it is that **it is published forever**: anyone can extract
+  it from the APK, and every future update must be signed with it or devices refuse the update. It is
+  the only irreversible secret in the system.
+- **`http`'s `auth:` guard stays and is the model to follow.** It is the one guard in the system that
+  constrains the *agent* rather than gating a *person*: a secret stored for `api.stripe.com` cannot be
+  sent to `evil.com`, whatever the agent writes. It costs nothing and it is real.
+
+### 13b.5 No encryption anywhere
+
+Three designs were considered and all are rejected:
+
+| Design | Why rejected |
+|---|---|
+| Encrypted archive on the remote, decrypted on pull | Git push/pull are ref updates, not file transfers. A blob has no git server; push becomes "upload a bundle file", pull "download and fetch from it". **Whole history every time**, and the app must own "what has the remote got" — which is exactly what git's ref negotiation does for free. |
+| Clean/smudge filter (git-crypt's design) | Works, and JGit has the API (`FilterCommand`, `FilterCommandRegistry`). But **LFS stores bytes outside git**, so no filter can reach a picture — and pictures are the bulk of a notes project. Filtering everything means dropping LFS and growing history by every picture version forever. |
+| Encrypt the transport | Not possible: **a git object's name is the SHA-1 of its content.** Changing the bytes changes the identity, so the tree no longer points at the object. Making it work means rewriting every commit — that is a rebase on every push. |
+
+**The decision: open or private is the user's choice at project creation, and nothing is encrypted.**
+That choice already exists — `PRIVATE_LICENCE` is the default in the licence window (`Dialogs.kt:490`),
+and a licensed repository is public. No work needed.
+
+### 13b.6 Token separation: app token and agent token
+
+The operator's decision: *"we need to separate the token agent uses and what app uses. we can add
+secrets scope to app's access token and mint repo scoped tokens for agents."*
+
+**Measured constraint, and it decides the mechanism:** GitHub's API can create fine-grained PATs **only
+for organizations, and only from a GitHub App**. A user cannot mint a scoped PAT from another token.
+
+So "mint a repo-scoped token" means **a GitHub App**, not a PAT:
+
+| | today | with an App |
+|---|---|---|
+| Identity | the person's OAuth user token | an App installation |
+| Scope | every repo the person can reach | the repos the App is installed on |
+| Lifetime | until revoked | **1 hour**, auto-renewed |
+| Minted by | device flow | JWT → installation token |
+
+**What this costs:** a GitHub App must be registered (a second registration beside the OAuth App), and
+its private key must live somewhere — which puts it back in the "a secret in an APK is not a secret"
+problem the device flow was chosen to avoid (`DeviceFlow.kt:10`). An App's private key cannot be
+device-flowed.
+
+**What is buildable without an App, and is most of the value:** keep the user token for the *app*, and
+give the *agent* nothing — because every agent operation already targets exactly one repository:
+
+| agent call | target |
+|---|---|
+| `push` | this project's remote |
+| `ci` / `runs` / `artifact` | this project's repo |
+| `http` | a vault secret bound to a host |
+
+**So the agent never needs a cross-repo token.** The cheapest real improvement is to **drop
+`delete_repo` from `TokenScopes.REQUIRED`** — it is the one irreversible capability in the set — and
+have "delete project" leave the remote and tell the person to delete it on github.com. That reduces
+blast radius with no new registration and no new key.
+
+### 13b.7 The publish button, where Sync was
+
+`AppViewModel.startRelease(versionName, devBuild)` at `:3473` calls `Release.start` at `:3489`, and
+**nothing calls `startRelease`.** `Release.start`, `Release.nameProblem` and `Release.Report.said()` are
+all tested and all **unreachable** — the app cannot publish a release from inside it at all. The same
+defect `CiSetup` had before it got a door.
+
+**The operator chose design B: a prominent button in the sync slot on the project row**, because *"it
+is prominent and operator may see that local git has no new commits after last push and just press a
+button."*
+
+The slot is free — `BrowserScreen.kt:591` removed the Sync button when that decision moved to the
+agent. **But a release is a different question from a sync.** Sync asks "send what is here", and the
+reason it was removed is that two writers could disagree about *which commit is being sent*. A release
+names a **version**, and only a person decides that.
+
+States for the button:
+
+| project state | button |
+|---|---|
+| local, no remote | nothing (the menu has "Put on GitHub…") |
+| synced, N unsent | **"N unsent"** — information, not an action, exactly as today |
+| synced, up to date | **"Publish…"** |
+
+Tapping "Publish…" opens a dialog with one field (the version name) and a `devBuild` checkbox, showing
+`Release.nameProblem` inline as the person types. **The dialog is tested as a function, not driven** —
+`AlertDialog` never reports idle under Robolectric in this repo, which is a known limit.
+
+### 13b.8 One vault, three scopes
+
+**The operator's decision, 2026-11-07:** *"one single secrets vault and one window to manage it in
+settings. and scope selector field that user can choose all projects or some specific project from the
+list of projects inside the app. and when project is deleted secrets from its scope are also
+deleted."*
+
+Today the vault has **one scope**: `secret_${login}_$name`, so a secret added for one project is
+readable by the agent in **every** project. For a shared `stripe` key that is right. For "the API token
+for this client's system" it is not.
+
+#### The three scopes
+
+| scope | key shape | who can read it | why it exists |
+|---|---|---|---|
+| **app** | `token_$login`, `modelKeyKey(login)` — **a separate pref namespace** | the app only | The agent must never be able to name these, and it cannot: `secret()` reads `secret_` keys, so **no `auth:` value resolves to a token**. Unreachable by construction, not by policy. |
+| **account** | `secret_${login}_$name` | every agent, on every project | A key several projects share |
+| **project** | `secret_${login}_${project}_$name` | agents in **this project only** | A key that belongs to one project |
+
+**The app scope does not move into the vault.** It stays a separate namespace, because the fact that
+`http {auth: …}` cannot reach the GitHub token is worth more than the tidiness of one model. That
+guarantee is structural — there is no name to guess — and folding it into a scope field would replace
+a construction with a rule.
+
+#### Resolution order
+
+`http {auth: "x"}` asks **project first, then account**:
+
+1. `secret_${login}_${project}_x` — if present, that is the answer
+2. `secret_${login}_x` — otherwise the account-wide one
+3. neither → the refusal names **both** places it looked, so a person knows which scope to add it to
+
+**A project secret shadows an account secret of the same name**, and that is deliberate: a project that
+needs a different key for the same service should be able to say so without renaming anything. The
+refusal for a *wrong-host* secret says which scope it was found in, because "stored for another host"
+and "stored for another project" are different facts and only one of them is fixable by editing a host.
+
+#### What the window shows
+
+**One screen** — `SecretsScreen`, which already exists. Each row gains its scope:
+
+```
+stripe            api.stripe.com        all projects
+acme-api          api.acme.test         acme-site
+MUFFY_LOG_KEY     (this phone only)     all projects
+```
+
+**The add dialog gains one field**: a scope selector, a dropdown of **All projects** plus the list of
+projects. It **defaults to the project the person came from** when the screen was opened from a project,
+and to **All projects** when opened from Settings — because the safer default is the narrower one, and
+the screen is reached both ways.
+
+#### Deletion
+
+**Deleting a project deletes that project's secrets**, in the same act, before the folder goes. This is
+the rule the operator asked for and it is also the only correct one: a secret whose project no longer
+exists is a row nothing can ever read, and leaving it would be a leak nobody can see.
+
+**Account secrets are untouched** — they were never that project's.
+
+The deletion is ordered **secrets first, folder second**, because the reverse leaves a window where the
+folder is gone and the secrets are not, and nothing would then know which project they belonged to.
+
+#### What this costs
+
+| place | change |
+|---|---|
+| `CredentialStore` | five secret methods gain a `project: String?` parameter (null = account scope) |
+| `AppViewModel` | four wrappers follow |
+| `AgentTools` | two `auth:` call sites pass `project` — which it already holds as a field |
+| `Scenario.kt` `MemoryCredentials` | the override follows |
+| `SecretsScreen` | a scope column and a scope selector |
+| project deletion | one call, before the folder goes |
+
+**~12 call sites, all mechanical**, and the migration is free because **no project secrets exist yet** —
+there is nothing to move.
+
+#### What it is not
+
+**It is a blast-radius control, not a secrecy control.** The agent runs with the vault available, so a
+secret in *this* project's scope is readable by any code the agent writes *in this project*. What
+project scope prevents is project A's agent reading project B's key. That is worth having, and it is
+less than it sounds.
+
+**Same sentence for the app scope:** the GitHub token is unreachable through `auth:`, but the app's own
+tools still use it (`ci`, `push`), so the agent acts with it. What is prevented is the token travelling
+to an arbitrary URL, not the agent using GitHub.
+
+### 13b.9 Open, and their costs
+
+**All four were decided on 2026-11-07. None is open any more.**
+
+| # | Decision |
+|---|---|
+| 1 | **Drop `delete_repo`.** "Delete project" leaves the remote and says so; the person deletes it on github.com. It is the one irreversible capability in the token set and the app does not need it. |
+| 2 | **The size limit moves to Settings**, default 100 MB. `Fetcher.LIMIT_BYTES` becomes a pref read at the six call sites. |
+| 3 | **Release by run id: not now.** It is the one piece of the workflow split worth keeping, and it is a feature rather than a cleanup — a run picker, a workflow step, and a decision about what happens when the artifact has expired. Recorded, not scheduled. |
+| 4 | **No GitHub App, yet.** Its cost lands on the one decision (`DeviceFlow.kt:10`) that made sign-in secretless, and item 1 gets most of the benefit for none of it. |
+
+### 13b.10 The order this is built in
+
+**Each step is separately shippable and separately verifiable.** The tree is never half-changed between
+commits.
+
+| # | Step | Why here |
+|---|---|---|
+| 1 | One branch: `main`, `[main]`, `ReleaseKey.BRANCHES`, dead conditions marked | Smallest change, and everything else assumes it |
+| 2 | Delete the workflow lock gate | Deletion; nothing depends on it once it is gone |
+| 3 | Drop `delete_repo` from `TokenScopes.REQUIRED` and `DeviceFlow.SCOPE` | Two constants and one message; independent of everything |
+| 4 | Size limit in Settings | Independent; one pref and six reads |
+| 5 | Project-scoped secrets | The largest; touches `CredentialStore`, `AppViewModel`, `AgentTools`, `SecretsScreen`, project deletion |
+| 6 | The publish button in the sync slot | Needs nothing from 1–5, but it is the one that changes a screen, so it goes last |
+| 7 | `unseal`, so `http` covers artifacts | Optional; only worth it if `artifact` proves redundant |
+
 ## 14. What this does not solve
 
 - **CI portability.** §1's missing quarter. `http` makes providers reachable, never interchangeable.

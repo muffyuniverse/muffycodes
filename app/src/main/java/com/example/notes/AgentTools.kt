@@ -239,14 +239,17 @@ class AgentTools(
         const val MAX_RESULT = SettingsStore.DEFAULT_MAX_RESULT
 
         /**
-         * The branch an agent's push goes to — **a constant, never an argument.**
+         * **There is one branch, and this is its name.**
          *
-         * The operator's decision: *"person pushes to main, while agent pushes to dev."* `main` is
-         * where a release is published, and an agent that could name it could publish one. So there is
-         * no `push(branch)` tool: there is `push()`, and it goes here. A refspec built from a tool
-         * argument is one typo — or one injected instruction — away from a release.
+         * There used to be two: a person pushed to `main` and an agent to `development`, so that an
+         * agent could not publish a release. The operator ended that: *"lets keep only main"*. What
+         * makes it safe is not the branch but the **dispatch**, which names a workflow file and an
+         * event — never a publish. A push is a push on either design; the two lanes only ever
+         * separated the *conclusion* a run reached.
+         *
+         * So this is no longer a boundary. It is the branch a project has, said once.
          */
-        const val AGENT_BRANCH = "development"
+        const val BRANCH = "main"
 
         /**
          * The most pictures one `look` may attach.
@@ -857,8 +860,9 @@ class AgentTools(
                     "A run that has not finished has no conclusion, and is shown as `running` " +
                     "rather than as a failure. Use `runs` to read what a run actually said. " +
                     "**With `event` set to `workflow_dispatch`, it starts the workflow instead.** " +
-                    "It runs on `development`, and `branch` may only repeat that: `main` " +
-                    "publishes a release, so it is started by the person and never from here. " +
+                    "It runs on `main`, the project's only branch, and `branch` may only repeat " +
+                    "that. **Starting a workflow is not publishing a release**: a release is a " +
+                    "version and a tag, and no tool here can make one. " +
                     "`inputs` are the workflow's own dispatch inputs, as strings. " +
                     "**A runner is a sandbox for the machine and not for the repository**: every " +
                     "workflow in a repository can read every repository secret, so a workflow you " +
@@ -870,7 +874,7 @@ class AgentTools(
                     "makes a log or an artifact readable afterwards; every step is idempotent, so " +
                     "running it twice is running it once, and the key is stored on this phone " +
                     "without being shown.",
-                "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\"," +
+                "{\"workflow\":\"build-and-release.yml\",\"branch\":\"main\"," +
                     "\"limit\":10,\"event\":\"workflow_dispatch\",\"inputs\":{},\"op\":\"\"}",
             ),
             spec(
@@ -3371,23 +3375,22 @@ class AgentTools(
                     "\"workflow\":\"build-and-release.yml\"}. `ci` with no `event` lists runs.",
             )
         }
-        // **The branch is the agent's own, and naming another is refused rather than ignored.**
+        // **There is one branch, so `branch` can only agree.** A project has one branch and this is
+        // its name; naming a different one is a mistake about *this project*, not a permission
+        // question, and it is refused rather than silently replaced so that a model which thought it
+        // was starting something somewhere else finds out.
         //
-        // `AGENT_BRANCH` used to be only the *default*, so `{"branch":"main"}` would dispatch on main —
-        // which is where a release is published, and the one path the two-lane decision exists to keep
-        // out of the agent's hands. A default that can be overridden is not a boundary.
-        //
-        // It is refused rather than silently replaced, because a model that asked for main and got
-        // development would believe it had started a release.
+        // This guard used to be a boundary: `main` published a release, so an agent that could name
+        // it could publish one. That ended with the second branch — a release is started by `Release`,
+        // which is a person's two presses and no tool at all. What is left is a typo check.
         val asked = args.optString("branch").trim()
-        if (asked.isNotEmpty() && asked != AGENT_BRANCH) {
+        if (asked.isNotEmpty() && asked != BRANCH) {
             return refusal(
-                "The agent starts workflows on `$AGENT_BRANCH` only, and this call asked for " +
-                    "\"$asked\". `main` publishes a release, so it is started by the person and " +
-                    "never from here. Leave `branch` out, or say `$AGENT_BRANCH`.",
+                "This project has one branch, `$BRANCH`, and this call asked for \"$asked\". " +
+                    "Leave `branch` out, or say `$BRANCH`.",
             )
         }
-        val branch = AGENT_BRANCH
+        val branch = BRANCH
         val there = when (val w = ciWhere()) {
             is Where.Refused -> return refusal(w.said)
             is Where.Found -> w

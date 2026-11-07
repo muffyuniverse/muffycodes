@@ -378,10 +378,11 @@ class ReleaseKey(private val properties: File) {
         /**
          * The branches that may use the `release` environment.
          *
-         * **`main` publishes and `development` builds an installable APK signed with the same key** —
-         * that is deliberate, so a dev build installs over the release one. Both need the key; nothing
-         * else does.
+         * **One, because there is one branch.** This was `["main", "development"]` so that a dev build
+         * could be signed with the release key and install over the release APK — deliberate, and it
+         * worked. With the second branch gone the list has one entry, and the rule that matters is
+         * unchanged: **only this branch may reach the signing key.**
          */
-        val BRANCHES = listOf("main", "development")
+        val BRANCHES = listOf("main")
     }
 }

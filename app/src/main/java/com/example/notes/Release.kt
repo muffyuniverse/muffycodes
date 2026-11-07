@@ -5,7 +5,7 @@ package com.example.notes
  *
  * ## Why this is separate from the `ci` tool
  *
- * `AgentTools`' `ci` dispatches on `AGENT_BRANCH` and **refuses any other branch**, because `main`
+ * `AgentTools`' `ci` dispatches on [AgentTools.BRANCH] and **refuses any other branch**, because `main`
  * publishes. This class is the other lane: it dispatches on [BRANCH], and the only way to reach it is a
  * button in the app that a person pressed.
  *
@@ -28,8 +28,10 @@ object Release {
     /**
      * The branch a release is published from.
      *
-     * **`main`, and this constant is the only place the app says so.** The agent's own constant is
-     * [AgentTools.AGENT_BRANCH] and the two are deliberately not derived from one another.
+     * **`main`, and this constant is the only place the app says so.** [AgentTools.BRANCH] says the
+     * same word for the same reason; they are deliberately not derived from one another, because a
+     * release branch and the branch a project happens to have are two different claims that must be
+     * able to disagree. Today they agree.
      */
     const val BRANCH = "main"
 
