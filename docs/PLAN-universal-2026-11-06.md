@@ -2027,6 +2027,23 @@ Both are tested in `ProjectGitTest` against a hand-built worktree (JGit has **no
 **The release key.** A per-branch key means every branch signs differently and Play rejects the update,
 so `ReleaseKey.FILE` is one per project. It is the only exception to the worktree rule found so far.
 
+#### What step 3 has landed, and the one thing it has not
+
+**Landed** (`98281e4` … `12702fb`): the branch screen is reachable and real (add/remove open dialogs and
+say their refusals); `agents.json` is keyed by project **and** branch with **no migration** (`main` keeps
+the bare project name); the notification id and the Stop action are per worktree; `Worktrees` makes a
+branch's folder by writing git's four files and checking the tree out, verified against real `git`
+(`worktree list` accepts it, `status` is clean, a commit in it moves only that branch); `Workspace.fileAt`
+resolves through the open branch and `relative` reverses it; `enterBranch` makes the folder, sets the
+branch and shows the files.
+
+**Not landed, and it is the pointed end:** the *agent* still resolves its files with
+`ws.projectDir(project)`, which is `main`'s tree. A worktree-scoped agent needs its own
+`Workspace`/branch pairing — the session's branch has to reach `AgentTools`' `projectDir`, `AgentLog`,
+`SearchIndex` and `requests/`. Until that is done, an agent on `feature` reads and writes main's files
+while its session, notification and diary are correctly per-branch — which is worse than not having
+branches, because the screen says `feature`.
+
 #### And it settles the merge question
 
 **A worktree can only merge into the branch it has checked out**, so an agent on `feature` cannot merge
