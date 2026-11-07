@@ -1117,9 +1117,11 @@ class ProjectGitTest {
         repo!!.use {
             assertNotNull("HEAD resolves", it.resolve("HEAD"))
             assertEquals("and it is the worktree's own branch", "feature", GitService.currentBranch(it))
+            // **`localBranches`, not `repo.branchList()`** — that is a `Git` command, not a
+            // `Repository` method, which is the kind of mistake that costs a CI round.
             assertTrue(
-                "and the shared branches are reachable",
-                it.branchList().call().any { r -> r.name == "refs/heads/main" },
+                "and the shared branches are reachable: ${GitService.localBranches(it)}",
+                "main" in GitService.localBranches(it),
             )
         }
     }
