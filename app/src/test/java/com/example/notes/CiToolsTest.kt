@@ -35,6 +35,10 @@ class CiToolsTest {
     fun setUp() {
         root = File(System.getProperty("java.io.tmpdir"), "ci-tools-" + System.nanoTime())
         root.mkdirs()
+        // **The trace goes to a file this class can read.** Two tests assert what the trace recorded,
+        // and the trace is asynchronous — reading the sink is the only way not to race the writer.
+        Trace.resetForTest()
+        Trace.attach(File(root, "trace.log"))
         val accounts = AccountStore(root)
         val account = accounts.save(
             Account("dev", "Test Account", "dev@example.com", dev = true),
@@ -63,6 +67,8 @@ class CiToolsTest {
 
     @After
     fun tearDown() {
+        Trace.resetForTest()
+        Trace.attach((null as Trace.Sink?))
         root.deleteRecursively()
     }
 
@@ -169,6 +175,15 @@ class CiToolsTest {
     private fun lock(path: String) {
         ws.setLocked(ws.locked() + "$repo/$path")
     }
+
+    /**
+     * What the trace has written so far.
+     *
+     * **Read from the sink, not from memory.** `Trace.note` is asynchronous (one task per event), so
+     * a test that read a ring buffer would race the writer. The sink is a file this class attaches
+     * in `@Before`, and reading it is the same read the report screen does.
+     */
+    private fun traceNow(): String = Trace.sinkNow()?.read().orEmpty()
 
     @Test
     fun `a remote is read as a repository whichever way it is written`() {
@@ -439,29 +454,19 @@ class CiToolsTest {
 
     // ---- dispatch: the environment check ----------------------------------
 
+    // ---- dispatch: there is no approval gate, deliberately ------------------
+    //
+    // These four tests used to assert a refusal. The gate is gone (see `start`'s comment), and they
+    // now assert the opposite — which is the point of rewriting rather than deleting them: the
+    // *behaviour* is still pinned, so a future change that reintroduces a gate fails here.
+
     @Test
-    fun `a workflow that names an environment is refused while its file is unlocked`() {
-        // **The operator's rule, and the reason the lock is the approval.** A locked file cannot be
-        // written by the agent, so its bytes are the bytes a person left. An unlocked file that names
-        // an environment can be rewritten by the agent *and* can read that environment's secrets —
-        // which is exactly the attack: write `run: echo "${{ secrets.X }}"`, dispatch, read the
-        // artifact.
+    fun `a workflow that names an environment starts without a lock`() {
+        // **The gate that used to refuse this is gone.** Its premise was that a person audits the
+        // YAML, and the YAML is not the danger: `run: ./script.sh` is a script the agent wrote and
+        // can rewrite. What constrains a runner is required reviewers on the environment, which
+        // GitHub enforces whatever started the run.
         workflow("deploy.yml", "jobs:\n  ship:\n    environment: release\n")
-
-        val body = call(
-            "ci",
-            """{"event":"workflow_dispatch","workflow":"deploy.yml"}""",
-        )
-
-        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("it names the environment: $body", body.contains("release"))
-        assertTrue("and says how to approve: $body", body.contains("Lock"))
-    }
-
-    @Test
-    fun `the same workflow is started once the file is locked`() {
-        val path = workflow("deploy.yml", "jobs:\n  ship:\n    environment: release\n")
-        lock(path)
 
         val body = call(
             "ci",
@@ -472,10 +477,25 @@ class CiToolsTest {
     }
 
     @Test
-    fun `a workflow that names no environment starts without a lock`() {
-        // **The other half of the operator's ruling.** An unapproved workflow still runs — it simply
-        // reaches no environment secret, so there is nothing to approve. Refusing it would make the
-        // agent unable to test CI at all, which is what my first design got wrong.
+    fun `the trace still records whether the workflow was sealed`() {
+        // **Removing the gate is not removing the record.** A person reading a trace should be able
+        // to see whether the workflow in front of them was one they sealed, and that is the fact the
+        // gate used to decide on. Keeping it in the trace costs nothing and outlives the gate.
+        val path = workflow("deploy.yml", "jobs:\n  ship:\n    environment: release\n")
+        lock(path)
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"deploy.yml"}""",
+        )
+
+        assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
+        val note = traceNow()
+        assertTrue("and the trace says it was sealed: $note", note.contains("locked"))
+    }
+
+    @Test
+    fun `a workflow that names no environment starts too`() {
         workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
 
         val body = call(
@@ -487,9 +507,11 @@ class CiToolsTest {
     }
 
     @Test
-    fun `a workflow whose environment name is an expression is refused too, and says why`() {
-        // **The scan cannot resolve an expression**, so the declaration is what counts. Reporting
-        // "names no environment" here would be the dangerous direction: the file can still read one.
+    fun `a workflow whose environment name is an expression starts, and the trace says so`() {
+        // **The scan cannot resolve an expression**, so the trace records that rather than claiming
+        // the file reaches no environment. That distinction mattered when it decided a refusal; it
+        // still matters, because it is what a person reads when a run reaches a secret they did not
+        // expect.
         val dollar = "$"
         workflow(
             "dynamic.yml",
@@ -502,44 +524,43 @@ class CiToolsTest {
             """{"event":"workflow_dispatch","workflow":"dynamic.yml"}""",
         )
 
-        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue(
-            "and it says the name could not be read: $body",
-            body.contains("expression"),
-        )
+        assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
+        val note = traceNow()
+        assertTrue("and the trace says the name could not be read: $note", note.contains("expression"))
     }
 
     @Test
-    fun `starting a workflow on main is refused, because main publishes a release`() {
-        // **The hole this closes.** `AGENT_BRANCH` used to be only the default, so `{"branch":"main"}`
-        // dispatched on main — the one path the two-lane decision exists to keep out of the agent's
-        // hands. A default that can be overridden is not a boundary.
-        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
-
-        val body = call(
-            "ci",
-            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"main"}""",
-        )
-
-        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("it says why: $body", body.contains("main"))
-        assertTrue("and names the branch it may use: $body", body.contains("development"))
-    }
-
-    @Test
-    fun `naming the agent's own branch is allowed, and so is saying nothing`() {
-        // **The refusal must not take away a legitimate call.** A model that spells out `development`
-        // has asked for exactly what it would have got.
+    fun `naming the one branch is allowed, and so is saying nothing`() {
+        // **The refusal must not take away a legitimate call.** A model that spells out `main` has
+        // asked for exactly what it would have got. This test used to prove the opposite for
+        // `main` — that naming it was refused — because there were two branches and `main`
+        // published. There is one branch now, and the operator wants the agent able to release.
         workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
 
         val explicit = call(
             "ci",
-            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"development"}""",
+            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"main"}""",
         )
         val silent = call("ci", """{"event":"workflow_dispatch","workflow":"build.yml"}""")
 
         assertTrue("explicit is fine: $explicit", explicit.startsWith(AgentLog.SUCCESS))
         assertTrue("and so is silent: $silent", silent.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `naming a branch this project does not have is refused, and says which one it has`() {
+        // **A typo check, not a permission question.** With one branch there is nothing to protect,
+        // but a model that asked for `development` believed something about this project that is not
+        // true — and silently substituting `main` would let it go on believing it.
+        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"development"}""",
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the branch this project has: $body", body.contains("`main`"))
     }
 
     @Test

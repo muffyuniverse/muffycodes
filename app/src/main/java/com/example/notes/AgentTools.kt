@@ -3413,29 +3413,29 @@ class AgentTools(
         }
         val reach = workflows.reach(target)
         val sealed = workflows.isLocked(path, ws.locked(), project)
-        // **The check the operator asked for: a workflow that names an environment, in a file nobody
-        // has sealed, is not started from here.** The lock is the approval — a locked file cannot be
-        // written by the agent, so its bytes are the bytes a person left — and the environment
-        // declaration is what decides whether a run can read a secret at all.
+        // **There is no approval gate here, and its removal is deliberate.**
         //
-        // **What this does and does not protect.** It gates *this app's* dispatch, which is the
-        // agent's own act. It does not stop a run started from github.com or by a push; for that the
-        // protection is required reviewers on the environment, which GitHub enforces whatever started
-        // the run. Said here rather than in a document, because the next person to read this function
-        // is the one who needs to know which of the two they are looking at.
-        if (reach.declaresEnvironment && !sealed) {
-            val what = if (reach.environments.isEmpty()) {
-                "names an environment this app cannot read (it is an expression)"
-            } else {
-                "names " + reach.environments.joinToString(", ") { "`$it`" }
-            }
-            return refusal(
-                "$path $what, so its runs can read that environment's secrets — and the file is " +
-                    "not locked, so nobody has sealed these bytes. Lock it to approve them, then " +
-                    "start it again. A workflow that names no environment can be started without " +
-                    "a lock, because it reaches no environment secret.",
-            )
-        }
+        // This used to refuse a dispatch of any workflow that named an environment unless a person
+        // had *locked* the file, on the reasoning that a locked file's bytes are the bytes a person
+        // left. The operator ended it: *"relying on human to check the code before it is dispatched
+        // isnt a guarantee and a bad experience."*
+        //
+        // The gate's premise is that a person audits the YAML, and that premise fails three ways:
+        //
+        // 1. **The YAML is not the danger.** `run: ./script.sh` — the danger is in the script, which
+        //    the agent wrote and can rewrite after the lock. Locking a file that calls a file locks
+        //    nothing.
+        // 2. **It does not scale.** Every new workflow needs a press, so the natural response is to
+        //    lock everything, which is the same as locking nothing.
+        // 3. **It inverts the trust model.** The agent can already push a workflow file and let the
+        //    push trigger it — no gate, no press. So the gate blocked the dispatch path while
+        //    leaving the push path wide open.
+        //
+        // **What actually constrains a runner is required reviewers on the environment**, which
+        // GitHub enforces whatever started the run — a push, a dispatch, or github.com. That is a
+        // press on an *act*, not an audit of *bytes*, and it is the only mechanism here that is
+        // real. `sealed` is still computed because the trace below records it: a person reading a
+        // trace should be able to see whether the workflow they are looking at was one they sealed.
         deadline.check("ci")
         // **Inputs go through, or a workflow that requires one is dispatched without it.** GitHub then
         // rejects the dispatch with a message that does not name the missing input, and the model has no
