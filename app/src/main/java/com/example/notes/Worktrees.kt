@@ -190,13 +190,43 @@ class Worktrees(private val workspace: Workspace) {
         // git's own per-worktree entries go with the repository; only the folders are ours to clear.
     }
 
-    /** Carries a project's branch folders across a rename, so a rename does not lose a checkout. */
+    /**
+     * Carries a project's branch folders across a rename, **and repoints git at them.**
+     *
+     * **Called after the project's own folder has been renamed**, because two of the four files git
+     * keeps name the other half by absolute path: a tree's `.git` points at
+     * `<common>/.git/worktrees/<id>`, and that entry's `gitdir` points back at the tree. Moving the
+     * folders alone leaves a worktree whose pointers name paths that no longer exist — which
+     * `GitService.openExisting` reports as a repository with **no branch and no exception**, the same
+     * silent shape as the `setGitDir` bug this file's header describes.
+     *
+     * The private entry is also renamed, because [idOf] derives it from the project's name. Leaving
+     * the old id in place would be a worktree git lists under a project that is not there.
+     */
     fun rename(from: String, to: String): Boolean {
         val source = File(worktreesRoot(), from)
         if (!source.isDirectory) return true
         val target = File(worktreesRoot(), to)
         target.parentFile?.mkdirs()
-        return source.renameTo(target)
+        if (!source.renameTo(target)) return false
+        // Every branch folder that moved has two files naming its other half, and both must follow.
+        (target.listFiles() ?: emptyArray()).forEach { moved ->
+            if (!moved.isDirectory || workspace.isLink(moved)) return@forEach
+            val branch = moved.name
+            val oldId = idOf(from, branch)
+            val newId = idOf(to, branch)
+            val oldPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$oldId")
+            val newPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$newId")
+            if (oldPrivate.isDirectory && oldId != newId) oldPrivate.renameTo(newPrivate)
+            // **Rewritten, not patched.** These are three-line files whose whole content is one path,
+            // so a replacement is the same size of job as an edit and cannot half-succeed.
+            runCatching {
+                Beside.write(File(moved, ".git"), "gitdir: " + newPrivate.absolutePath + "\n")
+                Beside.write(File(newPrivate, "gitdir"), File(moved, ".git").absolutePath + "\n")
+                Beside.write(File(newPrivate, "commondir"), "../..\n")
+            }
+        }
+        return true
     }
 
     companion object {

@@ -450,6 +450,10 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.open("Shopping")
         scene.file("notes.txt", "unsent\n")
+        // **A key, so the refusal under test is the one about the tree.** Without it the answer is
+        // "sign in first", which is true and is not what this test is about — and the guess would have
+        // been invisible, because both are refusals.
+        scene.credentials.setToken(scene.login, "a-key")
         scene.viewModel.message = null
 
         scene.viewModel.startRelease("1.5")

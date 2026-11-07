@@ -343,6 +343,31 @@ class WorktreesTest {
     }
 
     @Test
+    fun `renaming a project carries its worktrees and repoints git at them`() {
+        // **Two files name the other half, by absolute path**, so moving the folder is half a rename:
+        // the tree's `.git` still points at the old private entry and that entry's `gitdir` still names
+        // the old folder. JGit then opens it as a repository with **no branch and no exception** — the
+        // same silent shape as the `setGitDir` bug — so the assertion is the branch, read back.
+        val dir = projectWithBranch()
+        val tree = trees.make("Shopping", "feature").getOrThrow()
+
+        // What the rename does: the project's folder first, then the branch folders.
+        assertTrue("the project moved", dir.renameTo(workspace.projectDir("Groceries")))
+        assertTrue("the worktrees moved", trees.rename("Shopping", "Groceries"))
+
+        val moved = trees.dirOf("Groceries", "feature")
+        assertTrue("the branch folder is at the new project's path: $moved", moved.isDirectory)
+        assertTrue("git's private entry was renamed too", trees.exists("Groceries", "feature"))
+        assertFalse("and the old folder is gone", tree.exists())
+        GitService.openExisting(moved)!!.use { repo ->
+            assertEquals("it still opens as its branch", "feature", GitService.currentBranch(repo))
+            assertNotNull("with a HEAD that resolves", repo.resolve("HEAD"))
+        }
+        // **The link came with it**, because the folder moved rather than being rebuilt.
+        assertTrue("and the system folder is still reachable", File(moved, Workspace.SYSTEM_PROJECT).isDirectory)
+    }
+
+    @Test
     fun `a project with no repository is refused with a sentence about the project`() {
         // Not a crash: a project whose repository has not been made yet is a normal state, and the
         // refusal has to say which project rather than "could not check out".

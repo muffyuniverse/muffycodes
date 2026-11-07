@@ -3593,10 +3593,16 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun startRelease(versionName: String, devBuild: Boolean = false) {
         val login = activeLogin
-        val api = githubFor(login) ?: return
+        // **Refused in words, not by returning.** This read `githubFor(login) ?: return`, and a return
+        // with no message is a press that does nothing at all — the failure shape this app treats as a
+        // defect everywhere else.
+        val api = githubFor(login) ?: run {
+            message = "Sign in to GitHub first: a release is dispatched to GitHub"
+            return
+        }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first"
+            message = "Sign in to GitHub first: a release is dispatched with your key"
             return
         }
         val project = path.firstOrNull() ?: return
@@ -3875,6 +3881,11 @@ class AppViewModel @JvmOverloads constructor(
                 }
                 return@onWorker
             }
+            // **The branch folders come with it, and their pointers are repointed.** Renaming only the
+            // project's folder left every worktree under `.muffy/worktrees/<old name>/` — invisible to
+            // the app, and with two files naming paths that no longer exist, which JGit reports as a
+            // repository with no branch rather than as a failure.
+            Worktrees(ws).rename(project, clean)
             // The repository moved too, so its address changes with it.
             if (token != null && login != null && note.isEmpty()) {
                 val g = ProjectGit(
@@ -3931,6 +3942,10 @@ class AppViewModel @JvmOverloads constructor(
             // Ordered secrets-first because the reverse leaves a window where the folder is gone and
             // the secrets are not, and nothing then knows which project they belonged to.
             val forgotten = credentials.forgetProjectSecrets(project)
+            // **The branch folders go first**, because they live outside the project folder and
+            // deleting the folder alone leaves them under `.muffy/worktrees/` for ever — a link to the
+            // system folder each, and nothing that lists them to notice.
+            Worktrees(ws).removeAll(project)
             ws.delete(ws.projectDir(project))
             main.post {
                 busy = false
