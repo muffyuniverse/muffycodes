@@ -514,8 +514,30 @@ class AppViewModel @JvmOverloads constructor(
      */
     val signedIn: Boolean get() = account != null && !isProvisionalAccount
 
-    /** The active account's tree, or null when nobody is signed in. */
-    val workspace: Workspace? get() = activeLogin?.let { Workspace(accounts.dirOf(it)) }
+    /**
+     * The active account's tree, or null when nobody is signed in.
+     *
+     * **One instance per account, cached, and the caching is a correctness requirement now.** It used to
+     * be `Workspace(dir)` built fresh on every read, which was harmless while the object held nothing but
+     * the folder — and became a silent bug the moment [Workspace.activeBranch] existed: `enterBranch`
+     * wrote the branch to one instance and the next read built another, so the write went to a throwaway
+     * and the screen stayed on `main`. Measured, after two CI rounds of guessing at it.
+     *
+     * Keyed by login rather than held once, because switching accounts must hand out the new account's
+     * tree — and a fresh instance is what puts that account back on `main`, which is what `switchTo`
+     * wants anyway.
+     */
+    val workspace: Workspace?
+        get() {
+            val login = activeLogin ?: return null
+            cachedWorkspace?.takeIf { it.first == login }?.let { return it.second }
+            val fresh = Workspace(accounts.dirOf(login))
+            cachedWorkspace = login to fresh
+            return fresh
+        }
+
+    /** The last [workspace] handed out, with the login it belongs to. Nothing else reads this. */
+    private var cachedWorkspace: Pair<String, Workspace>? = null
 
     /**
      * Who commits, when nobody has signed in.
