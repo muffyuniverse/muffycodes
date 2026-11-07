@@ -89,6 +89,7 @@ VOCABULARY = {
     "enter account", "leave account",
     # the branches of a project (§13d)
     "add branch", "enter branch", "confirm add branch", "confirm remove branch",
+    "open branches", "remove branch",
     # the log itself, and the table counted from the request logs
     "share log", "stats", "stats clock", "stats from", "stats generate", "stats interval",
     "stats rolling", "stats time", "stats to",

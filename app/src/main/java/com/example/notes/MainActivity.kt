@@ -120,6 +120,10 @@ private sealed interface Pending {
     data object NewProject : Pending
     /** **Which account**, because the list shows several and the row that was tapped decides. */
     data class RemoveAccount(val login: String) : Pending
+    /** A new branch in the project whose branches are on screen (§13d). */
+    data object NewBranch : Pending
+    /** Removing a branch, which is refused when it carries work main does not have. */
+    data class RemoveBranch(val branch: String) : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
     /** Local -> synced: a repository, seeded with the licence the person picks. */
@@ -521,6 +525,24 @@ private fun AppRoot(viewModel: AppViewModel) {
             onSettings = { tap("settings"); showSettings = true },
         )
 
+        // **Tapping a project shows its branches first** (§13d). The operator's shape, and it is a
+        // branch of its own rather than a mode inside BrowserScreen for the same reason the accounts
+        // list is: a different subject, and a back gesture that has to return here.
+        viewModel.choosingBranchFor != null -> BranchesScreen(
+            project = viewModel.choosingBranchFor.orEmpty(),
+            branches = viewModel.choosingBranches,
+            onEnter = { branch ->
+                // **Entering a branch opens the project's files.** Until worktrees exist (§13d step
+                // 3) every branch is the same working tree, so the honest thing is to open it and
+                // say which branch you chose — not to pretend there are separate folders yet.
+                viewModel.closeBranches()
+                viewModel.open(listOf(viewModel.choosingBranchFor.orEmpty()))
+            },
+            onAdd = { tap("add branch"); pending = Pending.NewBranch },
+            onRemove = { branch -> tap("remove branch", branch); pending = Pending.RemoveBranch(branch) },
+            onBack = { viewModel.closeBranches() },
+        )
+
         else -> androidx.compose.foundation.layout.Box {
             BrowserScreen(
                 viewModel = viewModel,
@@ -852,6 +874,28 @@ private fun Dialogs(
                       Trace.tap("confirm new file", name)
                       viewModel.createFile(name)
                   },
+        )
+
+        is Pending.NewBranch -> PromptDialog(
+            title = "New branch",
+            label = "Name",
+            initial = "",
+            confirm = "Create",
+            onDismiss = dismiss,
+            onConfirm = { name -> viewModel.newBranch(name) },
+        )
+
+        is Pending.RemoveBranch -> ConfirmDialog(
+            title = "Remove ${pending.branch}?",
+            // **The refusal is named before the button is pressed**, because it is the whole reason
+            // this is a confirmation and not a swipe: a branch with work main does not have is work
+            // that exists nowhere else.
+            text = "The branch goes from this phone. A branch with work that is not on main is " +
+                "refused, because those commits would be left with nothing pointing at them.",
+            confirm = "Remove",
+            destructive = true,
+            onDismiss = dismiss,
+            onConfirm = { viewModel.dropBranch(pending.branch) },
         )
 
         is Pending.NewImage -> NewImageDialog(

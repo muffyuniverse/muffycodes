@@ -3,7 +3,9 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -50,7 +52,13 @@ class AccountsScreenTest {
 
     @Composable
     private fun Frame(content: @Composable () -> Unit) {
-        MaterialTheme { Surface { content() } }
+        // **`fillMaxSize`, because the screen under test is `fillMaxSize` too.** A `Surface` that
+        // wraps its content leaves the screen measured against nothing, and every node then exists
+        // but is "not displayed" — a failure that reads like a missing element and is really an
+        // unbounded parent. Taps passed while display assertions failed, which is what gave it away.
+        MaterialTheme {
+            Surface(modifier = androidx.compose.foundation.layout.fillMaxSize) { content() }
+        }
     }
 
     /** Paints the menu, recording which act was asked for so a tap can be proven to reach it. */
@@ -80,7 +88,7 @@ class AccountsScreenTest {
         // **The count is the row's whole content beyond the login.** Two accounts with one project
         // each and two accounts with none look identical without it, and the person is choosing
         // between workspaces, not between names.
-        scene.viewModel.createProject("Shopping", "mit")
+        scene.project("Shopping")
         accounts()
 
         compose.onNodeWithText(scene.login).assertIsDisplayed()
@@ -91,8 +99,8 @@ class AccountsScreenTest {
     fun `the count says projects when there is more than one`() {
         // A plural that reads "2 project" is the kind of wrongness that survives for years, so the
         // sentence is asserted rather than the number.
-        scene.viewModel.createProject("Shopping", "mit")
-        scene.viewModel.createProject("Work", "mit")
+        scene.project("Shopping")
+        scene.project("Work")
         accounts()
 
         compose.onNodeWithText("2 projects").assertIsDisplayed()
@@ -132,23 +140,26 @@ class AccountsScreenTest {
     }
 
     @Test
-    fun `remove is a visible button and names the account it would remove`() {
-        // **Offered, not hidden behind a long press.** And it must name the row it belongs to: a
-        // removal that took the wrong login is the one mistake here that loses a workspace.
+    fun `remove is a visible button that names its own account`() {
+        // **Offered, not hidden behind a long press.** And it must name its own row: a removal that
+        // took the wrong login is the one mistake here that loses a workspace.
         val taps = Taps()
-        scene.viewModel.signIn("someone-else", "a-key", "", "")
         accounts(taps)
 
         compose.onNodeWithText("Remove").performScrollTo().performClick()
 
-        // The first row is the one that was signed in first; either way the callback must name a real
-        // account rather than null.
-        assertEquals("a specific account was named", true, taps.removed != null)
-        assertEquals(
-            "and it is one of the two on this phone",
-            true,
-            taps.removed in setOf(scene.login, "someone-else"),
-        )
+        assertEquals("the row named its own account", scene.login, taps.removed)
+    }
+
+    @Test
+    fun `every account row offers its own remove`() {
+        // **One per row, not one on the screen.** With two accounts there must be two buttons; the
+        // version of this screen that drew a single Remove would have removed whichever account the
+        // code happened to pick.
+        scene.viewModel.signIn("someone-else", "a-key", "", "")
+        accounts()
+
+        compose.onAllNodesWithText("Remove").assertCountEquals(2)
     }
 
     @Test
@@ -164,16 +175,15 @@ class AccountsScreenTest {
     }
 
     @Test
-    fun `an empty list says what an account is, rather than showing a blank screen`() {
-        // The empty state is reachable: the app makes a provisional account, but a person who has
-        // removed every real one is looking at this. A blank screen reads as a fault.
+    fun `removing the last real account leaves the local workspace, not a blank screen`() {
+        // **The empty state is unreachable, and that is the design.** `removeAccount` makes sure the
+        // provisional account exists rather than assuming it does, because a sign-in can adopt it
+        // away — so the menu always has at least one row. An empty list would mean a screen that
+        // could not act, and this is the assertion that the floor is really there.
         scene.viewModel.removeAccount(scene.login, deleteCopies = true)
         accounts()
 
-        compose.onNodeWithText("No accounts yet").assertIsDisplayed()
-        // **And it says what an account IS**, because "No accounts yet" alone answers nothing for a
-        // person who does not know whether an account is a login, a folder, or a paid plan.
-        compose.onNodeWithText("An account is a GitHub identity", substring = true)
-            .assertIsDisplayed()
+        compose.onNodeWithText("~local").assertIsDisplayed()
+        compose.onNodeWithText("No accounts yet").assertDoesNotExist()
     }
 }

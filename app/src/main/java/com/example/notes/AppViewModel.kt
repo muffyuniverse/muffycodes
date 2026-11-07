@@ -5207,6 +5207,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun leaveAccount() {
         Trace.tap("leave account")
+        choosingBranchFor = null
         path = emptyList()
         editingPath = null
         historyPath = null
@@ -5225,10 +5226,116 @@ class AppViewModel @JvmOverloads constructor(
     var onAccountsScreen: Boolean by mutableStateOf(true)
         private set
 
+    /**
+     * **The project whose branches are on screen, or null** (§13d).
+     *
+     * The operator's decision: *"when you tap a project you are shown branch screen where you need to
+     * select a branch (and main branch exists by default even for newly created projects)."*
+     *
+     * **A flag-shaped field rather than a fourth level in `path`**, because the branch screen is not a
+     * folder — there is no `File` it corresponds to yet, and putting a name in `path` would make the
+     * breadcrumb claim a directory that does not exist. It is the same shape as [onAccountsScreen]:
+     * what the *screen* is showing, kept apart from what the *agent* is working in.
+     *
+     * **Null means the project's files are what you are looking at**, which is the state every screen
+     * before §13d already assumed. So nothing changes until a branch is chosen.
+     */
+    var choosingBranchFor: String? by mutableStateOf(null)
+        private set
+
+    /** Shows [project]'s branches instead of its files. */
+    fun openBranches(project: String) {
+        Trace.tap("open branches", project)
+        choosingBranchFor = project
+        refreshBranches()
+    }
+
+    /** Back to the project list, from the branch screen. */
+    fun closeBranches() {
+        choosingBranchFor = null
+        choosingBranches = emptyList()
+    }
+
+    /**
+     * The branches of [choosingBranchFor], `main` first.
+     *
+     * **Kept in state rather than read on every frame.** A `get()` that opened the repository would do
+     * file I/O during composition — once per recomposition, on the frame the person is looking at —
+     * and would still be stale, because Compose has no way to know a branch was made. [refreshBranches]
+     * is called when the screen opens and after every change, so the list is read exactly when
+     * something could have changed it.
+     */
+    var choosingBranches: List<String> by mutableStateOf(emptyList())
+        private set
+
+    /** Re-reads the branch list. Answers the list, so a caller can report what happened. */
+    fun refreshBranches() {
+        val project = choosingBranchFor ?: run { choosingBranches = emptyList(); return }
+        val repo = git?.open(project) ?: run { choosingBranches = emptyList(); return }
+        choosingBranches = try {
+            GitService.localBranches(repo)
+        } finally {
+            repo.close()
+        }
+    }
+
+    /**
+     * Makes a branch in the project whose branches are on screen.
+     *
+     * **The refusal is said, not swallowed.** A name git would reject, an existing name, `main` — all
+     * three are refusals the person has to see, or the button looks broken.
+     */
+    fun newBranch(name: String) {
+        Trace.tap("confirm add branch", name)
+        val project = choosingBranchFor ?: return
+        val repo = git?.open(project) ?: run {
+            message = "There is no repository for $project, so there is nothing to branch."
+            return
+        }
+        val outcome = try {
+            GitService.createBranch(repo, name)
+        } finally {
+            repo.close()
+        }
+        message = outcome.fold(
+            { "Made $it, from main." },
+            { it.message ?: "The branch could not be made." },
+        )
+        refreshBranches()
+    }
+
+    /**
+     * Deletes a branch, **and says why when it will not.**
+     *
+     * The two refusals are `main` and a branch with work that is not on `main`; both are the rule that
+     * removed `delete_repo`, and both are sentences rather than a button that does nothing.
+     */
+    fun dropBranch(name: String) {
+        Trace.tap("confirm remove branch", name)
+        val project = choosingBranchFor ?: return
+        val repo = git?.open(project) ?: run {
+            message = "There is no repository for $project, so there is no branch to remove."
+            return
+        }
+        val outcome = try {
+            GitService.deleteBranch(repo, name)
+        } finally {
+            repo.close()
+        }
+        message = outcome.fold(
+            { "Removed $it." },
+            { it.message ?: "The branch could not be removed." },
+        )
+        refreshBranches()
+    }
+
     /** Makes a stored account active. */
     fun switchTo(login: String) {
         credentials.activeLogin = login
         activeLogin = login
+        // **The branch belongs to a project in the account you were in**, so switching accounts
+        // must not leave the branch screen naming a project that is no longer there.
+        choosingBranchFor = null
         // One log, not one per account: a switch is a thing that happened in this
         // session, and splitting the stream would lose the line before it.
         Trace.note("switched-account", login)

@@ -868,7 +868,10 @@ private fun ProjectList(
                 ) {
                     Column(
                         modifier = Modifier.weight(1f)
-                            .combinedClickable(onClick = { viewModel.open(listOf(name)) }),
+                            // **A project's first screen is its branches** (§13d). `openBranches`
+                            // rather than `open`, so the tap names a project rather than a folder —
+                            // and the file screen is reached by choosing a branch, one tap deeper.
+                            .combinedClickable(onClick = { viewModel.openBranches(name) }),
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
                         // **How much is unsent, on one line.** It used to lead with the project's
