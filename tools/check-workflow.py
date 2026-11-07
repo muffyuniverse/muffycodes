@@ -124,38 +124,29 @@ def check_shell(where: str, line: int, shell: str) -> None:
         fail(f"{where}:{line}", "shell does not parse — " + (detail[0] if detail else "no reason given"))
 
 
-# The step that encrypts the build's output, and the job it must be in.
+# **Encryption is not checked for, because it is not allowed.** The operator rejected it outright
+# ("I explicitly rejected it and left it to be just an example of what can be added to a workflow"), so
+# this file no longer asks whether a sealing step can reach its key. It refuses the step instead: a
+# pipeline that seals its own artifacts cannot be read by the person reading a failure, which is the
+# cost that made the removal worth doing.
 ENCRYPTS = re.compile(r"openssl\s+enc\b")
-LOG_KEY = re.compile(r"\bMUFFY_LOG_KEY\b")
-ENVIRONMENT = re.compile(r"^\s*environment\s*:")
 
 
-def check_encrypted_log(where: str, job: str, body: list[str]) -> None:
-    """A job that encrypts its log must be able to read the key that opens it.
+def check_no_sealing(where: str, job: str, body: list[str]) -> None:
+    """A workflow must not encrypt its own output.
 
-    **The failure this catches is silent in both directions.** A job that reads
-    `secrets.MUFFY_LOG_KEY` without naming an environment gets an empty value —
-    GitHub's rule is that environment secrets are only available to jobs that
-    reference the environment — and the encryption step then encrypts under an
-    empty password. The blob looks fine. Nobody can read it, including the person
-    whose build failed, and nothing reports a problem.
-
-    So: if a job encrypts, it must both name an environment and use the key.
+    **This is a policy check, not a safety check.** The app holds no encryption rule, and a pipeline
+    that invents one puts the rejected design in a second place — where it is harder to find and it
+    hides the assertion messages a red run exists to show.
     """
-    if not any(ENCRYPTS.search(line) for line in body):
-        return
-    if not any(ENVIRONMENT.match(line) for line in body):
-        fail(
-            where,
-            f"job {job!r} encrypts its log but names no environment, so the key secret "
-            f"is unreachable and every run would be unreadable",
-        )
-    if not any(LOG_KEY.search(line) for line in body):
-        fail(
-            where,
-            f"job {job!r} encrypts its log but never reads MUFFY_LOG_KEY, so it would "
-            f"encrypt under an empty password",
-        )
+    for i, line in enumerate(body):
+        if ENCRYPTS.search(line) and not line.lstrip().startswith("#"):
+            fail(
+                where,
+                f"job {job!r} encrypts its own output; the project holds no encryption rule "
+                f"and a sealed artifact cannot be read by the person diagnosing a failure",
+            )
+            return
 
 
 def check_one(workflow: Path) -> None:
@@ -208,7 +199,7 @@ def check_one(workflow: Path) -> None:
         for line, shell in run_blocks(lines, begin, end):
             check_shell(f"{where} (job {name})", line, shell)
 
-        check_encrypted_log(f"{where}:{begin + 1}", name, lines[begin:end])
+        check_no_sealing(f"{where}:{begin + 1}", name, lines[begin:end])
 
 
 def main() -> int:

@@ -239,40 +239,6 @@ class AgentSessionsTest {
     }
 
     @Test
-    fun `a file written before branches existed loads as a session on main`() {
-        // **No migration, and that is a claim worth a test.** Every phone that has run this app has an
-        // `agents.json` keyed by bare project name. If those keys stopped matching, every running agent
-        // would vanish on upgrade - and it would look like the app had crashed, not like a format change.
-        file.parentFile?.mkdirs()
-        file.writeText(
-            """{"Shopping":{"state":"STOPPED","sub":"WAITING","retries":0}}""",
-        )
-
-        val read = store.read()
-
-        assertEquals("it is main's session", 1, read.size)
-        assertEquals("the project", "Shopping", read[0].project)
-        assertEquals("and the branch is main", "main", read[0].branch)
-        assertEquals("with its state intact", AgentSession.State.STOPPED, read[0].state)
-    }
-
-    @Test
-    fun `a legacy key and a branch key live side by side in one file`() {
-        // The upgrade moment itself: an old row is still there while a new branch row appears.
-        file.parentFile?.mkdirs()
-        file.writeText("""{"Shopping":{"state":"STOPPED"}}""")
-        store.put(AgentSession("Shopping", branch = "feature"))
-
-        val read = store.read()
-
-        assertEquals("both rows", 2, read.size)
-        assertTrue(
-            "main and feature, not two of one: ${read.map { it.project to it.branch }}",
-            read.map { it.branch }.containsAll(listOf("main", "feature")),
-        )
-    }
-
-    @Test
     fun `a branch whose name contains a slash keeps its whole name`() {
         // **`feature/x` is legal git**, so the key cannot be split on the last slash — and it must not
         // be split on every slash either. The project name cannot contain one, so the FIRST slash is
@@ -287,13 +253,17 @@ class AgentSessionsTest {
     }
 
     @Test
-    fun `the key is the bare project name for main and project-slash-branch otherwise`() {
-        // The rule itself, asserted directly: it is what makes the old file readable.
-        assertEquals("Shopping", AgentSession.keyOf("Shopping", "main"))
+    fun `the key is project-slash-branch, and main is not special`() {
+        // **One shape**, so a reader never has to ask which kind of key it is looking at.
+        assertEquals("Shopping/main", AgentSession.keyOf("Shopping", "main"))
         assertEquals("Shopping/feature", AgentSession.keyOf("Shopping", "feature"))
         assertEquals("Shopping/feature/x", AgentSession.keyOf("Shopping", "feature/x"))
-        assertEquals("Shopping", AgentSession.projectOf("Shopping"))
-        assertEquals("main", AgentSession.branchOf("Shopping"))
+
+        // The first slash is the boundary, because a project name cannot contain one and a branch can.
+        assertEquals("Shopping", AgentSession.projectOf("Shopping/feature/x"))
         assertEquals("feature/x", AgentSession.branchOf("Shopping/feature/x"))
+
+        // A key with no slash is a project with no branch said — which can only mean main.
+        assertEquals("main", AgentSession.branchOf("Shopping"))
     }
 }

@@ -147,25 +147,28 @@ data class AgentSession(
         const val MAIN = "main"
 
         /**
-         * How a session is keyed in `agents.json` — **project and branch in one string.**
+         * How a session is keyed in `agents.json` — **`project/branch`, for every branch including
+         * `main`.**
          *
-         * `main` keeps the **bare project name**, which is why this file needs no migration: every
-         * session written before branches existed is a session on main, and it reads back unchanged.
-         * A file written by an older version of the app is not a file to convert.
+         * **One shape, no special case**, because a key that means one thing for `main` and another for
+         * everything else is a key with a rule inside it that every reader has to know. `main` is a branch
+         * like any other — the operator's own framing — so it is stored like one.
          *
-         * **`/` is the separator because a project name cannot contain one** — `Workspace.nameProblem`
-         * refuses a slash, because a project is a folder. A branch *can* contain a slash (`feature/x`
-         * is a legal git name), so [projectOf] and [branchOf] split on the **first** one only.
+         * **`/` is the separator because a project name cannot contain one** and a branch can:
+         * `Workspace.nameProblem` refuses a slash, because a project is a folder, while `feature/x` is a
+         * legal git name. So the split is on the **first** slash — everything before it is the project,
+         * and everything after it is the branch, slashes and all.
+         *
+         * A key with no slash at all is a project with no branch, and [branchOf] answers `main` for it:
+         * `main` is the only branch a project can be on without saying so.
          */
-        fun keyOf(project: String, branch: String): String =
-            if (branch == MAIN) project else "$project/$branch"
+        fun keyOf(project: String, branch: String): String = "$project/$branch"
 
         /** The project half of a key, which is everything before the first slash. */
         fun projectOf(key: String): String = key.substringBefore('/')
 
-        /** The branch half of a key, and `main` for a key written before branches existed. */
-        fun branchOf(key: String): String =
-            if (key.contains('/')) key.substringAfter('/') else MAIN
+        /** The branch half of a key, which is everything after the first slash. */
+        fun branchOf(key: String): String = key.substringAfter('/', MAIN)
 
         /** The poll interval: four minutes, and it is the design's number, not a tuning knob. */
         /**

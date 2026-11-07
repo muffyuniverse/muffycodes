@@ -2030,8 +2030,9 @@ so `ReleaseKey.FILE` is one per project. It is the only exception to the worktre
 #### What step 3 has landed, and the one thing it has not
 
 **Landed** (`98281e4` … `12702fb`): the branch screen is reachable and real (add/remove open dialogs and
-say their refusals); `agents.json` is keyed by project **and** branch with **no migration** (`main` keeps
-the bare project name); the notification id and the Stop action are per worktree; `Worktrees` makes a
+say their refusals); `agents.json` is keyed `project/branch` — **one shape for every branch, `main`
+included**, because the operator's rule is that compatibility is not a reason to keep a second shape in a
+key; the notification id and the Stop action are per worktree; `Worktrees` makes a
 branch's folder by writing git's four files and checking the tree out, verified against real `git`
 (`worktree list` accepts it, `status` is clean, a commit in it moves only that branch); `Workspace.fileAt`
 resolves through the open branch and `relative` reverses it; `enterBranch` makes the folder, sets the
