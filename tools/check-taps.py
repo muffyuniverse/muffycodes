@@ -85,6 +85,8 @@ VOCABULARY = {
     "export",
     # the account
     "add account", "confirm add account", "remove account", "use test account",
+    # entering and leaving an account's folder — the main menu is the list of them (§13c.2)
+    "enter account", "leave account",
     # the log itself, and the table counted from the request logs
     "share log", "stats", "stats clock", "stats from", "stats generate", "stats interval",
     "stats rolling", "stats time", "stats to",

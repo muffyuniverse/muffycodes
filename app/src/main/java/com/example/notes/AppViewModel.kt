@@ -5167,6 +5167,64 @@ class AppViewModel @JvmOverloads constructor(
         closeOnboardingIfConnected()
     }
 
+    /**
+     * **The accounts on this phone, for the main menu** (§13c.2).
+     *
+     * Each carries how many projects it holds, because that is the one fact a person needs in order to
+     * decide which to enter — and it is read from the folder rather than stored, so it cannot disagree
+     * with what entering the account shows.
+     */
+    val accountsWithProjects: List<Pair<Account, Int>>
+        get() = accounts.accounts().map { account ->
+            account to Workspace(accounts.dirOf(account.login)).projectNames().size
+        }
+
+    /**
+     * **The account you are inside**, or null when you are looking at the list of them.
+     *
+     * This is the folder model (§13c.2): the main menu is the accounts, entering one shows its
+     * projects, and leaving returns. `activeLogin` is *derived from navigation* — it is set by
+     * [enterAccount] and cleared by [leaveAccount], never picked from a dialog up front.
+     */
+    var insideAccount: String?
+        get() = activeLogin?.takeIf { accounts.account(it) != null }
+        set(value) {
+            if (value == null) leaveAccount() else enterAccount(value)
+        }
+
+    /** Enters [login]'s folder: its projects become the screen, and its agent becomes the one running. */
+    fun enterAccount(login: String) {
+        Trace.tap("enter account")
+        switchTo(login)
+    }
+
+    /**
+     * **Leaves the account you are in and shows the list again.**
+     *
+     * The account is *not* signed out and nothing is stopped: `activeLogin` keeps naming the account
+     * whose sessions the runner is ticking, because the agent for a project you were just looking at
+     * should not go quiet because you went back one screen. Only the screen changes.
+     */
+    fun leaveAccount() {
+        Trace.tap("leave account")
+        path = emptyList()
+        editingPath = null
+        historyPath = null
+        // **`insideAccount` reads from this**, and null is the list — so the flag is separate from
+        // `activeLogin` rather than making it null, which would stop the runner for every project.
+        onAccountsScreen = true
+    }
+
+    /**
+     * True when the main menu is the **list of accounts** rather than one account's projects.
+     *
+     * A flag rather than a nullable `activeLogin`, because the two questions are different: *which
+     * account's agent is running* (one, always, once you have entered one) and *what the screen is
+     * showing* (the list, or that account's projects).
+     */
+    var onAccountsScreen: Boolean by mutableStateOf(true)
+        private set
+
     /** Makes a stored account active. */
     fun switchTo(login: String) {
         credentials.activeLogin = login
@@ -5177,6 +5235,8 @@ class AppViewModel @JvmOverloads constructor(
         path = emptyList()
         editingPath = null
         historyPath = null
+        // **Entering an account leaves the list**, which is the whole of the navigation model.
+        onAccountsScreen = false
         refresh()
     }
 

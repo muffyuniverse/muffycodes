@@ -288,13 +288,18 @@ class SecretsScreenTest {
         compose.onNodeWithText("only acme", substring = true).assertIsDisplayed()
     }
 
-    /** And an account-wide one says that instead, so the two are never confused. */
+    /**
+     * **An account-wide secret says "this account"**, which is now a different fact from "all
+     * projects, every account" — before the general scope existed, "all projects" was the widest thing
+     * there was and the wording was honest. Now it would be a lie: this secret is not visible from
+     * another account's projects.
+     */
     @Test
-    fun `an account-wide secret says all projects`() {
+    fun `an account-wide secret says this account`() {
         scene.viewModel.saveSecret("stripe", "tok_1", "api.stripe.com")
         screen()
 
-        compose.onNodeWithText("all projects", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("this account", substring = true).assertIsDisplayed()
     }
 
 }
