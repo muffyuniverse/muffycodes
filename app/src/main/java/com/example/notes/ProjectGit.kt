@@ -623,11 +623,20 @@ class ProjectGit(
         if (GitService.isRepository(dir)) {
             return GitService.RemoteResult("This project already has a repository", false)
         }
+        // **The same decision the other three verbs make**, asked here rather than inside
+        // `GitService.clone` so that every way a URL is used answers one question the same way. The
+        // project folder does not exist yet, so only the account and shared scopes can answer — which
+        // is exactly why an account's key is stored at account scope.
+        val token = when (val answer = credentialFor(project, remoteUrl)) {
+            is GitCredentials.Answer.Say -> return GitService.RemoteResult(answer.why, false)
+            is GitCredentials.Answer.Use -> answer.token
+            GitCredentials.Answer.None -> null
+        }
         val result = GitService.clone(
             remoteUrl,
             dir,
             authorProvider(),
-            tokenProvider(),
+            token,
             deadline,
         )
         if (result.success) {

@@ -277,17 +277,20 @@ class KeySafetyTest {
     }
 
     @Test
-    fun `a clone from another host refuses in words instead of sending the key`() {
-        // **The bug this exists for.** A private repository anywhere but GitHub went out with no
-        // credentials at all, the server answered 401, and the person was told their key was wrong —
-        // about a key the app had deliberately withheld. Silent, and wrong about which thing failed.
+    fun `a clone from an address this app cannot speak is refused before anything is opened`() {
+        // **This test used to assert that a clone from another host refused in words**, and the rule
+        // has moved rather than gone: *which key a remote gets* is [GitCredentials], asked by the
+        // caller that knows the account, so a private repository on `gitlab.com` is now cloned with
+        // that project's own secret instead of being refused. `GitCredentialsTest` and
+        // `ProjectGitTest` pin the decision, and this one pins what is left in the transport itself.
         //
-        // The refusal is now a sentence that names the host and the reason, and it happens **before
-        // anything is opened**, because the request is the harm.
+        // What is left is the address the app cannot speak at all: no SSH client is packaged, so the
+        // scp form every host's page offers first fails inside JGit with an error that names nothing.
+        // Refused here, in words, **before anything is opened**, because the request is the harm.
         val target = File(root, "elsewhere")
 
         val result = GitService.clone(
-            "https://gitlab.com/someone/private.git",
+            "git@gitlab.com:someone/private.git",
             target,
             author,
             token,
@@ -295,11 +298,7 @@ class KeySafetyTest {
 
         assertFalse("it did not succeed", result.success)
         assertTrue("it names the host: ${result.message}", result.message.contains("gitlab.com"))
-        assertTrue("and says why: ${result.message}", result.message.contains("GitHub key"))
-        assertTrue(
-            "and that it was not sent: ${result.message}",
-            result.message.contains("not sent"),
-        )
+        assertTrue("and offers the form it can reach: ${result.message}", result.message.contains("HTTPS"))
         assertFalse("and the key is nowhere in it", result.message.contains(token))
         assertFalse("and nothing was made", target.exists())
     }

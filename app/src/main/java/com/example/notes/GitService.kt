@@ -400,31 +400,20 @@ object GitService {
         token: String? = null,
         deadline: Deadline? = null,
     ): RemoteResult {
-        // **A key that does not belong to this host is not sent, and the refusal says so.**
+        // **The transport, before the credential.** This app packages no SSH, so a `git@host:path`
+        // address fails deep inside JGit with a null-shaped error naming nothing — and it *looks*
+        // usable right up to that point, because `hostOf` reads a host out of the scp form quite
+        // happily. Refused in words, and before anything is opened, because the request is the harm.
+        Secrets.transportProblem(remoteUrl)?.let { return RemoteResult(it, false) }
+        // **Which key, and whether it belongs here, is not this function's question any more.**
         //
-        // The guard below is right — the key on this phone is a GitHub key, and giving it to
-        // `gitlab.com` would be a leaked key — but its silence was not. A private repository
-        // anywhere else went out unauthenticated, the server answered 401, and the person was told
-        // their credentials were wrong about a key the app had deliberately withheld. That is the
-        // one failure the app forbids: a failure that does not say what happened.
-        //
-        // **Said before anything is opened**, because the request is the harm: a clone that has
-        // already reached the host has already asked it a question.
-        //
-        // **A remote with no host at all is not this case.** A local path — a test's bare
-        // repository, or a project cloned from a folder on the phone — has no host to give a key
-        // to, so there is nothing to refuse. `hostOf` answers with an empty string there, and an
-        // empty host means "not a network remote", which is the honest reading rather than a
-        // guess that it is somebody else's server.
-        val host = Secrets.hostOf(remoteUrl)
-        if (host.isNotEmpty() && !token.isNullOrBlank() && !Secrets.isGitHubHost(remoteUrl)) {
-            return RemoteResult(
-                "This repository is at $host, and the key on this phone is a " +
-                    "GitHub key. It was not sent, because a key given to the wrong host is a leaked " +
-                    "key. Cloning a private repository elsewhere needs a key for that host.",
-                false,
-            )
-        }
+        // It used to be: a guard here refused any non-GitHub address whenever a key was present, so a
+        // private repository on another host went out unauthenticated, the server answered 401, and
+        // the person was told their credentials were wrong about a key the app had withheld. The rule
+        // now lives in [GitCredentials], which is asked by the caller that knows the account — one
+        // decision for all four ways a URL is used (clone, add-remote, pull, push) instead of a
+        // GitHub-shaped copy in each of them. What arrives here is already decided, and a null token
+        // means "nothing to send" rather than "not allowed to send".
         val partial = File(dir.parentFile, dir.name + ".partial")
         return try {
             dir.parentFile?.mkdirs()

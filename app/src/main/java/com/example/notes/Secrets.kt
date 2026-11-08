@@ -179,10 +179,9 @@ object Secrets {
     /**
      * The host of [url], lowercased and stripped of credentials, port and path.
      *
-     * **Extracted so that "which host is this" is answered once.** [isGitHubHost] and the clone
-     * refusal that has to name the host it will not send a key to were spelling the same six
-     * chained calls separately, and a rule with two spellings is a rule that disagrees with itself
-     * eventually.
+     * **Extracted so that "which host is this" is answered once.** [isHost] and the refusals that have
+     * to name the host they are talking about were spelling the same six chained calls separately, and
+     * a rule with two spellings is a rule that disagrees with itself eventually.
      *
      * **A URL with no authority has no host, and that is not the same as having one called
      * `file`.** `file:///tmp/x` is the case that taught this: taking the first segment after the
