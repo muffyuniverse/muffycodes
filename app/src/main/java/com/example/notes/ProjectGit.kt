@@ -624,6 +624,45 @@ class ProjectGit(
      * change to the person's repository and a project that has just arrived has nothing to send.
      */
     /**
+     * **A release: a tag at `HEAD`, sent to the remote.**
+     *
+     * The universal replacement for "dispatch a release workflow". What a host builds from a tag is
+     * the host's business; that the version exists, points at a commit and can be fetched is git's, and
+     * it works everywhere.
+     *
+     * **Held under the repository's lock**, because it writes a ref — the same reason a commit is.
+     */
+    fun tag(project: String, name: String, message: String? = null): GitService.RemoteResult {
+        val clean = name.trim()
+        if (clean.isEmpty()) {
+            return GitService.RemoteResult("A tag needs a name: a version, like 1.4.0", false)
+        }
+        return RepoLocks.hold(repoDir(project), "tag") {
+            val repo = open(project)
+                ?: return@hold GitService.RemoteResult("This project has no repository yet", false)
+            repo.use {
+                val remote = remoteUrlOf(it)
+                if (remote.isNullOrBlank()) {
+                    return@use GitService.RemoteResult(
+                        "This project has no address, so a tag would stay on this phone. " +
+                            "Add one first if the version is meant to go anywhere.",
+                        false,
+                    )
+                }
+                // **The same decision as a push**, because it is the same push: a tag's ref goes to
+                // the same host with the same key, and a tag refused by a server is no better than a
+                // commit refused by one.
+                val token = when (val answer = credentialFor(project, remote)) {
+                    is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(answer.why, false)
+                    is GitCredentials.Answer.Use -> answer.token
+                    GitCredentials.Answer.None -> null
+                }
+                GitService.tagAndPush(it, clean, message, token, gitUser())
+            }
+        }
+    }
+
+    /**
      * **Can this address be cloned, with this account's key** — asked before anything is made.
      *
      * The same three questions a clone answers, in the order that costs least: can this app even speak

@@ -879,9 +879,9 @@ private fun Dialogs(
         is Pending.Release -> ReleaseDialog(
             project = pending.project,
             onDismiss = dismiss,
-            onRelease = { version, devBuild ->
+            onRelease = { version, note ->
                 Trace.tap("confirm publish release", version)
-                viewModel.startRelease(version, devBuild)
+                viewModel.tagRelease(version, note)
             },
         )
 

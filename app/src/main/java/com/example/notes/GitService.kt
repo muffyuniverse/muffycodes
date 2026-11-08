@@ -2082,6 +2082,59 @@ object GitService {
     }
 
     /** Pulls from the remote into the current branch. */
+    /**
+     * **Makes a tag at `HEAD` and sends it.**
+     *
+     * A tag is the release the git protocol has: every host understands one, and what a host then does
+     * with it — a release page, a build, an artifact — is that host's business rather than this app's.
+     *
+     * **Annotated when there is a message**, because a tag that says why is what a person reading a
+     * host's release list needs, and a lightweight tag cannot carry it. Tags are the one thing in git
+     * that should not be moved afterwards, so a name that already exists is refused rather than
+     * rewritten: re-tagging silently would make two different commits claim the same version.
+     */
+    fun tagAndPush(
+        repo: Repository,
+        name: String,
+        message: String?,
+        token: String?,
+        gitUser: String? = null,
+    ): RemoteResult {
+        if (repo.resolve("refs/tags/$name") != null) {
+            return RemoteResult(
+                "There is already a tag called `$name`. A version that has been sent stays where " +
+                    "it is; pick a new one.",
+                false,
+            )
+        }
+        return try {
+            Git(repo).use { git ->
+                val command = git.tag().setName(name)
+                if (message.isNullOrBlank()) command.setAnnotated(false)
+                else command.setAnnotated(true).setMessage(message)
+                command.call()
+                val push = git.push()
+                // **The tag's own ref, spelled out.** A plain `push` sends the branch, and a tag is
+                // not on a branch: without this refspec the tag exists here and nowhere else, which
+                // is the one outcome worse than a refused release.
+                push.setRefSpecs(RefSpec("refs/tags/$name:refs/tags/$name"))
+                credentials(remoteOf(repo), token, gitUser)?.let { push.setCredentialsProvider(it) }
+                val result = push.call()
+                val refused = result.flatMap { it.remoteUpdates }
+                    .filter { it.status != RemoteRefUpdate.Status.OK }
+                    .mapNotNull { it.message }
+                    .firstOrNull()
+                if (result.isSuccessful) {
+                    RemoteResult("Tagged $name and sent it", true)
+                } else {
+                    RemoteResult(refused ?: "The host refused the tag", false)
+                }
+            }
+        } catch (e: Throwable) {
+            RemoteResult(Secrets.describe(e), false)
+        }
+    }
+
     fun pull(repo: Repository, token: String?, gitUser: String? = null): RemoteResult {
         return try {
             Git(repo).use { git ->

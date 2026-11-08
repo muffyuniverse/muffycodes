@@ -5761,6 +5761,65 @@ class AppViewModel @JvmOverloads constructor(
         }
 
     /**
+     * **A release is a tag** — at `HEAD` of `main`, sent to the remote.
+     *
+     * This replaces dispatching a GitHub workflow. A tag is the release the protocol has: every host
+     * understands one, and what a host builds from it is that host's business rather than this app's.
+     * **`main` is required for the same reason it was before**: a version is a statement about what
+     * the project is, and a tag on a branch nobody has merged is a version of something else.
+     */
+    fun tagRelease(versionName: String, note: String = "") {
+        val ws = workspace ?: return
+        val project = currentProject
+        if (project == null) {
+            message = "Open a project first: a version belongs to one"
+            return
+        }
+        if (activeBranch != AgentSession.MAIN) {
+            message = "A version is tagged on ${AgentSession.MAIN}. You are on $activeBranch, so " +
+                "nothing was tagged — merge it into ${AgentSession.MAIN} and tag it there."
+            return
+        }
+        val clean = versionName.trim()
+        if (clean.isEmpty()) {
+            message = "A version needs a name, like 1.4.0"
+            return
+        }
+        busy = true
+        onWorker {
+            // **Counted here, not read from the cached map** — the same rule the release had, and for
+            // the same reason: `changesOf` is a snapshot from the last refresh, so a save made since
+            // would not be in it. A version tagged over unsent work names a commit the remote does not
+            // have, so the tag would send that commit and leave `main` behind it — a version of
+            // different code from the one the person is looking at, and nothing would say so.
+            val unsent = try {
+                projectGit(ws).changes(project).total
+            } catch (t: Throwable) {
+                // A count that cannot be taken is not a count of zero, but refusing on a failure to
+                // read would block a release for a reason that is not about the release.
+                0
+            }
+            if (unsent > 0) {
+                main.post {
+                    busy = false
+                    message = "$project has $unsent change(s) not sent yet, so a version would name " +
+                        "a commit the remote does not have. Sync first."
+                }
+                return@onWorker
+            }
+            val result = projectGit(ws).tag(project, clean, note.ifBlank { "Version $clean" })
+            main.post {
+                busy = false
+                message = result.message
+                // **Traced either way**, because a version that did not go is the one report a person
+                // writes as "the release button does nothing".
+                Trace.note("release", "$project · $clean · ${if (result.success) "tagged" else "refused"}")
+                refresh()
+            }
+        }
+    }
+
+    /**
      * **Drops the branch screen, without a trace line**, because the caller is already leaving.
      *
      * Extracted because **three** paths change which account is in force — `signIn`, `switchTo` and

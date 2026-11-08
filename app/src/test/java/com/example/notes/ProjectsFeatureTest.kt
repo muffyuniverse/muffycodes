@@ -508,63 +508,56 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `publishing a release is refused while anything is unsent`() {
-        // **The one rule that makes a release mean something**, and it is enforced in the view model
-        // rather than only by the button: a version published from a tree with unsent work names a
-        // commit GitHub does not have, so the release would be of different code from the one the
-        // person is looking at.
+    fun `tagging a version is refused while anything is unsent`() {
+        // **The rule that makes a version mean something.** A tag over unsent work would send a commit
+        // that `main` on the remote does not have — a version of different code from the one the person
+        // is looking at — and nothing would say so.
         //
-        // **The count is taken when the release is asked for**, because `changesOf` is a snapshot the
-        // last refresh took — a save made since would not be in it, and the guard would pass while the
-        // sentence it exists to prevent was true.
+        // **The count is taken when the tag is asked for**, not read from the cached map: `changesOf`
+        // is a snapshot the last refresh took, so a save made since would not be in it and the guard
+        // would pass while the sentence it exists to prevent was true.
         scene.signedIn()
         scene.project("Shopping")
         scene.open("Shopping")
         scene.file("notes.txt", "unsent\n")
-        // **A key, so the refusal under test is the one about the tree.** Without it the answer is
-        // "sign in first", which is true and is not what this test is about — and the guess would have
-        // been invisible, because both are refusals.
-        scene.credentials.setToken(scene.login, "a-key")
         scene.viewModel.message = null
 
-        scene.viewModel.startRelease("1.5")
+        scene.viewModel.tagRelease("1.5")
         scene.await("the answer") { !scene.viewModel.busy && scene.viewModel.message != null }
 
         val said = scene.viewModel.message.orEmpty()
         assertTrue("it says why: $said", said.contains("not sent yet"))
-        assertTrue("and names the version's problem: $said", said.contains("GitHub does not have"))
-        // **Nothing was dispatched**, which is the half a message alone cannot prove.
-        assertFalse(
-            "the pretend GitHub has no run",
-            File(scene.remote("Shopping"), "ci").listFiles().orEmpty().isNotEmpty(),
-        )
+        assertTrue("and what the version would name: $said", said.contains("remote does not have"))
     }
 
     @Test
-    fun `publishing a clean project dispatches the release workflow on main`() {
-        // **The door, walked end to end.** `Release.start`, `Release.nameProblem` and `startRelease`
-        // all existed and were tested while nothing called any of them — the app could not publish a
-        // release from inside it at all. This is the proof that the button reaches the dispatch: the
-        // project is clean, a key is stored, and the pretend GitHub records what was asked for.
+    fun `tagging a clean project makes a tag and sends it to the address`() {
+        // **The door, walked end to end.** A release is a tag: it is made at the top of `main`, and the
+        // ref is pushed to the project's own address — which is the release the protocol has, and the
+        // reason this works on a host this app has no API for.
         scene.signedIn()
         scene.project("Shopping")
         scene.open("Shopping")
-        scene.credentials.setToken(scene.login, "a-key")
+        val remote = File(scene.workspace!!.accountDir, "local-remote")
         scene.await("the project to be clean") { scene.viewModel.changesOf("Shopping") == 0 }
+        val author = GitAuthor("Test", "test@example.com")
+        GitService.initOrOpen(scene.workspace!!.projectDir("Shopping"), author).use {
+            GitService.setRemoteUrl(it, remote.absolutePath)
+        }
         scene.viewModel.message = null
 
-        scene.viewModel.startRelease("1.5")
-        scene.await("the dispatch") {
-            scene.github.dispatches(RepoRef(scene.login, "Shopping")).isNotEmpty()
-        }
+        scene.viewModel.tagRelease("1.5", "the first one")
+        scene.await("the answer", 30_000) { !scene.viewModel.busy && scene.viewModel.message != null }
 
-        val sent = scene.github.dispatches(RepoRef(scene.login, "Shopping")).single()
-        assertEquals("the release workflow", Release.WORKFLOW, sent.workflow)
-        assertEquals("on the branch a release is published from", "main", sent.branch)
-        assertEquals("with the version the person typed", "1.5", sent.inputs["version_name"])
-        // **And nothing was asked for that was not chosen**: a dev copy is a second APK, and a box
-        // nobody ticked must not be sent as "true".
-        assertFalse("no dev copy was asked for", sent.inputs.containsKey("dev_build"))
+        assertTrue("it says what happened: ${scene.viewModel.message}", scene.viewModel.message.orEmpty().contains("1.5"))
+        // **The tag is in the project's own repository**, and its message is the one typed: a note that
+        // did not become part of the tag would be a field that does nothing.
+        GitService.initOrOpen(scene.workspace!!.projectDir("Shopping"), author).use { repo ->
+            val ref = repo.resolve("refs/tags/1.5")
+            assertTrue("the tag exists", ref != null)
+            val message = repo.refDatabase.peekObject(ref!!).shortMessage
+            assertEquals("and carries what the person wrote", "the first one", message)
+        }
     }
 
     @Test

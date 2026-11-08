@@ -1820,42 +1820,33 @@ fun ModelKeyDialog(
 }
 
 /**
- * **Publishing a release: one field, one checkbox, and the rule as you type.**
+ * **A release is a tag** — so the window asks for a version and a sentence, and nothing else.
  *
- * The operator chose this shape (§13b.7): a button in the sync slot, offered only when nothing is
- * unsent, because *"a version published from a tree with unsent work would name a commit GitHub does
- * not have"*. This is the window behind it.
+ * It used to ask whether to also build a dev copy and to dispatch a workflow that built and signed the
+ * app. That was GitHub Actions wearing a feature's clothes: the protocol has one release, `git tag`,
+ * and what a host builds from it belongs to the host.
  *
- * **`Release.nameProblem` is shown while the person types, not after they press.** The name becomes a
- * git tag and a release title, so an em dash in it is refused by git ten seconds into a pipeline —
- * and the workflow refuses it too, which is a pipeline spent to learn something a regular expression
- * answers now. The same function is what the workflow's rule was written from, so the two cannot
- * disagree about what a version name is.
- *
- * **Tested as a function, never driven.** `AlertDialog`'s enter animation never reports idle under
- * Robolectric in this repository, so every dialog here is asserted at the rule and never typed into.
+ * **The dev-copy checkbox is gone rather than hidden**, because there is nothing left for it to decide:
+ * this app no longer produces a build of somebody else's project.
  */
 @Composable
 fun ReleaseDialog(
     project: String,
     onDismiss: () -> Unit,
-    onRelease: (versionName: String, devBuild: Boolean) -> Unit,
+    onRelease: (versionName: String, note: String) -> Unit,
 ) {
     var version by remember { mutableStateOf("") }
-    // **Off by default.** A dev build is an extra copy of the same APK for installing over a release;
-    // a person publishing a version has not asked for one, and a checkbox left ticked from a previous
-    // release would quietly double what the pipeline produces.
-    var devBuild by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf("") }
     val problem = Release.nameProblem(version.trim())
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Publish a release of $project") },
+        title = { Text("Tag a version of $project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "The workflow builds and signs the app, then attaches it to a release named " +
-                        "after this version. It takes about ten minutes, and it publishes only " +
-                        "from ${Release.BRANCH}.",
+                    "A tag is made at the top of ${Release.BRANCH} and sent to this project's " +
+                        "address. Every host understands a tag; what it builds from one is its own " +
+                        "business.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1871,28 +1862,27 @@ fun ReleaseDialog(
                         if (version.isNotEmpty() && problem != null) Text(problem)
                     },
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { devBuild = !devBuild },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked = devBuild, onCheckedChange = { devBuild = it })
-                    Text(
-                        "Also build a dev copy",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("What changed (optional)") },
+                    supportingText = {
+                        Text(
+                            "The tag carries this, so it is readable wherever the version is.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
             }
         },
         confirmButton = {
             TextButton(
                 enabled = problem == null && version.isNotBlank(),
                 onClick = {
-                    onRelease(version.trim(), devBuild)
+                    onRelease(version.trim(), note.trim())
                     onDismiss()
                 },
-            ) { Text("Publish") }
+            ) { Text("Tag it") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
