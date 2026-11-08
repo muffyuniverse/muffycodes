@@ -54,7 +54,7 @@ class HeartbeatCardTest {
     }
 
     private fun shown(): List<Heartbeat.Measure> = listOf(
-        measure(Heartbeat.Id.SPEND, recent = 0.42, baseline = 0.40),
+        measure(Heartbeat.Id.REQUESTS, recent = 0.42, baseline = 0.40),
         measure(Heartbeat.Id.CACHE, recent = 0.9710, baseline = 0.95),
         measure(Heartbeat.Id.OUTPUT, recent = 9_994.0, baseline = 8_000.0),
         measure(Heartbeat.Id.SHARE, recent = 1.0 / 6, baseline = 0.2),
@@ -84,7 +84,7 @@ class HeartbeatCardTest {
     @Test
     fun `an empty account draws nothing at all`() {
         card(emptyList())
-        compose.onNodeWithText(Heartbeat.Id.SPEND.title).assertDoesNotExist()
+        compose.onNodeWithText(Heartbeat.Id.REQUESTS.title).assertDoesNotExist()
     }
 
     /**
@@ -93,7 +93,7 @@ class HeartbeatCardTest {
      */
     @Test
     fun `a measure with no recent value shows a dash and no badge`() {
-        card(listOf(measure(Heartbeat.Id.SPEND, recent = null, baseline = 0.5)))
+        card(listOf(measure(Heartbeat.Id.REQUESTS, recent = null, baseline = 0.5)))
 
         compose.onNodeWithText("spend").assertIsDisplayed()
         // The dash appears twice - once as the value, once as the badge - which is the honest
@@ -112,7 +112,7 @@ class HeartbeatCardTest {
     fun `only spend declines to judge its own rise`() {
         // **Half again, not double**: exactly +100% sits on the cap and would print `>+99.99%`,
         // testing the cap rather than this rule.
-        val rising = measure(Heartbeat.Id.SPEND, recent = 1.5, baseline = 1.0)
+        val rising = measure(Heartbeat.Id.REQUESTS, recent = 1.5, baseline = 1.0)
         assertEquals("spend rising is a fact, not a verdict", null, rising.better)
         assertEquals("+50.00%", Heartbeat.badge(rising.badge))
 
@@ -133,7 +133,7 @@ class HeartbeatCardTest {
     fun `a badge that cannot be computed is drawn instead of crashing`() {
         // A baseline of zero is a real measurement - the period spent nothing - and has no
         // percentage. The card must draw the dash rather than dividing by it.
-        card(listOf(measure(Heartbeat.Id.SPEND, recent = 1.0, baseline = 0.0)))
+        card(listOf(measure(Heartbeat.Id.REQUESTS, recent = 1.0, baseline = 0.0)))
         compose.onNodeWithText("1.00$").assertIsDisplayed()
     }
 }

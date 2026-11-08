@@ -77,9 +77,10 @@ object Heartbeat {
     /**
      * The four cells, in the order they are drawn.
      *
-     * **The order is the order of the questions.** "What did it cost" first, because that is the one
-     * a person checks first; then how well the cache is working, which is what the cost depends on;
-     * then how much came out; then how much of that was answer rather than thinking.
+     * **The order is the order of the questions.** "How much work happened" first — the count of
+     * requests, which is what a person checks first now that the fourth cell is not money — then how
+     * well the cache is working, which is what the work *cost*, then how much came out, then how much
+     * of that was answer rather than thinking.
      */
     enum class Id(
         val title: String,
@@ -87,16 +88,29 @@ object Heartbeat {
         /**
          * Whether this measure's badge is drawn in the brand's caramel instead of green or red.
          *
-         * **Spend alone.** Deciding whether more spending is good is not the app's call - a busy
-         * hour costs more and also gets more done, and which of those matters depends on what the
-         * person is doing. So for spend the badge states the comparison and stops: the colour marks
+         * **Activity alone.** Deciding whether more requests is good is not the app's call — a busy
+         * hour is more work and more spend, and which of those matters depends on what the person is
+         * doing. So for the request count the badge states the comparison and stops: the colour marks
          * it as a comparison rather than judging it. The other three keep green above and red below,
          * because a cache hit rising and a share of output rising are plainly the better direction
          * and calling them bad would be wrong rather than modest.
          */
         val neutral: Boolean = false,
     ) {
-        SPEND("spend", additive = true, neutral = true),
+        /**
+         * **Requests, which replaced spend — and the replacement is the point.**
+         *
+         * A fourth measure existed here and it was money: `usage.cost`, summed per hour. That field
+         * is OpenRouter's own, not the protocol's, so a server this app talks to has no obligation
+         * to report it — and a spend cell showing `0.00$` for a busy hour on such a server reads as
+         * "free", which is the one direction a record must not lie in. The operator's rule:
+         * *if we can't get it through the protocol then we don't need it.*
+         *
+         * **A count of requests is the protocol's own fact**, it is what the other three measures are
+         * shares of, and it is the number a person asks after spend: how much work happened. Neutral
+         * like spend was, because "more requests" is not better or worse — it is activity.
+         */
+        REQUESTS("requests", additive = true, neutral = true),
         CACHE("cache hit", additive = false),
         OUTPUT("output", additive = true),
         SHARE("output share", additive = false),
@@ -168,10 +182,10 @@ object Heartbeat {
 
         return listOf(
             measure(
-                Id.SPEND,
-                windows.map { w -> w.cost.takeIf { w.requests > 0 } },
-                whole = whole.cost,
-                recent = windows.last().let { w -> w.cost.takeIf { w.requests > 0 } },
+                Id.REQUESTS,
+                windows.map { w -> w.requests.toDouble().takeIf { w.requests > 0 } },
+                whole = whole.requests.toDouble(),
+                recent = windows.last().let { w -> w.requests.toDouble().takeIf { w.requests > 0 } },
             ),
             measure(
                 Id.CACHE,
@@ -242,7 +256,10 @@ object Heartbeat {
     /** The recent value, in the shape its cell shows it. */
     fun format(id: Id, value: Double?): String = when {
         value == null -> "—"
-        id == Id.SPEND -> String.format(Locale.UK, "%.2f$", value)
+        // **A count, not a price.** `%.2f$` used to be here, and the `$` was a currency; a request
+        // count is a whole number and a unit-less one, because "12.00 requests" is a figure nobody
+        // writes.
+        id == Id.REQUESTS -> String.format(Locale.UK, "%.0f", value)
         id == Id.OUTPUT -> compact(value)
         // **Two decimals, matching the statistics screen's own cache share.** 97.10% and 97.05% are
         // different facts about how well the cache is working, and one decimal hides the difference.

@@ -118,9 +118,6 @@ object RequestStats {
         val cachedTokens: Long = 0,
         val completionTokens: Long = 0,
         val reasoningTokens: Long = 0,
-        val cost: Double = 0.0,
-        /** How many responses actually reported a cost, so an average is over the right count. */
-        val costReported: Int = 0,
         /**
          * What a stalled answer had produced, in characters.
          *
@@ -137,8 +134,6 @@ object RequestStats {
             cachedTokens = cachedTokens + other.cachedTokens,
             completionTokens = completionTokens + other.completionTokens,
             reasoningTokens = reasoningTokens + other.reasoningTokens,
-            cost = cost + other.cost,
-            costReported = costReported + other.costReported,
             saidChars = saidChars + other.saidChars,
             thinkingChars = thinkingChars + other.thinkingChars,
         )
@@ -156,12 +151,13 @@ object RequestStats {
         val thinkingShare: Double? get() = if (completionTokens == 0L) null else reasoningTokens.toDouble() / completionTokens
 
         /**
-         * What one request cost, averaged over the responses that reported a cost.
+         * **No money here, and the absence is the operator's rule.**
          *
-         * **Over `costReported`, not over `requests`.** A stalled answer is billed but reports no
-         * usage, so dividing by the request count would make an average that is neither the price of
-         * a request nor the price of a billed one - and a stall would silently deflate it.
+         * A `cost` and a `perRequest` stood here: `usage.cost` is a gateway's own field, so a total
+         * built from it was a total of what one gateway chose to say, and a server that does not
+         * report it contributed zero — which reads as "free" rather than "not said". *If we can't get
+         * it through the protocol then we don't need it.* The four token counts above are the
+         * protocol's, and they survive in full.
          */
-        val perRequest: Double? get() = if (costReported == 0) null else cost / costReported
     }
 }

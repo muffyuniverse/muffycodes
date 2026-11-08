@@ -821,15 +821,16 @@ class AgentTools(
             spec(
                 "query",
                 "Ask the person's request log a question in SQL and write the answer to a file. " +
-                    "Use it for what the app cost, how the cache is doing, which model or project " +
-                    "spends most, or any trend over time. " +
+                    "Use it for how the cache is doing, how much work each model or project does, " +
+                    "or any trend over time. " +
                     "**Read-only**: only SELECT and WITH run, and only the tables below exist. " +
                     "At most ${SqlTool.MAX_ROWS} rows come back; you are told when there were more. " +
                     "The conversation gets the columns and a few rows; the file gets everything. " +
                     "\n\n" + SqlTool.SCHEMA,
-                "{\"sql\":\"SELECT (bucket/3600000)*3600000 AS hour, SUM(cost) AS usd " +
-                    "FROM roll_hour GROUP BY hour ORDER BY hour DESC LIMIT 48\", " +
-                    "\"path\":\"spend-last-two-days.csv\"}",
+                "{\"sql\":\"SELECT (bucket/3600000)*3600000 AS hour, SUM(n) AS requests, " +
+                    "SUM(completion) AS output FROM roll_hour GROUP BY hour " +
+                    "ORDER BY hour DESC LIMIT 48\", " +
+                    "\"path\":\"work-last-two-days.csv\"}",
             ),
             spec(
                 "restore",

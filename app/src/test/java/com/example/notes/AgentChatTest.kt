@@ -562,7 +562,7 @@ class AgentChatTest {
         assertEquals("reversed order is the same fact", AgentChat.Spend(2400, 9100), AgentChat.spend("think=9100 out=2400"))
         // **An unknown key is ignored rather than fatal**, so a later version can add one and an
         // older build still reads the row.
-        assertEquals("an unknown key", AgentChat.Spend(7, 0), AgentChat.spend("out=7 cost=0.003"))
+        assertEquals("an unknown key", AgentChat.Spend(7, 0), AgentChat.spend("out=7 cached=12"))
     }
 
     @Test

@@ -76,8 +76,8 @@ object RequestLog {
              * upstream supports cancellation. Some do and some do not, and for the ones that do
              * not, the whole generation is charged after the connection dies.
              *
-             * So this row is written with `usage` absent, which leaves every token and cost column
-             * blank rather than showing a zero. A zero would say "free", and the honest answer is
+             * So this row is written with `usage` absent, which leaves every token column blank
+             * rather than showing a zero. A zero would say "free", and the honest answer is
              * "we do not know" - and a blank `reasoning` would say "nothing was produced", when
              * what is true is that something was, we just never received the accounting for it.
              */
@@ -86,7 +86,14 @@ object RequestLog {
 
         val promptTokens: Int? get() = usage?.optInt("prompt_tokens")?.takeIf { usage.has("prompt_tokens") }
         val completionTokens: Int? get() = usage?.optInt("completion_tokens")?.takeIf { usage.has("completion_tokens") }
-        val cost: Double? get() = usage?.optDouble("cost")?.takeIf { usage.has("cost") }
+        /**
+         * **No cost, and its absence is the operator's rule rather than an oversight.**
+         *
+         * `usage.cost` is a gateway's own addition: the OpenAI shapes define `prompt_tokens`,
+         * `completion_tokens`, `cached_tokens` and `reasoning_tokens`, and none of them is money.
+         * A figure built from a field a server need not send is zero for every server that does not,
+         * and zero reads as free. *If we can't get it through the protocol then we don't need it.*
+         */
 
         /** The part of the prompt the provider did not have to read, when it says. */
         val cachedTokens: Int?

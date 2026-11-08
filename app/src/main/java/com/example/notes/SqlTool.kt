@@ -10,8 +10,8 @@ import java.util.Locale
 /**
  * Read-only SQL over the request log, so an agent can answer questions about the person's usage.
  *
- * **Why a database and not a tool with parameters.** "What did last week cost", "compare this Tuesday
- * to last", "which model costs most per answer" are one query language's worth of questions and
+ * **Why a database and not a tool with parameters.** "How much work did last week hold", "compare this
+ * Tuesday to last", "which model answers most per project" are one query language's worth of questions and
  * infinitely many tools' worth. A model that can write SQL answers the next question without an
  * update; a model with four fixed tools answers four.
  *
@@ -73,13 +73,11 @@ object SqlTool {
           cached      INTEGER  input tokens served from cache (a subset of prompt)
           completion  INTEGER  output tokens
           reasoning   INTEGER  thinking tokens (billed as output, counted apart)
-          cost        REAL     US dollars
-          reported    INTEGER  how many of these n reported a cost
           said        INTEGER  characters of answer, for stalled requests
           thinking    INTEGER  characters of thinking, for stalled requests
 
         requests    one row per request, kept about a minute before it is rolled up
-          utc, kind, ms, prompt, cached, completion, reasoning, cost, reported,
+          utc, kind, ms, prompt, cached, completion, reasoning,
           said, thinking, finish, provider, model, project
           kind: 0 = a turn, 1 = a cache keepalive, 2 = a stalled answer
 
@@ -203,8 +201,9 @@ object SqlTool {
             android.database.Cursor.FIELD_TYPE_INTEGER -> c.getLong(i).toString()
             android.database.Cursor.FIELD_TYPE_FLOAT -> {
                 val d = c.getDouble(i)
-                // **Integral doubles lose the trailing `.0`.** A cost column full of `0.0` reads as
-                // broken to a person opening the file, and `0` is what SQLite itself would print.
+                // **Integral doubles lose the trailing `.0`.** A column of `12.0` reads as broken to
+                // a person opening the file, and `12` is what SQLite itself would print. (The case
+                // this was written for was money; the rule is about doubles, and it stays.)
                 if (d == Math.floor(d) && !d.isInfinite() && Math.abs(d) < 1e15) {
                     d.toLong().toString()
                 } else {

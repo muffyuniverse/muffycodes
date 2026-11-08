@@ -48,7 +48,7 @@ class TraceCoverageTest {
                 db, System.currentTimeMillis(),
                 RequestLog.Stats(
                     kind = RequestLog.Stats.Kind.TURN, ms = 100, provider = "p", model = "m",
-                    usage = org.json.JSONObject("""{"prompt_tokens":10,"completion_tokens":1,"cost":0.5}"""),
+                    usage = org.json.JSONObject("""{"prompt_tokens":10,"completion_tokens":1}"""),
                     finish = "stop",
                 ),
             )
@@ -95,14 +95,14 @@ class TraceCoverageTest {
                 account, System.currentTimeMillis(),
                 RequestLog.Stats(
                     kind = RequestLog.Stats.Kind.TURN, ms = 100, provider = "p", model = "m",
-                    usage = org.json.JSONObject("""{"prompt_tokens":10,"completion_tokens":1,"cost":0.5}"""),
+                    usage = org.json.JSONObject("""{"prompt_tokens":10,"completion_tokens":1}"""),
                     finish = "stop",
                 ),
             )
 
             phone.viewModel.refresh()
             phone.await("the card to show the request") {
-                phone.viewModel.heartbeat.firstOrNull { it.id == Heartbeat.Id.SPEND }?.recent != null
+                phone.viewModel.heartbeat.firstOrNull { it.id == Heartbeat.Id.REQUESTS }?.recent != null
             }
 
             assertTrue(

@@ -46,7 +46,7 @@ class SqlToolTest {
                     ms = 100,
                     provider = "p", model = "m",
                     usage = JSONObject(
-                        """{"prompt_tokens":100,"completion_tokens":10,"cost":0.5,
+                        """{"prompt_tokens":100,"completion_tokens":10,
                            "prompt_tokens_details":{"cached_tokens":40}}""",
                     ),
                     finish = "stop",
@@ -90,7 +90,7 @@ class SqlToolTest {
         for (sql in listOf(
             "DROP TABLE requests",
             "INSERT INTO requests(utc) VALUES (1)",
-            "UPDATE requests SET cost = 0",
+            "UPDATE requests SET prompt = 0",
             "DELETE FROM requests",
             "CREATE TABLE x(a)",
             "ATTACH DATABASE '/tmp/x.db' AS x",
@@ -151,8 +151,8 @@ class SqlToolTest {
 
     @Test
     fun `the columns are the query's own names`() {
-        val rows = run("SELECT utc AS at_ms, cost AS usd FROM requests").getOrThrow()
-        assertEquals(listOf("at_ms", "usd"), rows.columns)
+        val rows = run("SELECT utc AS at_ms, prompt AS input FROM requests").getOrThrow()
+        assertEquals(listOf("at_ms", "input"), rows.columns)
     }
 
     // ---- the file -------------------------------------------------------------
@@ -166,12 +166,12 @@ class SqlToolTest {
     @Test
     fun `a comma in a value is quoted rather than shifting the columns`() {
         val csv = SqlTool.csv(
-            listOf("model", "cost"),
+            listOf("model", "prompt"),
             listOf(listOf("a,b", "0.5"), listOf("plain", "1")),
         )
         assertEquals(
             """
-            model,cost
+            model,prompt
             "a,b",0.5
             plain,1
 
@@ -187,9 +187,9 @@ class SqlToolTest {
     }
 
     @Test
-    fun `an integral cost is written without a trailing zero`() {
-        // A cost column of `0.0` reads as broken to a person opening the file.
-        val rows = run("SELECT 0.0 AS cost, 1.5 AS other").getOrThrow()
+    fun `an integral double is written without a trailing zero`() {
+        // A column of `0.0` reads as broken to a person opening the file.
+        val rows = run("SELECT 0.0 AS whole, 1.5 AS other").getOrThrow()
         assertEquals(listOf("0", "1.5"), rows.rows.first())
     }
 
@@ -197,7 +197,7 @@ class SqlToolTest {
 
     @Test
     fun `a query that matches nothing is not an error`() {
-        val rows = run("SELECT * FROM requests WHERE cost > 1000").getOrThrow()
+        val rows = run("SELECT * FROM requests WHERE prompt > 1000").getOrThrow()
         assertTrue("no rows", rows.rows.isEmpty())
         assertTrue("and complete", rows.complete)
         assertEquals("only the header", 1, rows.csv.lines().count { it.isNotEmpty() })

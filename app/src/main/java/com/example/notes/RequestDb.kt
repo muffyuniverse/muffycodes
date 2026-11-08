@@ -107,12 +107,12 @@ object RequestDb {
     private const val DIMENSIONS = "provider, model, project"
 
     private const val AGGREGATE_COLUMNS =
-        "n, prompt, cached, completion, reasoning, cost, reported, said, thinking"
+        "n, prompt, cached, completion, reasoning, said, thinking"
 
     /** Those columns summed, **for a table that already holds counts** (a rollup). */
     private const val SUMS =
-        "SUM(n), SUM(prompt), SUM(cached), SUM(completion), SUM(reasoning), SUM(cost), " +
-            "SUM(reported), SUM(said), SUM(thinking)"
+        "SUM(n), SUM(prompt), SUM(cached), SUM(completion), SUM(reasoning), " +
+            "SUM(said), SUM(thinking)"
 
     /**
      * The same nine values, **from raw rows** — where there is no `n` to sum.
@@ -123,8 +123,8 @@ object RequestDb {
      * happened to line up.
      */
     private const val RAW_SUMS =
-        "COUNT(*), SUM(prompt), SUM(cached), SUM(completion), SUM(reasoning), SUM(cost), " +
-            "SUM(reported), SUM(said), SUM(thinking)"
+        "COUNT(*), SUM(prompt), SUM(cached), SUM(completion), SUM(reasoning), " +
+            "SUM(said), SUM(thinking)"
 
     /**
      * Opens the database, creating the schema when it is new.
@@ -179,8 +179,6 @@ object RequestDb {
               cached    INTEGER NOT NULL DEFAULT 0,
               completion INTEGER NOT NULL DEFAULT 0,
               reasoning INTEGER NOT NULL DEFAULT 0,
-              cost      REAL    NOT NULL DEFAULT 0,
-              reported  INTEGER NOT NULL DEFAULT 0,
               said      INTEGER NOT NULL DEFAULT 0,
               thinking  INTEGER NOT NULL DEFAULT 0,
               finish    TEXT,
@@ -213,8 +211,6 @@ object RequestDb {
                   cached    INTEGER NOT NULL DEFAULT 0,
                   completion INTEGER NOT NULL DEFAULT 0,
                   reasoning INTEGER NOT NULL DEFAULT 0,
-                  cost      REAL    NOT NULL DEFAULT 0,
-                  reported  INTEGER NOT NULL DEFAULT 0,
                   said      INTEGER NOT NULL DEFAULT 0,
                   thinking  INTEGER NOT NULL DEFAULT 0,
                   -- **The tuple, not the instant.** A bucket now holds one row per provider, model
@@ -299,19 +295,12 @@ object RequestDb {
             put("cached", usage?.optJSONObject("prompt_tokens_details").intOr("cached_tokens", 0))
             put("completion", usage.intOr("completion_tokens", 0))
             put("reasoning", usage?.optJSONObject("completion_tokens_details").intOr("reasoning_tokens", 0))
-            // **Read once, into a value that cannot disagree with itself.** `cost` is the number and
-            // `reported` is whether the provider said it; reading the JSON twice is how those two
-            // drift apart, and a null cost is exactly the case where they must not.
-            //
-            // `usage?.takeIf { it.has("cost") }` rather than a `val reported = ...` flag, because
-            // Kotlin cannot smart-cast `usage` to non-null from a Boolean - the flag would compile
-            // into an error at `usage.optDouble`.
-            val cost = usage?.takeIf { it.has("cost") }?.optDouble("cost")
-            put("cost", cost ?: 0.0)
-            // **Reported, not merely nonzero.** A response that reported `$0` is a measurement and
-            // counts toward the average; one that reported nothing must not. This is the column that
-            // keeps "free" and "unknown" apart, and it is why the average has a denominator.
-            put("reported", if (cost != null) 1 else 0)
+            // **No money column, and its absence is a decision rather than an omission.**
+            // `usage.cost` is OpenRouter's own field: it is not in the OpenAI shapes, so a server
+            // this app talks to has no obligation to report it, and a total built from it would be
+            // zero for every such server - a figure that reads as "free" when the truth is "not
+            // said". Tokens are protocol, so tokens are kept in full; money is the gateway's
+            // arithmetic, so it is not this app's to keep.
             put("said", stats.received?.said ?: 0)
             put("thinking", stats.received?.thinking ?: 0)
             put("finish", stats.finish)
@@ -499,10 +488,8 @@ object RequestDb {
         cachedTokens = getLong(at + 2),
         completionTokens = getLong(at + 3),
         reasoningTokens = getLong(at + 4),
-        cost = getDouble(at + 5),
-        costReported = getInt(at + 6),
-        saidChars = getLong(at + 7),
-        thinkingChars = getLong(at + 8),
+        saidChars = getLong(at + 5),
+        thinkingChars = getLong(at + 6),
     )
 
     private fun floorTo(ms: Long, bucket: Long): Long = Math.floorDiv(ms, bucket) * bucket
@@ -772,7 +759,7 @@ object RequestDb {
             ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
             // **Stalls are left where they are** (see STALL_KIND). Deleting them would fold their
             // kind into a bucket that has no column to hold it, and the split the screen draws would
-            // then be silently wrong - a stall's zero cost indistinguishable from a free turn.
+            // then be silently wrong - a stall's blank tokens indistinguishable from a free turn.
             //
             // **A raw row is deleted only once a minute row covers it**, which is the guard the
             // whole pyramid rests on: every level above is rebuilt from the level below, so a row

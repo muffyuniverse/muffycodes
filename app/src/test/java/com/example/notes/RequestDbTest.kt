@@ -62,10 +62,16 @@ class RequestDbTest {
         account.deleteRecursively()
     }
 
-    /** One response, priced at a round number so a total can be checked by arithmetic. */
+    /**
+     * One response, with round token counts so a total can be checked by arithmetic.
+     *
+     * **No price any more.** `usage.cost` is a gateway's addition rather than the protocol's, so a
+     * total built from it reads as zero on a server that does not report one - and a total of what
+     * one gateway chose to say is not a total of the work. The prompt and completion counts are the
+     * same arithmetic in the protocol's own unit.
+     */
     private fun response(
         at: Long,
-        cost: Double = 1.0,
         prompt: Int = 100,
         completion: Int = 10,
         model: String = "m",
@@ -77,7 +83,7 @@ class RequestDbTest {
         model = model,
         project = project,
         usage = JSONObject(
-            """{"prompt_tokens":$prompt,"completion_tokens":$completion,"cost":$cost}""",
+            """{"prompt_tokens":$prompt,"completion_tokens":$completion}""",
         ),
         finish = "stop",
     )
@@ -89,7 +95,7 @@ class RequestDbTest {
      *
      * The operator's split: the fine tier exists to draw the heartbeat's forty-eight sliding
      * windows and nothing reads a minute older than that, while the coarse tier is what an agent
-     * asks for - "what did last week cost" - and is worth keeping as long as the person keeps
+     * asks for - "what did last week look like" - and is worth keeping as long as the person keeps
      * anything.
      *
      * **Falsification:** if both tiers shared one cutoff, the minute rows would survive for the
@@ -168,11 +174,11 @@ class RequestDbTest {
         // Three responses spread across one day, at hours 1, 12 and 23.
         for (h in listOf(1, 12, 23)) {
             val at = base + h * 3_600_000L
-            write(at, response(at, cost = 1.0))
+            write(at, response(at, prompt = 1))
         }
         RequestDb.compact(db, base + day)
 
-        assertEquals("the day holds all three", 3.0, costOf("roll_day"), 1e-9)
+        assertEquals("the day holds all three", 3.0, promptOf("roll_day"), 1e-9)
     }
 
     /**
@@ -189,7 +195,7 @@ class RequestDbTest {
         val base = 1_767_000_000_000L
         for (m in 0 until 10) {
             val at = base + m * 60_000L
-            write(at, response(at, cost = 1.0))
+            write(at, response(at, prompt = 1))
         }
         RequestDb.compact(db, base + 10 * 60_000L)
 
@@ -217,12 +223,12 @@ class RequestDbTest {
     fun `a bucket holds one row per model rather than replacing the last`() {
         val base = 1_767_000_000_000L
         val at = base - (base % 3_600_000L) + 60_000L // inside one hour
-        write(at, response(at, cost = 1.0, model = "a/one"))
-        write(at + 1_000L, response(at + 1_000L, cost = 2.0, model = "b/two"))
+        write(at, response(at, prompt = 1, model = "a/one"))
+        write(at + 1_000L, response(at + 1_000L, prompt = 2, model = "b/two"))
         RequestDb.compact(db, at + 3_600_000L)
 
         assertEquals("both models are present", 2, count("roll_minute"))
-        assertEquals("and the hour holds both", 3.0, costOf("roll_hour"), 1e-9)
+        assertEquals("and the hour holds both", 3.0, promptOf("roll_hour"), 1e-9)
     }
 
     /**
@@ -233,19 +239,19 @@ class RequestDbTest {
     fun `a total across a bucket adds every model up`() {
         val base = 1_767_000_000_000L
         val at = base - (base % 3_600_000L) + 60_000L
-        write(at, response(at, cost = 1.0, model = "a/one"))
-        write(at + 1_000L, response(at + 1_000L, cost = 2.0, model = "b/two"))
+        write(at, response(at, prompt = 1, model = "a/one"))
+        write(at + 1_000L, response(at + 1_000L, prompt = 2, model = "b/two"))
         RequestDb.compact(db, at + 3_600_000L)
 
         val totals = RequestDb.totals(db, at - 60_000L, at + 3_000_000L)
-        assertEquals("one number, not the first model's", 3.0, totals.total.cost, 1e-9)
+        assertEquals("one number, not the first model's", 3.0, totals.total.promptTokens.toDouble(), 1e-9)
     }
 
     private fun count(table: String): Int =
         db.rawQuery("SELECT COUNT(*) FROM $table", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
 
-    private fun costOf(table: String): Double =
-        db.rawQuery("SELECT SUM(cost) FROM $table", null).use { c -> if (c.moveToFirst()) c.getDouble(0) else 0.0 }
+    private fun promptOf(table: String): Double =
+        db.rawQuery("SELECT SUM(prompt) FROM $table", null).use { c -> if (c.moveToFirst()) c.getDouble(0) else 0.0 }
 
     /**
      * A response written **through the real path**, on this test's own connection.
@@ -269,7 +275,7 @@ class RequestDbTest {
      * The totals over an interval, **unwrapped to the turns-and-pings part.**
      *
      * `totals` returns a [RequestStats.Totals] - a total plus the stalls counted apart from it -
-     * because those are two different facts and folding them would claim a cost of zero for a stall.
+     * because those are two different facts and folding them would claim nothing was spent on a stall.
      * Almost every test here is about the ordinary requests, so this returns that half; the one test
      * that is about the split reads `.stalls` itself.
      */
@@ -301,30 +307,18 @@ class RequestDbTest {
     }
 
     @Test
-    fun `cost is a sum and the reported count is its denominator`() {
-        // **Two different facts in two columns.** One response reported a cost, one reported nothing.
-        // Averaging the sum over both would divide a real cost by two and return a plausible lie.
-        write(base + 10 * HOUR, response(base + 10 * HOUR, cost = 0.5))
+    fun `a response that reported no usage is still a request`() {
+        // **The distinction that outlived the money columns.** A response may arrive with no
+        // `usage` at all - a stall, or a server that does not report tokens - and it is still a
+        // request that happened. Counting only the rows that reported would make the request count
+        // a count of *accounted* requests, which is a different number.
+        write(base + 10 * HOUR, response(base + 10 * HOUR, prompt = 100))
         val silent = response(base + 10 * HOUR + MIN)
-        write(base + 10 * HOUR + MIN, silent.copy(usage = JSONObject("""{"prompt_tokens":100}""")))
+        write(base + 10 * HOUR + MIN, silent.copy(usage = null))
 
         val stats = total(base + 10 * HOUR, base + 11 * HOUR)
-        assertEquals("both counted", 2, stats.requests)
-        assertEquals("one cost", 0.5, stats.cost, 1e-9)
-        // **Reported, not merely nonzero.** A response that reported $0 is a measurement and counts;
-        // one that said nothing does not, which is what keeps this average honest.
-        assertEquals("but only one reported it", 1, stats.costReported)
-    }
-
-    @Test
-    fun `a response that reported zero cost still counts as reported`() {
-        // The case that separates "free" from "unknown". A provider that says `cost: 0` made a
-        // measurement; one that omits the field did not.
-        val free = response(base + 10 * HOUR, cost = 0.0)
-        write(base + 10 * HOUR, free)
-        val stats = total(base + 10 * HOUR, base + 11 * HOUR)
-        assertEquals("it reported", 1, stats.costReported)
-        assertEquals("and reported nothing owed", 0.0, stats.cost, 1e-9)
+        assertEquals("both are requests", 2, stats.requests)
+        assertEquals("and only one contributed tokens", 100, stats.promptTokens)
     }
 
     @Test
@@ -332,7 +326,10 @@ class RequestDbTest {
         write(base + 10 * HOUR)
         val empty = total(base + 15 * HOUR, base + 16 * HOUR)
         assertEquals("nothing counted", 0, empty.requests)
-        assertNull("no cost per request, because there is no request to divide by", empty.perRequest)
+        // **A rate with no denominator is null, not zero** - the same distinction the cost average
+        // made, in the shares that survive.
+        assertNull("no cache share, because there is no prompt to be a share of", empty.cachedShare)
+        assertNull("nor an output share", empty.thinkingShare)
         assertNull("no cache share, because there is no input", empty.cachedShare)
     }
 
@@ -862,10 +859,11 @@ class RequestDbTest {
         val both = RequestDb.totals(db, base + 10 * HOUR, base + 11 * HOUR)
         assertEquals("the turn is in the total", 1, both.total.requests)
         assertEquals("and the stall is counted apart", 1, both.stalls.requests)
-        // **A stall's cost is unknown, not zero**, so it must not touch the average: the turn
-        // reported a cost and the stall reported nothing, and one reported cost over one request is
-        // the honest answer.
-        assertEquals("only the turn reported a cost", 1, both.total.costReported)
-        assertEquals("so the stall did not enter the denominator", 1.0, both.total.perRequest!!, 1e-9)
+        // **A stall reported no usage, and that is still not a zero.** It must not enter a figure
+        // that is a share of accounted tokens: the turn's prompt is the whole of the prompt, and a
+        // stall folded in would quietly become a request with no tokens at all — which would drag
+        // every share toward zero for a reason that has nothing to do with the cache.
+        assertEquals("the turn's tokens, and only them", 100, both.total.promptTokens)
+        assertEquals("its cached tokens, and only them", 0, both.total.cachedTokens)
     }
 }
