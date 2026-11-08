@@ -169,12 +169,6 @@ object AgentWiring {
             // **Read per call, so a cap lowered while the agent is idle applies to the next request**
             // rather than to the runner built before the person changed it.
             fetchLimit = { settings.fetchBytes },
-            // **The real GitHub, and the key read per call.** A local project has a remote that is
-            // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
-            github = {
-                AppViewModel.githubFor(login, accounts, BuildConfig.DEBUG)
-            },
-            githubToken = { credentials.token(login) },
             // **The same function the project's ⋮ menu calls.** An agent that exports a file and a
             // person who exports the same one should find them identical, and two implementations of
             // "copy this to Downloads" would drift in exactly the ways nobody notices.

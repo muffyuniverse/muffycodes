@@ -146,17 +146,6 @@ class AgentTools(
      */
     private val credentials: Credentials? = null,
     /**
-     * GitHub, and the key to reach it with — **nulls when there is nothing to reach.**
-     *
-     * Read per call like every other limit here, because signing out or pasting a new key while the
-     * agent is idle must apply to the next call rather than to the runner built before it.
-     *
-     * Null is not an error: a project with no remote has no runs, and a refusal that says so is the
-     * honest answer. It is also what keeps the tests of every other tool free of a fake GitHub.
-     */
-    private val github: () -> GitHub? = { null },
-    private val githubToken: () -> String? = { null },
-    /**
      * Whether the model in force can see a picture — or `null` when nothing has said.
      *
      * **`ModelCatalogue.Entry.inputModalities` already answers this**, read from the provider's own

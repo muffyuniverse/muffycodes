@@ -54,15 +54,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     private val testAccountsAllowed: Boolean = BuildConfig.DEBUG,
     /**
-     * The GitHub that signing in asks who a key belongs to.
+     * The host that signing in asks who a key belongs to.
      *
-     * A seam, not a mock: production leaves it alone and gets [HttpGitHub]. It is
-     * here because the failure half of signing in — a key GitHub refuses — had no
-     * way to happen in a test, so the code that shows the refusal was never run.
-     * The one thing that must never be substituted is the answer a *release* build
-     * gives, and that is asserted separately.
+     * A seam, not a mock: production leaves it alone and gets [HttpWho]. It is here because the
+     * failure half of signing in — a key the host refuses — had no way to happen in a test, so the
+     * code that shows the refusal was never run. The one thing that must never be substituted is the
+     * answer a *release* build gives, and that is asserted separately.
      */
-    private val signInGitHub: () -> GitHub = { HttpGitHub() },
+    private val signInGitHub: () -> Who = { HttpWho() },
     /**
      * Whether this phone runs the **app-start housekeeping** — the sweep and `git gc` that reclaim
      * what a prune and a pull leave behind.
@@ -497,16 +496,17 @@ class AppViewModel @JvmOverloads constructor(
     val isProvisionalAccount: Boolean get() = accounts.isProvisional(activeLogin)
 
     /**
-     * The GitHub the active account talks to.
+     * **GitHub's own question, for the account that is signed in** — and nothing else of GitHub's.
      *
-     * A signed-in account talks to GitHub. The test account of a debug build talks
-     * to a folder on this phone that behaves like one, so every feature that needs
-     * an account can be walked through without a key ever existing.
+     * This used to be a whole API surface: repositories, licences, CI runs, artifacts, environment
+     * secrets. All of it is gone, because none of it is the git protocol and every host spells it
+     * differently. What is left is the one thing a sign-in cannot do without — asking whose key it
+     * has — and it is the only reason this app still knows a vendor's address at all. See [Who].
      */
-    fun githubFor(login: String?): GitHub? = Companion.githubFor(login, accounts, testAccountsAllowed)
+    fun whoFor(login: String?): Who? = Companion.whoFor(login, accounts, testAccountsAllowed)
 
-    /** The GitHub of the active account, or null when nobody is signed in. */
-    val github: GitHub? get() = githubFor(activeLogin)
+    /** The door of the active account, or null when no GitHub account is signed in. */
+    val who: Who? get() = whoFor(activeLogin)
 
     /**
      * True when there is a GitHub account behind the workspace.
@@ -516,25 +516,6 @@ class AppViewModel @JvmOverloads constructor(
      * this, and the provisional workspace answers no while still being a workspace.
      */
     val signedIn: Boolean get() = account != null && !isProvisionalAccount
-
-    /**
-     * **Why there is no GitHub behind this action** — in the words that fit the case.
-     *
-     * Two different situations reach every "no GitHub" branch, and answering both with "sign in to
-     * GitHub first" sends a person to a screen that cannot help them: an account on another host has
-     * *signed in*, and what it lacks is an API this app only has for one host. Naming the host is what
-     * makes the sentence actionable — the person either uses that host's own website, or reaches it
-     * with the agent's `http` and a secret bound to it.
-     */
-    private fun noGitHub(action: String): String {
-        val host = account?.host.orEmpty()
-        return if (host.isNotBlank() && host != GITHUB_HOST) {
-            "${action.replaceFirstChar { it.uppercase() }} is GitHub's API, and this account is on " +
-                "$host. Nothing was sent."
-        } else {
-            "Sign in to GitHub first: $action"
-        }
-    }
 
     /**
      * The active account's tree, or null when nobody is signed in.
@@ -1952,7 +1933,7 @@ class AppViewModel @JvmOverloads constructor(
      *
      * **The same answer the app acts on**, exposed rather than re-derived: a test that worked out a
      * project's repository from its folder name would be testing its own arithmetic, and the parse the
-     * phone actually performs (`RepoRef.of`) is the thing worth asking about.
+     * phone actually performs is the thing worth asking about.
      */
     fun remoteUrlOf(project: String): String? = git?.remoteUrl(project)
 
@@ -3563,110 +3544,6 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Makes a project: the repository on GitHub first, seeded with its licence,
-     * then the folder and the clone (§4.1).
-     */
-    fun createProject(
-        name: String,
-        licence: String,
-        onDone: (Boolean) -> Unit = {},
-    ) {
-        val ws = workspace ?: return
-        val login = activeLogin
-        val api = githubFor(login)
-        val token = login?.let { credentials.token(it) }.orEmpty()
-        if (login.isNullOrBlank() || api == null) {
-            message = noGitHub("creating a repository")
-            onDone(false)
-            return
-        }
-        // Deliberately not put through the project naming rule: this name becomes a
-        // repository on GitHub, and a project that was pulled in already carries the
-        // repository's own name. A name GitHub refuses is reported by GitHub, which
-        // is the only place that knows what it will accept.
-        val clean = name.trim()
-        val problem = Workspace.nameProblem(clean)
-        if (problem != null) {
-            message = problem
-            onDone(false)
-            return
-        }
-        if (ws.projectNames().any { it.equals(clean, ignoreCase = true) }) {
-            message = "There is already a project called \"$clean\""
-            onDone(false)
-            return
-        }
-
-        busy = true
-        onWorker {
-            // **The sentinel becomes two things, and neither is a licence.** `PRIVATE_LICENCE` is
-            // the window's word for "no licence, and nobody can see it" — so the template is left
-            // empty rather than sent, because GitHub would refuse `license_template: "private"`.
-            val isPrivate = licence == PRIVATE_LICENCE
-            val created = api.createRepo(
-                token,
-                clean,
-                if (isPrivate) "" else licence,
-                private = isPrivate,
-            )
-            if (created.error != null) {
-                main.post {
-                    busy = false
-                    message = created.error
-                    onDone(false)
-                }
-                return@onWorker
-            }
-            val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
-                ?: api.cloneUrlFor(login, clean)
-            // **No folder is made first.** `createProjectFolders` makes the project's folder,
-            // and git refuses to clone into a folder that already holds anything — so making it
-            // here meant every project made on GitHub arrived as an empty folder, an error in the
-            // snackbar and no repository, which is to say no history at all. The clone makes the
-            // folder; `cloneInto` writes the app's two ignore lines into it afterwards.
-            // **The one wiring, not a fifth copy of it.** Every ad-hoc `ProjectGit(...)` here used to
-            // spell the key, the identity and the index again — and each of them therefore had to
-            // remember the account's host and git username separately. `projectGit` is where that
-            // knowledge lives now, so a project cloned on another host gets its key the same way the
-            // editor's commit does.
-            val git = projectGit(ws)
-            val clone = git.cloneInto(clean, url)
-            // **The folder tree, after the clone and not before.** `cloneInto` refuses a folder that
-            // already holds anything, so a folder made first would have stopped the repository
-            // arriving at all — the same trap `createProjectFolders` had.
-            //
-            // **And only when the clone worked**, because folders in a folder that is not a project
-            // are folders nobody asked for.
-            //
-            // **And sent.** The markers are files, so there is something to commit — and a project
-            // made on GitHub is on GitHub. Leaving them as a commit waiting to be sent would greet a
-            // person with "1 to send" on a project they have not touched. The person pressed Create,
-            // the app already spoke to GitHub to make the repository, so what it starts with is part
-            // of what was made. The agent's rule — that nothing it does is pushed — is unchanged.
-            if (clone.success) {
-                val wrote = ProjectTree.create(ws.projectDir(clean))
-                if (wrote.isNotEmpty()) {
-                    git.sync(clean, "Start the project's folders")
-                }
-            }
-
-            main.post {
-                busy = false
-                message = clone.message
-                // **It does not move you inside.** A project appearing in the list is the result,
-                // and being teleported into an empty folder is how a person loses track of where
-                // they were — the row is right there when they want it.
-                //
-                // **And the window is answered before the list is redrawn**, for the reason the
-                // local-project path gives: the screen that waits is the add window, and a list
-                // redrawn after it has closed reaches nobody.
-                onDone(clone.success)
-                refresh()
-            }
-        }
-    }
-
-    /**
      * **Sets a project's address — and the local name follows it.**
      *
      * This is the whole of renaming, and the whole of publishing, because both are the same act seen
@@ -3858,124 +3735,6 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * **Gives a local project a GitHub repository** — local → synced.
-     *
-     * The operator's report: "local projects should have add to github option. and synced already
-     * give ability to keep the project as local in delete, right? make sure that the state change
-     * cycle (local<>synced) is complete and without errors."
-     *
-     * **The history goes up with it.** A local project has been committing since it was made - that
-     * is what makes it a project rather than a folder - so the repository is created empty and the
-     * first sync carries every version that already exists. Nothing is rewritten and nothing is
-     * copied: the project's folder *is* the repository.
-     *
-     * **The licence IS asked for, and that is the operator's correction.** A project on this phone
-     * has no licence file, because there was nothing to seed; the moment it is published it is a
-     * repository somebody can find, use and quote, so the terms it is offered under are a real
-     * decision rather than a detail. The app's policy is that everything it publishes is open
-     * source, so the dialog offers the licences GitHub publishes and starts on GPL-3.0.
-     */
-    fun addProjectToGitHub(project: String, licence: String, onDone: (Boolean) -> Unit = {}) {
-        val ws = workspace ?: return
-        val api = github
-        val login = activeLogin
-        val token = login?.let { credentials.token(it) }.orEmpty()
-        if (api == null || login == null) {
-            message = noGitHub("making a local project synced by giving it a repository")
-            onDone(false)
-            return
-        }
-        if (!isLocalProject(project)) {
-            message = "$project already has a GitHub repository"
-            onDone(false)
-            return
-        }
-        busy = true
-        onWorker {
-            // **Seeded with the licence, which is the whole point of asking.** GitHub writes the
-            // file as part of creating the repository; the first sync then carries the project's
-            // own history on top of it.
-            //
-            // **Except when the answer was "private".** That is not a licence: it is the choice of
-            // no licence and no visibility, so the template is left empty rather than sent — and
-            // GitHub would refuse `license_template: "private"` anyway, which would read as a bug
-            // in the app rather than as the choice it is.
-            val isPrivate = licence == PRIVATE_LICENCE
-            val created = api.createRepo(
-                token,
-                project,
-                if (isPrivate) "" else licence,
-                private = isPrivate,
-            )
-            if (created.error != null) {
-                main.post {
-                    busy = false
-                    message = created.error
-                    onDone(false)
-                }
-                return@onWorker
-            }
-            val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
-                ?: api.cloneUrlFor(login, project)
-            val pointed = git?.makeRemote(project, url) ?: false
-            main.post {
-                busy = false
-                // **The first sync is what actually sends it**, and it runs here rather than being
-                // left for a tap: a project that says "synced" while GitHub holds an empty
-                // repository is the worst of both states.
-                if (pointed) {
-                    Trace.note("published", "$project -> $url")
-                    sync(project)
-                } else {
-                    message = "The repository was made, but $project could not be pointed at it"
-                }
-                refresh()
-                onDone(pointed)
-            }
-        }
-    }
-
-    /**
-     * **Takes a project's GitHub repository away from this phone** — synced → local.
-     *
-     * Every commit stays. The history is in this phone's repository, so the project keeps every
-     * version it has and simply stops having somewhere to send them.
-     *
-     * **What is on GitHub stays on GitHub**, and the window says so before this runs: removing the
-     * remote is a statement about this phone, not about the server, and "keep as local" that quietly
-     * left a public copy behind would be a promise the app could not keep. Deleting the repository
-     * itself is the other act, "delete everywhere".
-     */
-    fun keepProjectLocal(project: String, onDone: (Boolean) -> Unit = {}) {
-        if (Workspace.isSystem(project)) {
-            message = "\"$project\" is where this account's settings live, so it stays"
-            onDone(false)
-            return
-        }
-        if (isLocalProject(project)) {
-            message = "$project is already only on this phone"
-            onDone(false)
-            return
-        }
-        val hadRemote = git?.remoteUrl(project)
-        val ok = git?.makeLocal(project) ?: false
-        Trace.tap("keep local", project)
-        // **The host, named from the address rather than assumed.** This sentence said "on GitHub"
-        // for every project, which was true only while every project had a GitHub repository - and it
-        // is the sentence that decides whether a person believes their copy is still somewhere else.
-        val where = hadRemote?.let { Secrets.hostOf(it) }?.takeIf { it.isNotBlank() }
-        message = if (ok) {
-            "$project is local now. Everything it holds is still here" +
-                (where?.let { ", and its repository is still at $it" } ?: "") +
-                (hadRemote?.let { " ($it)" } ?: "")
-        } else {
-            "$project could not be made local"
-        }
-        refresh()
-        onDone(ok)
-    }
-
-    /**
      * **Adds a project from an address the person supplies** — the universal half of the add window.
      *
      * The address is checked with `ls-remote` *before* a folder is made, so a mistyped path, a key the
@@ -4042,20 +3801,6 @@ class AppViewModel @JvmOverloads constructor(
                 refresh()
                 onDone(result.success)
             }
-        }
-    }
-
-    /** The licences a project can be published with, when that is GitHub's to answer. */
-    fun listLicences(onDone: (List<Licence>) -> Unit) {
-        val api = github
-        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
-        if (api == null) {
-            onDone(emptyList())
-            return
-        }
-        onWorker {
-            val result = api.licences(token)
-            main.post { onDone(result.value ?: emptyList()) }
         }
     }
 
@@ -5159,10 +4904,10 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Makes the test account of a debug build and signs it in.
      *
-     * It is a real account in every way that matters — its own folder, its own
-     * identity, its own projects — and its GitHub is a folder of bare repositories
-     * ([DiskGitHub]), so a project is invented, cloned, committed to and pushed
-     * for real. One repository is put there first, so Pull has something to pull.
+     * It is a real account in every way that matters — its own folder, its own identity, its own
+     * projects — and the one thing a host answers, whose key this is, is answered on this phone by
+     * [DiskWho]. Its repositories are bare folders the tests make by hand, so a project is cloned,
+     * committed to and pushed for real.
      */
     fun signInAsTestAccount(onDone: (Boolean) -> Unit = {}) {
         if (!canMakeTestAccount) {
@@ -5172,10 +4917,9 @@ class AppViewModel @JvmOverloads constructor(
         }
         onWorker {
             val login = TEST_ACCOUNT
-            val github = DiskGitHub(accounts.devGitHubDir(login), login)
-            if (github.listRepos("").value?.isEmpty() != false) {
-                github.createRepo("", "welcome", "mit", "A repository that is not here yet")
-            }
+            // **Nothing is made here.** This used to seed a `welcome` repository so the picker had
+            // something to list; the picker is gone, and a repository is made on the host's website.
+            // What the test account needs is an identity, which [DiskWho] answers.
             main.post {
                 accounts.save(
                     Account(
@@ -6071,22 +5815,23 @@ class AppViewModel @JvmOverloads constructor(
          * that twice would be writing it two slightly different ways.
          *
          * **The provisional account has no GitHub.** Its folder is a real workspace, but there is no
-         * account behind it, so answering with an `HttpGitHub` would give every caller something
-         * that looks usable and sends unauthenticated requests to the internet. `null` is the honest
+         * account behind it, so answering with an `HttpWho` would give every caller something that
+         * looks usable and sends unauthenticated requests to the internet. `null` is the honest
          * answer, and it is the one the screens already handle.
          */
-        fun githubFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): GitHub? {
+        fun whoFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): Who? {
             if (accounts.isProvisional(login)) return null
             val stored = accounts.account(login) ?: return null
             if (stored.dev && testAccountsAllowed) {
-                return DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
+                // **A host that says who a key is and nothing else.** Its repositories are bare
+                // folders the fixtures make by hand, which is what a host's website does.
+                return DiskWho(stored.login)
             }
-            // **An account on another host has no GitHub at all.** `HttpGitHub()` pointed at
-            // `api.github.com` on behalf of a `gitlab.com` account would send that account's key to a
-            // host it was never made for — refused by design — and answer every caller with a 401 that
-            // explains nothing. `null` is the honest answer, and every caller already handles it: it is
-            // the same `null` a phone with nobody signed in gets.
-            return if (Secrets.isHost("https://${stored.host}/", GITHUB_HOST)) HttpGitHub() else null
+            // **An account on another host has no such door.** `HttpWho()` pointed at `api.github.com`
+            // on behalf of a `gitlab.com` account would send that account's key to a host it was never
+            // made for — refused by design — and answer with a 401 that explains nothing. `null` is the
+            // honest answer, and it is what makes the other-host door ask the person for a name.
+            return if (Secrets.isHost("https://${stored.host}/", GITHUB_HOST)) HttpWho() else null
         }
         private const val SEARCH_LIMIT = 4000
 

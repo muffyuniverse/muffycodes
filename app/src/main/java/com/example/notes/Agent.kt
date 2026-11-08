@@ -203,8 +203,6 @@ class Agent(
      * the key while an agent is idle, and the key that applies is the one in force when the call
      * arrives. Null means the CI tools refuse — a local project has no runs to read.
      */
-    private val github: () -> GitHub? = { null },
-    private val githubToken: () -> String? = { null },
     /**
      * The phone's Downloads folder, or `PhoneDownloads.NONE` when the agent may not reach it.
      *
@@ -264,7 +262,7 @@ class Agent(
         mcp = mcp, credentials = credentials, scanner = scanner,
         httpAllowed = httpAllowed,
         fetchLimit = fetchLimit,
-        github = github, githubToken = githubToken, phone = phone,
+        phone = phone,
         modelSees = modelSees,
         onDiskChanged = onDiskChanged,
         branch = branch,

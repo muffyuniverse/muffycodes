@@ -63,9 +63,9 @@ class KeySafetyFeatureTest : FeatureTest() {
             testAccountsAllowed = false,
         )
 
-        val github = releaseLike.githubFor(stored.login)
+        val who = releaseLike.whoFor(stored.login)
 
-        assertTrue("the build talks to GitHub, not to a folder", github is HttpGitHub)
+        assertTrue("the build asks GitHub, not a folder", who is HttpWho)
     }
 
     @Test
@@ -91,17 +91,20 @@ class KeySafetyFeatureTest : FeatureTest() {
     fun `a signed-in account with a key talks to GitHub`() {
         scene.viewModel.signIn("muffyuniverse", "a-key", "Muffy World", "muffy@example.com")
 
-        assertTrue(scene.viewModel.githubFor("muffyuniverse") is HttpGitHub)
+        assertTrue(scene.viewModel.whoFor("muffyuniverse") is HttpWho)
     }
 
     @Test
-    fun `the key never reaches the address a repository is cloned from`() {
+    fun `no address is ever composed from an account any more`() {
+        // **This test used to assert that `cloneUrlFor` put no key in the address.** The function that
+        // composed one is gone: an address is what a person pasted from their host's page, and the app
+        // has no convention for spelling one. So the fact worth asserting is the absence — a composed
+        // address would be a host convention the app had guessed, which is exactly what the cut removed.
         scene.viewModel.signIn("muffyuniverse", "ghp_secret_value", "Muffy World", "muffy@example.com")
 
-        val url = scene.viewModel.githubFor("muffyuniverse")!!.cloneUrlFor("muffyuniverse", "Shopping")
-
-        assertFalse("the key is not in the address", url.contains("ghp_"))
-        assertFalse("and nothing that looks like a credential is", url.contains("@"))
+        val who = scene.viewModel.whoFor("muffyuniverse")
+        assertTrue("the door is only asked who a key is", who is HttpWho)
+        assertNull("and it has no way to spell an address", scene.viewModel.remoteUrlOf("Shopping"))
     }
 
     @Test

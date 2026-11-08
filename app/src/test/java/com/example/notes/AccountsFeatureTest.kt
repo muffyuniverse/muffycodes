@@ -31,7 +31,7 @@ class AccountsFeatureTest : FeatureTest() {
         val phone = Scenario(
             RuntimeEnvironment.getApplication(),
             signIn = false,
-            signInGitHub = { RefusingGitHub() },
+            signInGitHub = { RefusingWho() },
         )
         try {
             var answered: Boolean? = null
@@ -67,9 +67,9 @@ class AccountsFeatureTest : FeatureTest() {
         assertTrue("and it is the provisional one", scene.viewModel.isProvisionalAccount)
         assertTrue("with a real workspace", scene.viewModel.workspace != null)
         assertFalse("but nobody is signed in to GitHub", scene.viewModel.signedIn)
-        // **No GitHub, deliberately.** Answering with an `HttpGitHub` would give every caller
+        // **No door, deliberately.** Answering with an `HttpWho` would give every caller
         // something that looks usable and sends unauthenticated requests to the internet.
-        assertNull("so there is no GitHub to talk to", scene.viewModel.github)
+        assertNull("so there is no GitHub to ask who a key is", scene.viewModel.who)
         // Nothing of the person's yet: the system project is all a fresh provisional account has.
         assertTrue(
             "nothing of the person's is listed",
@@ -92,16 +92,16 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a test account's GitHub is a folder on this phone, not the internet`() {
+    fun `a test account's door is the disk one, not the internet`() {
+        // **What is left of "a host" is one question**, so that is what there is to assert: a debug
+        // build's test account is answered on this phone, and a key is still required — the fake can
+        // say no, which is what makes the refusal half of signing in testable at all.
         scene.signedIn()
 
-        val github = scene.viewModel.github!!
-        assertTrue("it is the disk one", github is DiskGitHub)
-        assertTrue(
-            "its repositories live inside the account's folder",
-            (github as DiskGitHub).repoDir("anything").absolutePath
-                .startsWith(scene.viewModel.accounts.dirOf(scene.login).absolutePath),
-        )
+        val who = scene.viewModel.who!!
+        assertTrue("it is the disk one", who is DiskWho)
+        assertEquals("with the key's owner", "test-account", who.identity("any-key").value?.login)
+        assertEquals("and a key is still required", 401, who.identity("").status)
     }
 
     @Test
@@ -148,28 +148,30 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an account on another host has no GitHub at all`() {
+    fun `an account on another host has no GitHub door at all`() {
         // **The failure this prevents is a key sent to a host it was never made for.** An
-        // `HttpGitHub()` behind a `gitlab.com` account would call `api.github.com` with that account's
-        // key and answer every feature with a 401 that explains nothing. `null` is the honest answer:
-        // there is no GitHub for this account, exactly as there is none for a phone with nobody
-        // signed in — and every caller already handles that.
+        // `HttpWho()` behind a `gitlab.com` account would call `api.github.com` with that account's
+        // key and answer with a 401 that explains nothing. `null` is the honest answer: there is no
+        // such door for this account, exactly as there is none for a phone with nobody signed in.
         val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = false)
         try {
             var answered: Boolean? = null
             phone.viewModel.addHostAccount("someone", "gitlab.com", "", "glpat-the-key") { answered = it }
             phone.await("the account to be made") { answered != null }
 
-            assertNull("there is no GitHub behind it", phone.viewModel.github)
-            // **And the GitHub-only actions say the right thing.** "Sign in to GitHub first" would
-            // send a person who *has* signed in to a door that cannot help them; the sentence has to
-            // name the host their account is actually on.
+            assertNull("there is no such door behind it", phone.viewModel.who)
+            // **And nothing else in the app is GitHub's.** This test used to go on to assert that a
+            // GitHub-only action refused with a sentence naming the host — and after the cut there is
+            // no such action left, which is the stronger fact. A project is made here, with the git
+            // protocol, and the account's host never comes into it.
             var made: Boolean? = null
-            phone.viewModel.createProject("anything", "mit") { made = it }
-            assertEquals("creating a repository is refused", false, made)
-            val said = phone.viewModel.message.orEmpty()
-            assertTrue("and it names the host: $said", said.contains("gitlab.com"))
-            assertTrue("and says it is GitHub's API: $said", said.contains("GitHub's API"))
+            phone.viewModel.createLocalProject("anything") { made = it }
+            phone.await("the project to be made") { made != null }
+            assertEquals("a project on this phone needs no host", true, made)
+            assertTrue(
+                "and it is there",
+                phone.viewModel.projectNames.any { it.equals("anything", ignoreCase = true) },
+            )
         } finally {
             phone.close()
         }
@@ -305,7 +307,7 @@ class AccountsFeatureTest : FeatureTest() {
         val phone = Scenario(
             RuntimeEnvironment.getApplication(),
             signIn = false,
-            signInGitHub = { DiskGitHub(File(scene.root, "gh"), "muffy") },
+            signInGitHub = { DiskWho("muffy") },
         )
         try {
             var answered: Boolean? = null
@@ -704,120 +706,12 @@ class AccountsFeatureTest : FeatureTest() {
 }
 
 /**
- * A GitHub that refuses every key.
+ * A host that refuses every key.
  *
- * The other GitHub in these tests, [DiskGitHub], is a folder that accepts whatever
- * it is given — which made the refusal path unreachable and therefore unrun. This
- * one exists only to say no, the way GitHub does to an expired or mistyped key.
+ * [DiskWho] accepts whatever it is given, which made the refusal path unreachable and therefore
+ * unrun. This one exists only to say no, the way a host does to an expired or mistyped key.
  */
-private class RefusingGitHub : GitHub {
-    override fun identity(token: String): GitHubResult<Identity> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun listRepos(token: String): GitHubResult<List<Repo>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun licences(token: String): GitHubResult<List<Licence>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun createRepo(
-        token: String,
-        name: String,
-        licence: String,
-        description: String,
-        private: Boolean,
-    ): GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun renameRepo(token: String, owner: String, name: String, newName: String):
-        GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun cloneUrlFor(owner: String, name: String): String =
-        "https://github.com/$owner/$name.git"
-
-    override fun webUrl(cloneUrl: String): String = cloneUrl
-
-    override fun owns(remoteUrl: String): Boolean = true
-
-    // **The Actions calls, all refused like the rest.** They exist on the interface because the
-    // agent's `ci` and `runs` tools read them; a fake that left them unimplemented would not compile,
-    // and one that answered "no runs" would be a GitHub that agrees with everything, which is the
-    // exact failure this class was written to end.
-    override fun runs(
-        token: String,
-        ref: RepoRef,
-        workflow: String,
-        branch: String,
-        limit: Int,
-    ): GitHubResult<List<CiRun>> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun dispatch(
-        token: String,
-        ref: RepoRef,
-        workflow: String,
-        branch: String,
-        inputs: Map<String, String>,
-    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun environments(token: String, ref: RepoRef): GitHubResult<List<CiEnvironment>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun putEnvironment(
-        token: String,
-        ref: RepoRef,
-        name: String,
-        reviewers: List<String>,
-    ): GitHubResult<CiEnvironment> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun environmentKey(
-        token: String,
-        ref: RepoRef,
-        environment: String,
-    ): GitHubResult<Pair<String, ByteArray>> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun putEnvironmentSecret(
-        token: String,
-        ref: RepoRef,
-        environment: String,
-        name: String,
-        sealed: ByteArray,
-        keyId: String,
-    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun environmentSecretNames(
-        token: String,
-        ref: RepoRef,
-        environment: String,
-    ): GitHubResult<List<String>> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun restrictEnvironmentTo(
-        token: String,
-        ref: RepoRef,
-        environment: String,
-        branches: List<String>,
-    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun deleteEnvironmentSecret(
-        token: String,
-        ref: RepoRef,
-        environment: String,
-        name: String,
-    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
-
-    override fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit> =
-        GitHubResult(error = "Bad credentials", status = 401)
+private class RefusingWho : Who {
+    override fun identity(token: String): Reply<Identity> =
+        Reply(error = "Bad credentials", status = 401)
 }

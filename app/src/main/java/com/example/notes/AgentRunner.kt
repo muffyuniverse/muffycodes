@@ -110,10 +110,8 @@ class AgentRunner(
      *
      * Functions rather than values for the same reason the model is: a person can sign out or paste
      * a new key while an agent is idle, and the key that applies is the one in force when the call
-     * arrives. A release build reaches the real one; a test passes `DiskGitHub`.
+     * arrives. A release build reaches the real one; a test passes `DiskWho`.
      */
-    private val github: () -> GitHub? = { null },
-    private val githubToken: () -> String? = { null },
     /** The phone's Downloads folder. See `AgentTools.phone`. */
     private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
@@ -421,8 +419,6 @@ class AgentRunner(
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },
                     browseMs = { settings.browseMs },
-                    github = github,
-                    githubToken = githubToken,
                     phone = phone,
                     embedder = embedder,
                     models = models,

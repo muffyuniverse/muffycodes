@@ -122,14 +122,19 @@ class SyncFeatureTest : FeatureTest() {
 
 
     @Test
-    fun `a project is made against the account's own GitHub`() {
-        scene.project("Shopping")
+    fun `a project is made against the address it was given, and the address is what is stored`() {
+        // **This used to ask the GitHub object whether it owned the clone's address**, because the app
+        // composed that address and a composed address can be wrong. It is not composed any more: the
+        // address is what the fixture — standing in for the host's page — handed over, and the fact
+        // worth asserting is that the project's `origin` is exactly it, character for character.
+        val address = scene.hostRepo("Shopping")
+        var answered: Boolean? = null
+        scene.viewModel.addProjectFromUrl(address, "Shopping") { answered = it }
+        scene.await("the project to arrive", 60_000) { answered != null }
 
-        assertTrue(
-            "the clone's address is inside the account's folder",
-            scene.github.owns(File(scene.workspace!!.repoOf("Shopping"), ".git/config")
-                .readText().substringAfter("url = ").lines().first().trim()),
-        )
+        val stored = File(scene.workspace!!.repoOf("Shopping"), ".git/config")
+            .readText().substringAfter("url = ").lines().first().trim()
+        assertEquals("the address is the one that was given", address, stored)
     }
 
     @Test

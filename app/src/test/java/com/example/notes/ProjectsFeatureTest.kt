@@ -129,7 +129,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.viewModel.message = null
 
-        scene.viewModel.createProject("shopping", "mit")
+        scene.viewModel.createLocalProject("shopping")
 
         assertTrue(
             "the app says why",
@@ -142,7 +142,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
     @Test
     fun `a project cannot be made with a name a file could not have`() {
-        scene.viewModel.createProject("bad/name", "mit")
+        scene.viewModel.createLocalProject("bad/name")
 
         assertTrue("the app says no", scene.viewModel.message != null)
         // **Empty, and that is the point**: a folder at the account root with no repository is not a
@@ -151,49 +151,12 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a private project carries no licence file`() {
-        // **"Private" is a choice, not a licence**, so it must reach the API as two facts:
-        // `private: true`, and no `license_template` at all. Sending `license_template: "private"`
-        // would be refused by GitHub, and the refusal would read as a bug in the app rather than as
-        // the thing the person asked for.
-        //
-        // **Through the harness, which waits for the worker.** A project is made off the main
-        // thread, so a test that read the folder immediately would find nothing — and would pass on
-        // any machine where the clone happened to finish first.
-        scene.project("secrets", licence = PRIVATE_LICENCE)
-
-        assertTrue("it was made", "secrets" in scene.viewModel.projectNames)
-        val dir = scene.workspace!!.projectDir("secrets")
-        val licenceFiles = dir.listFiles()?.filter {
-            it.name.startsWith("LICENSE") || it.name.startsWith("COPYING")
-        }.orEmpty()
-        assertEquals("and no licence file was seeded", emptyList<File>(), licenceFiles)
-    }
-
-    @Test
-    fun `the licence window offers private first, because it is the safe answer`() {
-        // **The default matters more than the list.** A person who has just made a project on their
-        // phone has not decided who may read it, and a default of GPL-3.0 publishes their first save
-        // to the world before they have written it.
-        val fromGitHub = listOf(
-            Licence("mit", "MIT License"),
-            Licence("gpl-3.0", "GNU General Public License v3.0"),
-        )
-
-        val offered = licenceChoices(fromGitHub)
-
-        assertEquals("private is the first entry", PRIVATE_LICENCE, offered.first().key)
-        assertTrue("and it says what it is", offered.first().name.contains("Private"))
-        assertEquals("GitHub's own list follows, unchanged", fromGitHub, offered.drop(1))
-    }
-
-    @Test
     fun `an address that names a new repository renames the folder after it`() {
         // **Renaming is a consequence of the address**, which is the operator's decision: the person
         // renames on the host's own website — where the confirmation is the host's — and pastes the
         // address here. So the fixture renames there first, and the app is asked to agree with it.
         scene.localProject("Shopping")
-        val address = hostRepo("Groceries")
+        val address = scene.hostRepo("Groceries", seeded = false)
 
         scene.viewModel.setAddress("Shopping", address)
         scene.await("the address to be set") { !scene.viewModel.busy }
@@ -212,7 +175,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.localProject("Shopping")
         scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
-        val address = hostRepo("Groceries")
+        val address = scene.hostRepo("Groceries", seeded = false)
 
         scene.viewModel.setAddress("Shopping", address)
         scene.await("the address to be set") { !scene.viewModel.busy }
@@ -267,8 +230,10 @@ class ProjectsFeatureTest : FeatureTest() {
     fun `an address with the same name changes only the address`() {
         // **A repository that moved to another owner or host keeps its name**, which is ordinary. The
         // sentence must say the address changed rather than report a rename that did not happen.
-        scene.localProject("Shopping")
-        val moved = hostRepo("Shopping")
+        // **The repository the project already has**, set as its address again: the same name, a
+        // normal thing when a repository moves owner or host.
+        scene.project("Shopping")
+        val moved = File(scene.hostDir, "Shopping.git").toURI().toString()
 
         scene.viewModel.setAddress("Shopping", moved)
         scene.await("the address to be set") { !scene.viewModel.busy }
@@ -283,24 +248,6 @@ class ProjectsFeatureTest : FeatureTest() {
             "The address of Shopping is $moved",
             scene.viewModel.message,
         )
-    }
-
-    /**
-     * A repository on "the host": **a bare folder, made by hand.**
-     *
-     * That is what the host's website does, and it is the whole of what this app no longer does. The
-     * address is what the person would paste, and a bare repository is what `ls-remote` and a push
-     * really answer, so the test talks to the real thing rather than to a mock of it.
-     */
-    private fun hostRepo(name: String): String {
-        val dir = File(File(scene.workspace!!.accountDir, "host"), "$name.git")
-        org.eclipse.jgit.api.Git.init()
-            .setDirectory(dir)
-            .setBare(true)
-            .setInitialBranch("main")
-            .call()
-            .close()
-        return dir.toURI().toString()
     }
 
     @Test
@@ -359,28 +306,6 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `deleting something already gone is not a failure`() {
-        // **The rule that lives in `delete()`.** A move that runs
-        // twice — a person pressing again, a retry after a dropped connection — must land on "it is
-        // not there" and stop, rather than reporting a failure for having already succeeded. It used
-        // to be decided from the error text (`contains("404")`), which would also swallow a message
-        // that mentioned 404 for some other reason.
-        //
-        // It is exercised through a secret rather than a repository because the app no longer deletes
-        // repositories at all (§13b.6) — `delete()` is the one caller, and this is its path.
-        val api = DiskGitHub(scene.workspace!!.accountDir, scene.login)
-        val ref = RepoRef(scene.login, "Shopping")
-        api.putRepoSecret("Shopping", "MUFFY_TEST", "a-value".toByteArray())
-
-        val first = api.deleteRepoSecret("a-key", ref, "MUFFY_TEST")
-        val second = api.deleteRepoSecret("a-key", ref, "MUFFY_TEST")
-
-        assertTrue("the first delete succeeds", first.isSuccess)
-        assertTrue("and so does the second, which finds nothing", second.isSuccess)
-        assertNull("with no error at all", second.error)
-    }
-
-    @Test
     fun `a project from an address is the same project the picker used to make`() {
         // **What replaced two tests: "the add window offers the account's repositories" and "pulling a
         // repository in makes a project of it".** The list is gone because there is no git command for
@@ -405,15 +330,6 @@ class ProjectsFeatureTest : FeatureTest() {
         )
     }
 
-    @Test
-    fun `the licences a project can be made with come from the GitHub in use`() {
-        var licences: List<String> = emptyList()
-
-        scene.viewModel.listLicences { licences = it.map { licence -> licence.key } }
-        scene.await("the licences to arrive") { licences.isNotEmpty() }
-
-        assertTrue("MIT is offered", licences.contains("mit"))
-    }
     // ---- a local project: a project with no remote ---------------------------
 
     @Test

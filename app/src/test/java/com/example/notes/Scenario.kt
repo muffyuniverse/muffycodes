@@ -3,6 +3,9 @@ package com.example.notes
 import android.app.Application
 import android.os.Looper
 import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.lib.PersonIdent
+import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -183,9 +186,10 @@ open class MemoryCredentials : Credentials {
  *
  * A scenario makes a phone with nothing on it, signs in, and then does what a
  * person would do: opens a folder, writes a file, makes a project, syncs it. Every
- * step goes through the real [AppViewModel] and the real classes under it — the
- * only thing that is not real is GitHub itself, which is [DiskGitHub]: a folder of
- * bare repositories where clones, commits and force-pushes are genuine.
+ * step goes through the real [AppViewModel] and the real classes under it. The only thing that is not
+ * real is a host's API, which is [DiskWho] and answers exactly one question — whose key this is. A
+ * repository is a bare folder this fixture makes by hand, which is what a host's page makes, and
+ * clones, commits and force-pushes against it are genuine because the git protocol is.
  *
  * This is what makes the features that need an account testable at all. A test run
  * never holds a key.
@@ -203,13 +207,13 @@ class Scenario(
      */
     store: MemoryCredentials? = null,
     /**
-     * The GitHub that signing in asks who a key belongs to.
+     * The host that signing in asks who a key belongs to.
      *
-     * Null leaves the app's own choice alone, which is what every scenario but the
-     * sign-in ones wants. A test that needs GitHub to *refuse* a key passes one
-     * that does, because the real code path is the one that has to say no.
+     * Null leaves the app's own choice alone, which is what every scenario but the sign-in ones
+     * wants. A test that needs a host to *refuse* a key passes one that does, because the real code
+     * path is the one that has to say no.
      */
-    signInGitHub: (() -> GitHub)? = null,
+    signInGitHub: (() -> Who)? = null,
 ) {
 
     /** Everything this scenario makes lives here and goes away with it. */
@@ -230,7 +234,7 @@ class Scenario(
         // A person types slowly; a test does not. The history is committed at
         // once so that what is being tested is the behaviour, not the pause.
         saveDebounceMs = 0,
-        signInGitHub = signInGitHub ?: { HttpGitHub() },
+        signInGitHub = signInGitHub ?: { HttpWho() },
         // **No housekeeping.** It is a concern of *the app being opened*: a `gc` holds a repository
         // for seconds to minutes, and a shard builds hundreds of these view models. The pass has its
         // own tests (`MaintenanceTest`) and its own seam; a feature test that started one would be
@@ -275,17 +279,23 @@ class Scenario(
         credentials = credentials,
         settings = settings,
         saveDebounceMs = 0,
-        signInGitHub = { DiskGitHub(viewModel.accounts.devGitHubDir(login), login) },
+        signInGitHub = { DiskWho(login) },
         housekeeping = false,
         embedder = Embedder.NONE,
     )
 
-    /** The GitHub the account is talking to, for asking what really happened. */
-    val github: DiskGitHub
-        get() = DiskGitHub(viewModel.accounts.devGitHubDir(login), login)
+    /**
+     * Where a project's repository is **on the host** — a bare folder, made by the fixture.
+     *
+     * `repoDir` used to live in `DiskGitHub`, because the app made these. It does not any more: a
+     * repository is made on the host's website, so the fixture makes one by hand and the app is given
+     * its address, exactly as a person would give it one. What is left in the app is the question
+     * `Who` asks.
+     */
+    fun remote(project: String): File = File(hostDir, "$project.git")
 
-    /** The bare repository of a project — the thing on "GitHub". */
-    fun remote(project: String): File = github.repoDir(project)
+    /** The host's own folder: one directory per repository, as a bare repository each. */
+    val hostDir: File get() = File(viewModel.accounts.devGitHubDir(login), login)
 
     /** Opens a folder by its path from the account root. */
     fun open(vararg names: String): Scenario {
@@ -482,7 +492,12 @@ class Scenario(
     fun made(name: String): String = name.trim().ifBlank { "local" }
 
     fun project(name: String, licence: String = "mit"): Scenario {
-        viewModel.createProject(name, licence)
+        // **The host's website, then the address** — which is what a person does, and the only path
+        // that exists now that the app makes no repositories. A bare repository is what a host's page
+        // leaves behind; `ls-remote` and a push answer it for real, so the fixture talks to the thing
+        // the phone talks to rather than to a mock of it.
+        val address = hostRepo(name, licence)
+        viewModel.addProjectFromUrl(address, name)
         await("project \"$name\" to exist") {
             viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
         }
@@ -492,6 +507,62 @@ class Scenario(
         // one number this must not be.
         seeds[name] = remoteCommits(name)
         return this
+    }
+
+    /**
+     * **A repository on the host, made by hand** — the README and licence a host's own page writes.
+     *
+     * This was `DiskGitHub.createRepo` and `seed`, because the app called them. Nothing in the app
+     * makes a repository any more, so the fixture says plainly what a host does: an empty bare
+     * repository would clone into a project with no commits, so one commit is made and pushed first.
+     *
+     * Returns the address a person would paste.
+     */
+    fun hostRepo(name: String, licence: String = "mit", seeded: Boolean = true): String {
+        val dir = remote(name)
+        dir.parentFile?.mkdirs()
+        if (!seeded) {
+            // **A repository just made on the host's page**: bare, and empty. A person's first push
+            // fills it, which is the ordinary way a project arrives at a host that has never seen it.
+            Git.init().setBare(true).setInitialBranch("main").setDirectory(dir).call().close()
+            return dir.toURI().toString()
+        }
+        val work = File(dir.parentFile, "${dir.name}.seed")
+        work.deleteRecursively()
+        try {
+            Git.init().setBare(true).setInitialBranch("main").setDirectory(dir).call().close()
+            work.mkdirs()
+            Git.init().setInitialBranch("main").setDirectory(work).call().use { git ->
+                File(work, "README.md").writeText("# $name\n\nA test repository.\n")
+                if (licence.isNotBlank()) {
+                    File(work, "LICENSE").writeText("The $licence licence applies here.\n")
+                }
+                val who = PersonIdent(login, "$login@example.com")
+                git.add().addFilepattern(".").call()
+                git.commit()
+                    .setMessage("Initial commit")
+                    .setAuthor(who)
+                    .setCommitter(who)
+                    .call()
+                val pushed = git.push()
+                    .setRemote(dir.toURI().toString())
+                    .setRefSpecs(RefSpec("refs/heads/main:refs/heads/main"))
+                    .call()
+                val landed = pushed.flatMap { it.remoteUpdates }.any {
+                    it.status == RemoteRefUpdate.Status.OK ||
+                        it.status == RemoteRefUpdate.Status.UP_TO_DATE
+                }
+                if (!landed) {
+                    val said = pushed.flatMap { it.remoteUpdates }
+                        .mapNotNull { it.message ?: it.status?.name }
+                        .joinToString("; ")
+                    error("The first commit did not reach the repository: $said")
+                }
+            }
+        } finally {
+            work.deleteRecursively()
+        }
+        return dir.toURI().toString()
     }
 
     /**
