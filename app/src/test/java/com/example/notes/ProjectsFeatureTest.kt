@@ -291,39 +291,27 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the add window offers the account's repositories`() {
-        scene.project("Shopping")
-        var offered: List<String> = emptyList()
-        var problem: String? = null
-
-        scene.viewModel.listRepositories { repos, error ->
-            offered = repos.map { it.name }
-            problem = error
+    fun `a project from an address is the same project the picker used to make`() {
+        // **What replaced two tests: "the add window offers the account's repositories" and "pulling a
+        // repository in makes a project of it".** The list is gone because there is no git command for
+        // it — `GET /user/repos` is GitHub's, and every other host spells it differently — so the same
+        // act is an address, checked with `ls-remote`, which works on every host at once.
+        //
+        // The repository is a bare folder on this phone here, which is a real remote for exactly this
+        // purpose: no network, and every step is the one the app really takes.
+        val remote = File(scene.root, "picker-remote")
+        GitService.initOrOpen(remote, GitAuthor("Test", "test@example.com")).use { repo ->
+            File(remote, "README.md").writeText("# Shopping\n")
+            GitService.commitAll(repo, "readme", GitAuthor("Test", "test@example.com"))
         }
-        scene.await("the list to arrive") { offered.isNotEmpty() || problem != null }
-
-        assertTrue("the repository is offered", offered.contains("Shopping"))
-        assertNull("and nothing went wrong", problem)
-    }
-
-    @Test
-    fun `pulling a repository in makes a project of it`() {
-        scene.project("Shopping")
-        scene.viewModel.deleteProject("Shopping", everywhere = false)
-        scene.await("the delete to finish") { !scene.viewModel.busy }
-        assertEquals("no projects left at all", emptyList<String>(), scene.viewModel.projectNames)
-
-        val url = scene.github.cloneUrlFor(scene.login, "Shopping")
-        scene.viewModel.pullRepository(Repo("Shopping", "${scene.login}/Shopping", false, url))
-        scene.await("the pull to finish") { !scene.viewModel.busy }
-        scene.await("the repository's files to be here", 30_000) {
-            File(scene.workspace!!.repoOf("Shopping"), "README.md").isFile
-        }
-
-        assertTrue("the project came back", scene.viewModel.projectNames.contains("Shopping"))
+        var answered: Boolean? = null
+        scene.viewModel.addProjectFromUrl(remote.absolutePath, "Shopping") { answered = it }
+        scene.await("the project to arrive", 30_000) { answered != null }
+        assertEquals("it was added", true, answered)
+        assertTrue("and it is a project", scene.viewModel.projectNames.contains("Shopping"))
         assertTrue(
             "with the repository's files",
-            File(scene.workspace!!.repoOf("Shopping"), "README.md").isFile,
+            File(scene.workspace!!.projectDir("Shopping"), "README.md").isFile,
         )
     }
 
@@ -553,9 +541,11 @@ class ProjectsFeatureTest : FeatureTest() {
         // **The tag is in the project's own repository**, and its message is the one typed: a note that
         // did not become part of the tag would be a field that does nothing.
         GitService.initOrOpen(scene.workspace!!.projectDir("Shopping"), author).use { repo ->
-            val ref = repo.resolve("refs/tags/1.5")
+            val ref = repo.exactRef("refs/tags/1.5")
             assertTrue("the tag exists", ref != null)
-            val message = repo.refDatabase.peekObject(ref!!).shortMessage
+            // **The tag object's own message**, which is what makes it annotated rather than a bare
+            // pointer: a note that did not become part of the tag would be a field that does nothing.
+            val message = repo.objectDatabase.open(ref!!.`object`).shortMessage
             assertEquals("and carries what the person wrote", "the first one", message)
         }
     }

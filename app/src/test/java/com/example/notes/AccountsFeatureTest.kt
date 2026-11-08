@@ -164,15 +164,12 @@ class AccountsFeatureTest : FeatureTest() {
             // **And the GitHub-only actions say the right thing.** "Sign in to GitHub first" would
             // send a person who *has* signed in to a door that cannot help them; the sentence has to
             // name the host their account is actually on.
-            var listed: List<Repo>? = null
-            var said: String? = null
-            phone.viewModel.listRepositories { repos, problem ->
-                listed = repos
-                said = problem
-            }
-            phone.await("the refusal to arrive") { said != null }
-            assertTrue("nothing was listed", listed!!.isEmpty())
-            assertTrue("and it names the host: $said", said!!.contains("gitlab.com"))
+            var made: Boolean? = null
+            phone.viewModel.createProject("anything", "mit") { made = it }
+            assertEquals("creating a repository is refused", false, made)
+            val said = phone.viewModel.message.orEmpty()
+            assertTrue("and it names the host: $said", said.contains("gitlab.com"))
+            assertTrue("and says it is GitHub's API: $said", said.contains("GitHub's API"))
         } finally {
             phone.close()
         }

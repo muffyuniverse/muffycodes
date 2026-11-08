@@ -817,50 +817,20 @@ private fun Dialogs(
             )
         }
 
-        Pending.AddProject -> {
-            var repos by remember { mutableStateOf<List<Repo>>(emptyList()) }
-            var loading by remember { mutableStateOf(true) }
-            var error by remember { mutableStateOf<String?>(null) }
-            LaunchedEffect(Unit) {
-                viewModel.listRepositories { list, problem ->
-                    repos = list
-                    error = problem
-                    loading = false
-                }
-            }
-            AddProjectDialog(
-                repositories = repos,
-                alreadyHere = viewModel.projectNames.toSet(),
-                loading = loading,
-                error = error,
-                onDismiss = dismiss,
-                onNewProject = {
-                    dismiss()
-                    newProject()
-                },
-                onPick = { repo ->
-                    dismiss()
-                    if (repo.name in viewModel.projectNames) {
-                        // **Already here, and that is the whole answer.** There used to be a
-                        // "replace this copy?" question here, which was a second way to destroy a
-                        // project. Deleting it and importing again is one act the person already
-                        // knows, so this says what is true and stops.
-                        tap("already here", repo.name)
-                        viewModel.saidProjectAlreadyHere(repo.name)
-                    } else {
-                        tap("confirm add project", repo.name)
-                        viewModel.pullRepository(repo)
-                    }
-                },
-                onAddUrl = { url, name ->
-                    // **The address is never traced**: it may name a private repository, and a trace
-                    // is a file a person shares. The name is the identity, and the name is enough.
-                    tap("add from address", name)
-                    dismiss()
-                    viewModel.addProjectFromUrl(url, name)
-                },
-            )
-        }
+        Pending.AddProject -> AddProjectDialog(
+            onDismiss = dismiss,
+            onNewProject = {
+                dismiss()
+                newProject()
+            },
+            onAddUrl = { url, name ->
+                // **The address is never traced**: it may name a private repository, and a trace is a
+                // file a person shares. The name is the identity, and the name is enough.
+                tap("add from address", name)
+                dismiss()
+                viewModel.addProjectFromUrl(url, name)
+            },
+        )
 
         Pending.NewProject -> NewProjectUI(viewModel, dismiss)
 

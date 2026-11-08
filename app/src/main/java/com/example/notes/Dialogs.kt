@@ -391,21 +391,17 @@ private fun RadioLine(
  * The operator's rule, and it is what makes the window universal: *"we can ask user to add remote urls
  * on his own via + button, and we just check with git ls-remote command that is part of the protocol."*
  *
- * So the address comes first, and it is the only way in on a host this app has no API for. The list
- * below it is GitHub's — a repository list is a vendor feature and there is no git command for it —
- * and it is an alternative for the one host that has one.
+ * **The list of an account's repositories is gone, and that is the point.** There is no git command
+ * for it: `GET /user/repos` is GitHub's, GitLab uses `/api/v4/projects`, Gitea `/api/v1/user/repos`,
+ * and they disagree about envelopes, clone fields, auth headers and paging. So the list was a vendor
+ * feature wearing a feature's clothes, and an address field replaces it on every host at once.
  *
  * **The name is a prefill, not an answer**: the address may be `team/repo` and a slash cannot be a folder.
  */
 @Composable
 fun AddProjectDialog(
-    repositories: List<Repo>,
-    alreadyHere: Set<String>,
-    loading: Boolean,
-    error: String?,
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
-    onPick: (Repo) -> Unit,
     onAddUrl: (url: String, name: String) -> Unit,
 ) {
     var address by remember { mutableStateOf("") }
@@ -419,7 +415,7 @@ fun AddProjectDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add a project") },
         text = {
-            Column(modifier = Modifier.heightIn(max = 480.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -432,7 +428,6 @@ fun AddProjectDialog(
                 Text(
                     "Or from an address",
                     style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 12.dp),
                 )
                 OutlinedTextField(
                     value = address,
@@ -444,7 +439,8 @@ fun AddProjectDialog(
                     singleLine = true,
                     supportingText = {
                         Text(
-                            "https://host/owner/repository.git — checked before anything is cloned.",
+                            "https://host/owner/repository.git — checked with ls-remote before " +
+                                "anything is cloned.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     },
@@ -463,52 +459,6 @@ fun AddProjectDialog(
                     onClick = { onAddUrl(address, name) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Add it") }
-                HorizontalDivider()
-                Text(
-                    "Or from this account's repositories",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-                when {
-                    loading -> Text(
-                        "Asking GitHub…",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
-                    error != null -> Text(
-                        error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
-                    repositories.isEmpty() -> Text(
-                        "No repositories on this account yet",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 12.dp),
-                    )
-                    else -> LazyColumn {
-                        items(repositories) { repo ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onPick(repo) }
-                                    .padding(vertical = 10.dp),
-                            ) {
-                                Text(
-                                    repo.name + if (repo.name in alreadyHere) "  ·  on this phone" else "",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                if (repo.updatedAt.isNotBlank()) {
-                                    Text(
-                                        "last changed ${repo.updatedAt.take(10)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
