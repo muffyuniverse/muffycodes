@@ -139,7 +139,7 @@ private sealed interface Pending {
      * row's ⋮. A branch is a place a credential can live, and `main` is the project, so the row that
      * opens it decides the scope.
      */
-    data class ModelConnection(val project: String, val branch: String) : Pending
+    data class ModelConnection(val project: String?, val branch: String?) : Pending
     data class GitConnection(val project: String, val branch: String) : Pending
     data class DeleteProject(val project: String) : Pending
     data class Release(val project: String) : Pending
@@ -168,12 +168,20 @@ private sealed interface Pending {
  * One function rather than the rule written twice at the two call sites, because the two rows are the
  * same question asked from two screens.
  */
-internal fun scopeOf(project: String, branch: String): SecretScope =
-    if (branch == AgentSession.MAIN) SecretScope.Project(project) else SecretScope.Branch(project, branch)
+internal fun scopeOf(project: String?, branch: String?): SecretScope = when {
+    // **No project is the account**, which is the widest place a chat model may live — a general entry
+    // is the app-wide embedding key and never answers a chat.
+    project == null -> SecretScope.Account
+    branch == null || branch == AgentSession.MAIN -> SecretScope.Project(project)
+    else -> SecretScope.Branch(project, branch)
+}
 
 /** How a window names where it is: the project, or the project and the branch. */
-internal fun whereOf(project: String, branch: String): String =
-    if (branch == AgentSession.MAIN) project else "$project · $branch"
+internal fun whereOf(project: String?, branch: String?): String = when {
+    project == null -> "this account"
+    branch == null || branch == AgentSession.MAIN -> project
+    else -> "$project · $branch"
+}
 
 /**
  * The whole app: a browser over the account's tree, an editor, the history of a
@@ -552,6 +560,12 @@ private fun AppRoot(viewModel: AppViewModel) {
             // from Settings were never two mechanisms.
             onAdd = { tap("add account"); pending = Pending.ChooseAccountDoor },
             onRemove = { login -> tap("remove account", login); pending = Pending.RemoveAccount(login) },
+            // **The account's own model connection**, whose scope is the account — the widest place a
+            // chat model may live, because a chat request is made *as* somebody.
+            onConnection = {
+                tap("model connection", "this account")
+                pending = Pending.ModelConnection(null, null)
+            },
             onSettings = { tap("settings"); showSettings = true },
         )
 
@@ -923,8 +937,6 @@ private fun Dialogs(
                 Trace.tap("confirm model connection", whereOf(pending.project, pending.branch))
                 viewModel.saveConnection(
                     scope = scopeOf(pending.project, pending.branch),
-                    project = pending.project,
-                    branch = pending.branch,
                     draft = draft,
                 )
             },
@@ -953,8 +965,6 @@ private fun Dialogs(
                 Trace.tap("confirm git connection", whereOf(pending.project, pending.branch))
                 viewModel.saveConnection(
                     scope = scopeOf(pending.project, pending.branch),
-                    project = pending.project,
-                    branch = pending.branch,
                     draft = draft,
                 )
             },

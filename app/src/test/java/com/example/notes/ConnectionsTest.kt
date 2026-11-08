@@ -541,10 +541,10 @@ class ConnectionsTest {
         // there is a person saying "not the account's own pair", and its own records — the model key
         // and the address in `model_conf.json` — are what answers when there is none. A special case
         // for the account would have been a second rule to keep in step with this one.
-        val stored = mapOf(
+        val stored = mapOf<SecretScope, Connection>(
             SecretScope.Account to Connection("https://elsewhere.example/v1", "sk-other"),
         )
-        val chosen = mapOf(SecretScope.Account to Choice("their-model"))
+        val chosen = mapOf<SecretScope, Choice>(SecretScope.Account to Choice("their-model"))
 
         val wired = asked(connections = stored, choices = chosen)
 
@@ -562,7 +562,7 @@ class ConnectionsTest {
         // force, so the account's own model and address answer — which is the answer as if the row had
         // never been made.
         val wired = asked(
-            connections = mapOf(
+            connections = mapOf<SecretScope, Connection>(
                 SecretScope.Account to Connection("https://elsewhere.example/v1", "sk-other"),
             ),
         )

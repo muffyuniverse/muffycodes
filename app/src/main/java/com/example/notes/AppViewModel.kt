@@ -1725,13 +1725,22 @@ class AppViewModel @JvmOverloads constructor(
      * screen. For git the account is the only source, because the account *is* the credential for the
      * host it was made against.
      */
-    fun connectionShown(scope: SecretScope, kind: ConnKind, project: String, branch: String): ConnectionDraft {
+    fun connectionShown(
+        scope: SecretScope,
+        kind: ConnKind,
+        project: String?,
+        branch: String?,
+    ): ConnectionDraft {
         val ws = workspace
         val own = credentials.connection(scope, kind)
         if (kind == ConnKind.GIT) {
             return ConnectionDraft(
                 kind = ConnKind.GIT,
-                address = own?.address ?: host(project, branch).orEmpty(),
+                // **The account scope has no project to ask**, and its own host is the honest answer:
+                // it is the host the sign-in token was made against.
+                address = own?.address
+                    ?: project?.let { host(it, branch.orEmpty()) }
+                    ?: activeLogin?.let { accounts.account(it)?.host }.orEmpty(),
                 user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
                 nameable = own?.nameable == true,
             )
@@ -1776,8 +1785,6 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun saveConnection(
         scope: SecretScope,
-        project: String,
-        branch: String,
         draft: ConnectionDraft,
         onDone: (Boolean) -> Unit = {},
     ) {
@@ -1826,8 +1833,8 @@ class AppViewModel @JvmOverloads constructor(
     fun checkConnection(
         scope: SecretScope,
         draft: ConnectionDraft,
-        project: String,
-        branch: String,
+        project: String?,
+        branch: String?,
         then: (String) -> Unit,
     ) {
         draft.problemSaid()?.let {
@@ -1852,11 +1859,17 @@ class AppViewModel @JvmOverloads constructor(
             // `gitlab.com` whether it exists says nothing about whether this token may read *this*
             // project — so the check uses `remote.origin.url`, which is where the address lives.
             val ws = workspace
-            val remote = ws?.let {
-                try {
-                    projectGit(it).onBranch(branch).remoteUrl(project)
-                } catch (e: Throwable) {
-                    null
+            // **No project, no address to check against** — and the account's git credential is the
+            // sign-in token, whose window already exists, so this says so rather than pretending.
+            val remote = if (project == null) {
+                null
+            } else {
+                ws?.let {
+                    try {
+                        projectGit(it).onBranch(branch.orEmpty()).remoteUrl(project)
+                    } catch (e: Throwable) {
+                        null
+                    }
                 }
             }
             if (remote.isNullOrBlank()) {

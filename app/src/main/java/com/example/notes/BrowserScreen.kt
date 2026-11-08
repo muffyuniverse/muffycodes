@@ -284,8 +284,19 @@ fun AccountsScreen(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     onSettings: () -> Unit,
+    /**
+     * **The account's own model connection** — the widest place a chat model may live, and the one a
+     * project inherits when it has none.
+     *
+     * Only the model, not git: an account's git credential is the token it signed in with, which has
+     * its own door (the add-account window), and a git row here would be a second way to write the
+     * same secret.
+     */
+    onConnection: () -> Unit = {},
 ) {
     val accounts = viewModel.accountsWithProjects
+    // **Which row's menu is open**, one at a time — a menu per row would be a menu per row's state.
+    var menu by remember(accounts.size) { mutableStateOf<String?>(null) }
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -333,9 +344,34 @@ fun AccountsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        // **Removal is offered, not hidden behind a long press.** A row a person can
-                        // add to but never remove from is a row they work around by reinstalling.
-                        TextButton(onClick = { onRemove(account.login) }) { Text("Remove") }
+                        // **The row's own menu**, which is the only door to a credential in this app:
+                        // a credential with no owner is a row nobody can act on.
+                        Box {
+                            IconButton(onClick = { menu = account.login }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(
+                                expanded = menu == account.login,
+                                onDismissRequest = { menu = null },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Model connection…") },
+                                    onClick = {
+                                        menu = null
+                                        onConnection()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Remove…", color = MaterialTheme.colorScheme.error)
+                                    },
+                                    onClick = {
+                                        menu = null
+                                        onRemove(account.login)
+                                    },
+                                )
+                            }
+                        }
                     }
                     HorizontalDivider()
                 }
