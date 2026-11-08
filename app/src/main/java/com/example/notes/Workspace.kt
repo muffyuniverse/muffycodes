@@ -134,6 +134,27 @@ class Workspace(val accountDir: File) {
     }
 
     /**
+     * Makes sure a tree that can hold the link has git's line for it.
+     *
+     * **Before this, existing projects were not covered.** `ensureIgnore` writes the app's lines once,
+     * when a repository is made — and a project made before the link existed therefore had no exclusion
+     * for it, so a refresh that added the link made that project report a change nobody made. A commit
+     * would then have put a symlink into the repository. `linkSystem` runs on every refresh, and the
+     * line is what makes the link harmless, so the two are written by the same act.
+     *
+     * Silent when there is no repository: `excludeFile` answers null and `ensureIgnore` will write the
+     * line the moment one exists.
+     */
+    private fun ensureExcluded(worktree: File) {
+        val file = excludeFile(worktree) ?: return
+        addExcludeLines(
+            file,
+            listOf(SYSTEM_PROJECT),
+            "# The account's own folder, reached from inside this project by a link. Not shipped.",
+        )
+    }
+
+    /**
      * Makes `system` in [worktree] point at the account's system folder, and says whether it did.
      *
      * **Nothing already there is replaced.** A folder a person made called `system` holds their files,
@@ -161,6 +182,7 @@ class Workspace(val accountDir: File) {
             if (exists) link.delete()  // a broken link: the folder it named is gone
             val relative = worktree.canonicalFile.toPath().relativize(target.canonicalFile.toPath())
             java.nio.file.Files.createSymbolicLink(link.toPath(), relative)
+            ensureExcluded(worktree)
             true
         } catch (t: Throwable) {
             // **Silence is right here.** A filesystem that refuses a link (external storage does) still

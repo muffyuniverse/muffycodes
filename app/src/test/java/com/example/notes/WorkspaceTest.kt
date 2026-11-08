@@ -66,6 +66,35 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `a project made before the link existed gets git's line for it`() {
+        // **The upgrade case, and not a migration hack**: the line is written by the function that
+        // makes the link, because the link is what it is for. A project whose repository was made
+        // before this change has the app's other three lines and not this one - so without it the
+        // link reads as an untracked file, the project says "1 to send" about something the person
+        // did not do, and a commit would put a symlink in the repository.
+        val proj = workspace.projectDir("Shopping")
+        proj.mkdirs()
+        File(proj, ".git/info").mkdirs()
+        File(proj, ".git/info/exclude").writeText("agent/\n.muffy/\nrequests/\n")
+
+        assertTrue("the link was made", workspace.linkSystem(proj))
+
+        val lines = File(proj, ".git/info/exclude").readLines()
+        assertEquals(
+            "and the line for it was added once, after the ones already there",
+            listOf("agent/", ".muffy/", "requests/", "system"),
+            lines,
+        )
+        // **Idempotent**, because this runs on every refresh: a second pass must not append again.
+        workspace.linkSystem(proj)
+        assertEquals(
+            "a second refresh adds nothing",
+            listOf("agent/", ".muffy/", "requests/", "system"),
+            File(proj, ".git/info/exclude").readLines(),
+        )
+    }
+
+    @Test
     fun `the link is listed last, after the person's files`() {
         // **A given, asserted because a screenshot depends on it.** Sorting the link as a folder put it
         // between `muffycodes_data/` and the files, which pushed the newest file off the bottom of the
