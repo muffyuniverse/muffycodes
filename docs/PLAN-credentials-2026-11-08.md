@@ -102,7 +102,7 @@ travel together and are atomic; the model id and the effort inherit independentl
 
 | field | inherits on its own? | why |
 |---|---|---|
-| **address + key** | **no** — a scope has its own pair or inherits the whole pair | a key is bound to one host. A project with its own address and an inherited key would send that key to a host it was never stored for — the one hole this vault exists to close |
+| **address + key + request shape** | **no** — a scope has its own connection or inherits the whole connection | a key is bound to one host. A project with its own address and an inherited key would send that key to a host it was never stored for — the one hole this vault exists to close. The **shape** is in this group for the same reason (§2.6): it is a fact about the server, so a different server means a different shape, and half of one is a request that cannot be sent |
 | **model id, effort, window, reply** | **yes**, field by field — **but only as far as the address is inherited** | changing only the model must not mean re-typing the key, which would put a second copy of a secret on the phone. The limit is measured, not cautious: a model id is a *name the server assigns*, and the names disagree — `deepseek/deepseek-v4.1-flash` (OpenRouter), `deepseek-chat` (DeepSeek's own), `gpt-…` (OpenAI), whatever `--served-model-name` said (vLLM), `gemini-…` (Gemini's compat layer). So a scope that **sets its own address must set its own model**; the choice is inheritable exactly when the pair it belongs to is |
 
 So a window opens showing what the scope *would* use, the person changes any field, and **leaving a field
@@ -203,6 +203,62 @@ retention · running · background · the notification permission.
 
 A timeout is not a credential, and putting one on every branch would make three numbers to keep in step for
 no gain — the operator's words: *"lest of agent settings stay in general settings where they are."*
+
+### 2.6 The request shape — a file, because a request is a document
+
+**Researched because the operator asked whether one OpenAI request protocol exists.** It does not: what
+transfers is a shape (`POST {base}/chat/completions`), and every implementation negotiates separately above
+it. So the shape becomes **data**, stored with the connection, so a person can tell the app how their server
+wants to be asked instead of hoping the app guessed.
+
+**Requests are describable; streamed responses are not** — and the asymmetry is the whole design:
+
+- a request is a JSON object built once and sent, so renames and omissions (`max_tokens` →
+  `max_completion_tokens`, `system` → `developer`, the effort field) are a **substitution**;
+- a streamed response is a **fold over events** — accumulate `choices[0].delta.content`, join tool-call
+  argument fragments by `index`, watch `finish_reason`, stop at `[DONE]`. Anthropic terminates on
+  `message_stop`, Gemini on `candidates[].content.parts[]`, Responses on `response.completed`. A file can
+  name those paths and cannot name the accumulation rules, so a response schema would describe a fraction of
+  a protocol and silently mis-handle the rest.
+
+Within the OpenAI-compatible family the responses genuinely do not differ: the divergences are *additive*
+(DeepSeek's `reasoning_content`) or in the error envelope — both already handled. So **no response shape**,
+and the failing case says so plainly: a reply with no `choices[]` is reported as *"this server does not
+answer in the OpenAI chat shape"*, not as a parse error.
+
+**Three kinds, three presets**, and the embedding and rerank ones are not speculative: both are hard-coded to
+OpenRouter's shape today (`{model, input[]}` → `data[].embedding`; `{model, query, documents[]}` →
+`results[].{index, relevance_score}`), which is exactly what stops the app being pointed at Ollama, LM Studio
+or a self-hosted reranker.
+
+```json
+{ "url": "chat/completions",
+  "body": { "model": "{{model}}", "messages": "{{messages}}",
+            "tools": "{{tools}}", "tool_choice": "auto",
+            "stream": "{{stream}}",
+            "stream_options": { "include_usage": true },
+            "max_completion_tokens": "{{max_tokens}}",
+            "reasoning_effort": "{{effort}}" } }
+```
+
+**The placeholder list is exactly §2.4b's inventory** — `{{model}}`, `{{messages}}`, `{{tools}}`,
+`{{tool_choice}}`, `{{stream}}`, `{{effort}}`, `{{max_tokens}}` for chat; `{{model}}`, `{{input}}`,
+`{{dimensions}}` for embedding; `{{model}}`, `{{query}}`, `{{documents}}` for rerank. A template naming
+anything else fails with a sentence naming it, so the file cannot describe a protocol the app does not speak.
+
+Three rules that make it safe and predictable:
+
+1. **`url` is a relative path, never a URL.** A file with a scheme or a leading `//` is refused — otherwise a
+   template redirects the request and the key with it. `{base}/{url}`, with the trailing slash trimmed.
+2. **An empty placeholder removes its key.** No effort means no `reasoning_effort` field, not `""` — a server
+   that rejects the field never sees it.
+3. **The shape lives in Vault B, with the connection, not in a worktree.** A worktree arrives by clone, and a
+   stranger's template would then govern how *your* key is sent to *your* server. It also means the streaming
+   engine stays the app's.
+
+**The probe validates the shape (C3a).** One small request, and the server's refusal names the field it
+disliked — which is the only way a person learns that their server wants `max_completion_tokens`. The shape
+file and the connection check are the same tool looking at the same fact.
 
 ### 2.5 Storage
 
@@ -322,6 +378,8 @@ and a column nobody reads is not a compatibility problem).
 | **C0** | One row per `(scope, name)`: `secretRows()`, rows carry their own host and scope, general secrets listed, Remove acts on the row's scope. Fixes the three defects in §1.1. | **this run** |
 | **C1** | `VaultScope` gains `Branch`; the store, the picker and `ProjectGit` learn it. `GitCredentials` asks by branch. | not started |
 | **C2** | Generic model layer: base URL from the connection, drop `provider.only`/`allow_fallbacks`/`reasoning.exclude`, add `stream_options.include_usage`, catalogue optional. `model_conf.json` gains `baseUrl`. | not started |
+| **C3b.1** | `Shape`: parse a template, substitute the inventory, refuse a scheme in `url`, drop empty placeholders. Lands with the **default preset first and no storage**, and the test that makes it a provable no-op: the preset's output must equal today's body **byte for byte** for chat, embedding and rerank. If it does not, the refactor changed the wire format, which is the one thing it may not do. | |
+| **C3b.2** | Store it: `conn_<scope>_<kind>_url` and `_shape` beside the credential, inherited with it; the connection window shows a preset picker and an editor; a template that names an unknown placeholder is refused in the window rather than at the first request. | |
 | **C3a** | **Check this connection**: one small request from the connection window, reporting the server's own words — reachable, key accepted, model served, and any parameter it refused. "Compatible" is a claim; this is the measurement. It is the existing ping made useful rather than a new mechanism. | not started |
 | **C3** | Vault B: `conn_<scope>_<kind>` (kind `git` \| `llm`, scope branch/project/account/general), the account entry seeded from today's `token_`/`model_key_`; the ⋮ windows on account/project/branch rows; `ProjectGit` and the runner read it narrowest-first. Per §2.2 the address+key are atomic and model/effort inherit field by field. | not started |
 | **C4** | The two checkmarks, off by default; `auth:` resolves a Vault B entry only when ticked and only for its host; the agent's tool description lists what it may name. | not started |
