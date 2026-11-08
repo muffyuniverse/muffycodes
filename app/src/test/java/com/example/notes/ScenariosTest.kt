@@ -995,10 +995,15 @@ class ScenariosTest {
         scenario(
             compose, "18-a-window-deleting-a-project",
             "A window offering to delete a project.",
-            "a project's own folder, and the choice of where it is deleted from.",
+            "what is deleted, and where the copy on the host stays.",
             screen = {
                 window {
-                    DeleteProjectDialog(project = "groceries", onDismiss = {}, onDelete = {})
+                    DeleteProjectDialog(
+                        project = "groceries",
+                        address = "https://gitlab.com/owner/groceries.git",
+                        onDismiss = {},
+                        onDelete = {},
+                    )
                 }
             },
         ) {
@@ -1006,8 +1011,9 @@ class ScenariosTest {
             then("Nothing is deleted.") {}
             after()
             result(
-                "Both outcomes are named - here, or everywhere - because a person deleting a " +
-                    "project is deciding about two copies and the window has to say so.",
+                "One act, and it says exactly what it does: the folder here with every unsent " +
+                    "version, and the repository still at its address, untouched, because deleting " +
+                    "that is done on the host's own page.",
             )
         }
     }
