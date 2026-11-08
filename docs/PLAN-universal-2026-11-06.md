@@ -2072,12 +2072,19 @@ branch's folder by writing git's four files and checking the tree out, verified 
 resolves through the open branch and `relative` reverses it; `enterBranch` makes the folder, sets the
 branch and shows the files.
 
-**Not landed, and it is the pointed end:** the *agent* still resolves its files with
-`ws.projectDir(project)`, which is `main`'s tree. A worktree-scoped agent needs its own
-`Workspace`/branch pairing — the session's branch has to reach `AgentTools`' `projectDir`, `AgentLog`,
-`SearchIndex` and `requests/`. Until that is done, an agent on `feature` reads and writes main's files
-while its session, notification and diary are correctly per-branch — which is worse than not having
-branches, because the screen says `feature`.
+**Step 4 — the pointed end — landed 2026-11-07** (`30a5530` … `ed3d7c9`), and the shape it took is
+worth copying: `AgentTools` never called `ws.fileAt`, so **one line** made the whole tool set
+worktree-scoped — `projectDir` is now `ws.treeOf(project, branch)`, and every path in every tool is
+composed from it. What did have to be threaded is everything that is a *conversation's* rather than a
+*project's*: the diary (`AgentLog`), the index (`SemanticSearch`, `IndexQueue` — keyed by worktree, or
+two branches coalesce into one stale pass), the chat screen's log, the pages a turn publishes, the claim
+a turn holds, `start`/`stop`/`reset`, and `Background`, which remembered the *folder's* name — the
+branch's name in a worktree — so a background command on a branch never woke its agent.
+
+**The audit of all of it is `docs/AUDIT-2026-11-07-branches-and-the-system-folder.md`.** Twenty-three
+defects, each with what a person would have seen; the pattern behind them is one sentence: *a name used
+as a key, or a project asked for something only a tree knows*. The branch made both wrong without
+changing a line.
 
 #### And it settles the merge question
 
