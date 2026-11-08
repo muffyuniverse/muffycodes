@@ -68,10 +68,10 @@ object DeviceFlow {
     const val TOKEN_URL = "https://github.com/login/oauth/access_token"
 
     /**
-     * **The same three scopes the pasted-token instructions demand.**
+     * **The same scopes the pasted-token instructions demand.**
      *
      * The two doors used to disagree: this asked for `repo read:user` while the paste box told a
-     * person to make a key with `repo, workflow, delete_repo`. So a key made by following the app's
+     * person to make a key with `repo, workflow`. So a key made by following the app's
      * own instructions carried two powers that the sign-in button never asked for — and a repository
      * with a workflow file could be pushed to after pasting a key and refused after signing in.
      * Nothing in the app could explain that, because both are "signed in" to it.
@@ -82,7 +82,7 @@ object DeviceFlow {
      * The rule for keeping these in step is [TokenScopes.REQUIRED], which is what the paste door
      * checks; the test below pins that this string contains every one of them.
      */
-    const val SCOPE = "repo workflow delete_repo read:user"
+    const val SCOPE = "repo workflow read:user"
 
     /** Where a person types the code. Shown with it, because the code is useless alone. */
     const val WHERE = "github.com/login/device"

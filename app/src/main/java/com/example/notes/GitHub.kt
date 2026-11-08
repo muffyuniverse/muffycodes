@@ -234,8 +234,9 @@ interface GitHub {
     /** Renames a repository, so the project and its repository keep one name. */
     fun renameRepo(token: String, owner: String, name: String, newName: String): GitHubResult<Repo>
 
-    /** Deletes a repository. Used only by "delete everywhere". */
-    fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit>
+    // **There is no `deleteRepo`, and its absence is the rule** (§13b.6). Deleting a repository is
+    // the one irreversible capability in the system, and `delete_repo` was demanded of every token to
+    // buy it. A person deletes a repository on github.com; the app says the remote is still there.
 
     /** The address a repository is cloned from, from its owner and name. */
     fun cloneUrlFor(owner: String, name: String): String
@@ -512,13 +513,6 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         return GitHubResult(value = repo(obj))
     }
 
-    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
-        val response = get("DELETE", "/repos/$owner/$name", token)
-        if (response.error != null) {
-            return GitHubResult(error = response.error, status = response.status)
-        }
-        return GitHubResult(value = Unit)
-    }
 
     override fun cloneUrlFor(owner: String, name: String): String =
         "https://github.com/$owner/${urlPart(name)}.git"
@@ -996,7 +990,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
      */
     private fun delete(token: String, path: String): GitHubResult<Unit> {
         val response = get("DELETE", path, token)
-        if (response.status == 404) return GitHubResult(value = Unit)
+        // **`isGone`, not `status == 404`.** It is the rule stated once, in the one place the status
+        // is known, so a caller cannot re-phrase it as `contains("404")` — which is what it used to be.
+        if (response.isGone) return GitHubResult(value = Unit)
         if (response.error != null) {
             return GitHubResult(error = response.error, status = response.status)
         }
@@ -1305,21 +1301,6 @@ class DiskGitHub(
         }
     }
 
-    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
-        val dir = repoDir(name)
-        // 404, because that is what the real GitHub answers for a repository that is
-        // not there — and the caller's "already gone is not an error" rule reads the
-        // status. A fake that answered differently would make the tests pass while
-        // the phone behaved another way.
-        if (!dir.exists()) {
-            return GitHubResult(error = "There is no repository called \"$name\"", status = 404)
-        }
-        return if (dir.deleteRecursively()) {
-            GitHubResult(value = Unit)
-        } else {
-            GitHubResult(error = "Could not delete the repository")
-        }
-    }
 
     override fun cloneUrlFor(owner: String, name: String): String =
         repoDir(name).toURI().toString()

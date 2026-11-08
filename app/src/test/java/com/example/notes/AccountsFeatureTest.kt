@@ -645,9 +645,6 @@ private class RefusingGitHub : GitHub {
     override fun renameRepo(token: String, owner: String, name: String, newName: String):
         GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
 
-    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> =
-        GitHubResult(error = "Bad credentials", status = 401)
-
     override fun cloneUrlFor(owner: String, name: String): String =
         "https://github.com/$owner/$name.git"
 

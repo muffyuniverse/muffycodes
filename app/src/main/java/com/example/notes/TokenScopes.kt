@@ -12,14 +12,18 @@ package com.example.notes
  * dialog means the answer can be tested with three sets and no device — and it means the dialog's job
  * shrinks to showing whatever this says.
  *
- * ## The three scopes, and why each one
+ * ## The two scopes, and why each one
  *
  * - **`repo`** — read and write the repository. Nothing works without it, so its absence is fatal.
  * - **`workflow`** — push a file under `.github/workflows/`. A classic token without it can push every
  *   other file in the repository and is refused *only* on those, with the same "Resource not
  *   accessible by personal access token" that a dozen unrelated faults produce. That is why it has to
  *   be checked rather than discovered.
- * - **`delete_repo`** — remove a repository when a project is deleted and its repository goes with it.
+ *
+ * **`delete_repo` used to be a third, and it is gone** (§13b.6). It was the one irreversible
+ * capability in the set, and the app never used it: "delete everywhere" leaves the repository and says
+ * so. A token without it was refused for a power the app would not exercise — the worst kind of
+ * refusal, because the person cannot tell it is unnecessary.
  *
  * `read:user` is asked for as well but is **not checked**: it is implied by `repo` for a classic token,
  * and naming it as missing would be noise about a scope that cannot be the reason anything failed.
@@ -27,13 +31,12 @@ package com.example.notes
 object TokenScopes {
 
     /** The scopes a pasted token must carry. Order is the order they are named in a refusal. */
-    val REQUIRED = listOf("repo", "workflow", "delete_repo")
+    val REQUIRED = listOf("repo", "workflow")
 
     /** What each is for, in the words a refusal and the paste screen both use. */
     private val WHY = mapOf(
         "repo" to "read and write your repositories",
         "workflow" to "push a workflow file",
-        "delete_repo" to "delete a repository with a project",
     )
 
     /**

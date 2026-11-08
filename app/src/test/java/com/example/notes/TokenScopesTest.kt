@@ -15,9 +15,19 @@ import org.junit.Test
 class TokenScopesTest {
 
     @Test
-    fun `a classic token with all three scopes is fine`() {
-        val verdict = TokenScopes.judge(setOf("repo", "workflow", "delete_repo", "read:user"))
-        assertEquals("**all three present, so nothing is missing**", TokenScopes.Verdict.Fine, verdict)
+    fun `a classic token with both scopes is fine`() {
+        val verdict = TokenScopes.judge(setOf("repo", "workflow", "read:user"))
+        assertEquals("**both present, so nothing is missing**", TokenScopes.Verdict.Fine, verdict)
+    }
+
+    @Test
+    fun `a token without delete_repo is accepted, because the app never deletes a repository`() {
+        // **The refusal that was worse than useless.** `delete_repo` used to be required, and the app
+        // never used it — "delete everywhere" leaves the repository and says so (§13b.6). So a person
+        // holding a perfectly usable token was refused for a power the app would not exercise, and had
+        // no way to tell it was unnecessary. A test asserts the opposite of this one's whole point.
+        val verdict = TokenScopes.judge(setOf("repo", "workflow"))
+        assertEquals("nothing is missing", TokenScopes.Verdict.Fine, verdict)
     }
 
     @Test
@@ -26,7 +36,7 @@ class TokenScopesTest {
         // workflow, and GitHub's refusal is the same "Resource not accessible by personal access
         // token" that a dozen unrelated faults produce. Nothing else in the app can tell the two
         // apart, so this check is the only place the real reason can be said.
-        val verdict = TokenScopes.judge(setOf("repo", "delete_repo"))
+        val verdict = TokenScopes.judge(setOf("repo"))
         assertTrue("it is a refusal", verdict is TokenScopes.Verdict.Missing)
         assertEquals("and it names exactly the scope that is absent", listOf("workflow"),
             (verdict as TokenScopes.Verdict.Missing).missing)
@@ -68,23 +78,23 @@ class TokenScopesTest {
         // The header's order is GitHub's, not ours. Two tokens missing the same pair would otherwise
         // produce two differently-worded refusals, which reads as two different faults.
         val a = TokenScopes.judge(setOf("workflow")) as TokenScopes.Verdict.Missing
-        val b = TokenScopes.judge(setOf("delete_repo")) as TokenScopes.Verdict.Missing
+        val b = TokenScopes.judge(setOf("workflow")) as TokenScopes.Verdict.Missing
         assertEquals("repo comes first because REQUIRED says so", "repo", a.missing.first())
         assertEquals("and the same for the other", "repo", b.missing.first())
     }
 
     @Test
-    fun `the required list is the three the app documents, and nothing else`() {
-        // Pinned, because the dialog's sentence and the refusal both read from this list. A fourth
+    fun `the required list is the two the app documents, and nothing else`() {
+        // Pinned, because the dialog's sentence and the refusal both read from this list. A third
         // scope added here would be demanded of every token; one removed would go unchecked.
-        assertEquals(listOf("repo", "workflow", "delete_repo"), TokenScopes.REQUIRED)
+        assertEquals(listOf("repo", "workflow"), TokenScopes.REQUIRED)
     }
 
     @Test
     fun `the device flow asks for every scope the paste door requires`() {
         // **The two doors drifted apart once**, and nothing in the app could see it: the sign-in
         // button asked GitHub for `repo read:user` while the paste box told a person to make a key
-        // with `repo, workflow, delete_repo`. A repository with a workflow file could then be pushed
+        // with `repo, workflow`. A repository with a workflow file could then be pushed
         // to after pasting a key and refused after signing in, and both are "signed in" as far as the
         // app is concerned.
         //

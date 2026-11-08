@@ -269,17 +269,25 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a real failure to delete on GitHub still stops the local delete`() {
-        // The other half of the same rule, and the one that would be lost if the
-        // status check were loosened: a genuine error must keep the local copy and
-        // say so, because otherwise the phone and GitHub silently disagree.
-        val gone = scene.viewModel.accounts.devGitHubDir(scene.login)
-            .let { DiskGitHub(it, scene.login) }
-            .deleteRepo("", scene.login, "no-such-repository")
+    fun `deleting something already gone is not a failure`() {
+        // **The rule `isGone` exists for, and the only place it is still read.** A move that runs
+        // twice — a person pressing again, a retry after a dropped connection — must land on "it is
+        // not there" and stop, rather than reporting a failure for having already succeeded. It used
+        // to be decided from the error text (`contains("404")`), which would also swallow a message
+        // that mentioned 404 for some other reason.
+        //
+        // It is exercised through a secret rather than a repository because the app no longer deletes
+        // repositories at all (§13b.6) — `delete()` is the one caller, and this is its path.
+        val api = DiskGitHub(scene.workspace!!.accountDir, scene.login)
+        val ref = RepoRef(scene.login, "Shopping")
+        api.putRepoSecret("Shopping", "MUFFY_TEST", "a-value".toByteArray())
 
-        assertTrue("the fake answers 404 for a repository that is not there", gone.isGone)
-        assertEquals("with the status a real GitHub uses", 404, gone.status)
-        assertFalse("and that is not a failure to reach the server", gone.isOffline)
+        val first = api.deleteRepoSecret("a-key", ref, "MUFFY_TEST")
+        val second = api.deleteRepoSecret("a-key", ref, "MUFFY_TEST")
+
+        assertTrue("the first delete succeeds", first.isSuccess)
+        assertTrue("and so does the second, which finds nothing", second.isSuccess)
+        assertNull("with no error at all", second.error)
     }
 
     @Test

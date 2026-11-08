@@ -46,8 +46,6 @@ class CiSetupTest {
             name: String,
             newName: String,
         ): GitHubResult<Repo> = no("renameRepo")
-        override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> =
-            no("deleteRepo")
         override fun cloneUrlFor(owner: String, name: String): String = no("cloneUrlFor")
         override fun webUrl(cloneUrl: String): String = no("webUrl")
         override fun owns(remoteUrl: String): Boolean = no("owns")
