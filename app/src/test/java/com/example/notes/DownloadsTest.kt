@@ -152,13 +152,12 @@ class DownloadsTest {
         val answer = call("downloads", "{}")
 
         assertTrue("it says it stopped: $answer", answer.contains("the newest 40 of 45"))
-        // **The count is of the rows, not of the lines.** The caveat is its own paragraph and a
-        // blank line separates it, so a line count would have been about the prose rather than about
-        // the answer - and would break the next time a sentence is added.
+        // **Counted by name, not by line.** The caveat is prose that can grow, and a line count was
+        // about the shape of the answer rather than the claim it makes.
         assertEquals(
             "and forty rows follow",
             40,
-            answer.lines().count { it.contains("file") && it.contains("B") },
+            Regex("file\\d+\\.txt").findAll(answer).count(),
         )
     }
 
