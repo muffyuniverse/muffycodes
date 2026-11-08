@@ -470,6 +470,33 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `publishing a clean project dispatches the release workflow on main`() {
+        // **The door, walked end to end.** `Release.start`, `Release.nameProblem` and `startRelease`
+        // all existed and were tested while nothing called any of them — the app could not publish a
+        // release from inside it at all. This is the proof that the button reaches the dispatch: the
+        // project is clean, a key is stored, and the pretend GitHub records what was asked for.
+        scene.signedIn()
+        scene.project("Shopping")
+        scene.open("Shopping")
+        scene.credentials.setToken(scene.login, "a-key")
+        scene.await("the project to be clean") { scene.viewModel.changesOf("Shopping") == 0 }
+        scene.viewModel.message = null
+
+        scene.viewModel.startRelease("1.5")
+        scene.await("the dispatch") {
+            scene.github.dispatches(RepoRef(scene.login, "Shopping")).isNotEmpty()
+        }
+
+        val sent = scene.github.dispatches(RepoRef(scene.login, "Shopping")).single()
+        assertEquals("the release workflow", Release.WORKFLOW, sent.workflow)
+        assertEquals("on the branch a release is published from", "main", sent.branch)
+        assertEquals("with the version the person typed", "1.5", sent.inputs["version_name"])
+        // **And nothing was asked for that was not chosen**: a dev copy is a second APK, and a box
+        // nobody ticked must not be sent as "true".
+        assertFalse("no dev copy was asked for", sent.inputs.containsKey("dev_build"))
+    }
+
+    @Test
     fun `the system folder is reachable at the root and is not a project`() {
         // **A folder, not a hidden one** - the settings that belong to the whole account live in it,
         // and the report that asked for it was explicit: "system prompt is outdated. Another reason why
