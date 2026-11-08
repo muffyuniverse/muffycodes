@@ -78,6 +78,34 @@ data class Choice(
 )
 
 /**
+ * The host [address] names, whether it was written as a host or as a base URL.
+ *
+ * A git connection stores the host the token is for (`github.com`) and an llm connection stores a base
+ * URL (`https://openrouter.ai/api/v1`), because those are the two things the two protocols ask for. This
+ * is the one place that difference is papered over, so a comparison never has to know which kind it has.
+ */
+fun hostOfAddress(address: String): String {
+    val text = address.trim()
+    return if (text.contains("://")) Secrets.hostOf(text) else text.trimEnd('/').lowercase()
+}
+
+/**
+ * True when a credential stored for [stored] may be offered to [asked].
+ *
+ * **Whole labels, never a suffix**: `evil-github.com` must not satisfy `github.com`, and a bare
+ * `endsWith` is exactly the check that passes review and fails an attacker. A subdomain does satisfy the
+ * host it belongs to, which is what makes `api.github.com` work for a token stored for `github.com`.
+ *
+ * **One copy, in one place** — the store, the test fake and the connection lookup all ask this.
+ */
+fun hostCovers(stored: String, asked: String): Boolean {
+    val allowed = stored.trim().lowercase()
+    val wanted = asked.trim().lowercase()
+    if (allowed.isEmpty() || wanted.isEmpty()) return allowed == wanted
+    return wanted == allowed || wanted.endsWith(".$allowed")
+}
+
+/**
  * The scopes a question about [project] and [branch] may be answered at — **narrowest first**.
  *
  * A branch only exists inside a project, so a branch with no project is not a place a value can live

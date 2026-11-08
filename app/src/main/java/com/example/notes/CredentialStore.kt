@@ -282,6 +282,14 @@ interface Credentials {
     fun forgetConnection(scope: SecretScope, kind: ConnKind) {}
 
     /**
+     * The git connection that may be offered to [host], or null.
+     *
+     * A default that answers null, so a store with no vault — every fake in the suite — keeps working
+     * and cannot silently send an unscoped key.
+     */
+    fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? = null
+
+    /**
      * The model and effort [scope] asks for, or null when it asks for nothing and inherits.
      *
      * **Separate from [connection] because it inherits separately** (see `Connections.kt`): the pair is
@@ -732,6 +740,21 @@ class CredentialStore(context: Context) : Credentials {
         prefs.edit().putString(key, connection.address.trim() + HOST_SEPARATOR + encrypt(json.toString())).apply()
     }
 
+    /**
+     * **The git connection that may be offered to [host]**, or null when this question has none.
+     *
+     * Narrowest first, and **a nearer scope bound to another host falls through** rather than answering
+     * "nothing": a branch with a key for `gitlab.com` must not stop the project's key for `github.com`
+     * from being used — the same rule the named secrets already follow, because it is the same
+     * question ("is there a credential for *this* host") asked of a different store.
+     */
+    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
+        val at = connectionScope(project, branch) { scope ->
+            connection(scope, ConnKind.GIT)?.let { hostCovers(hostOfAddress(it.address), host) } == true
+        } ?: return null
+        return connection(at, ConnKind.GIT)
+    }
+
     override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
         val key = connKey(activeLogin, scope, kind) ?: return
         val choice = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
@@ -1093,12 +1116,7 @@ class CredentialStore(context: Context) : Credentials {
      * **An empty stored host matches only an empty question**, and the reverse. That is what keeps a
      * decryption key from being sent and a token from being printed into a log.
      */
-    private fun hostMatches(host: String, allowed: String): Boolean {
-        val asked = host.trim().lowercase()
-        val stored = allowed.trim().lowercase()
-        if (stored.isEmpty() || asked.isEmpty()) return asked == stored
-        return asked == stored || asked.endsWith(".$stored")
-    }
+    private fun hostMatches(host: String, allowed: String): Boolean = hostCovers(allowed, host)
 
     // ---- encryption --------------------------------------------------------
 

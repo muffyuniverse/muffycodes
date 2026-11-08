@@ -200,6 +200,13 @@ open class MemoryCredentials : Credentials {
         connKey(scope, kind)?.let { connections[it] = connection }
     }
 
+    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
+        val at = connectionScope(project, branch) { scope ->
+            connection(scope, ConnKind.GIT)?.let { hostCovers(hostOfAddress(it.address), host) } == true
+        } ?: return null
+        return connection(at, ConnKind.GIT)
+    }
+
     override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
         connKey(scope, kind)?.let {
             connections.remove(it)
@@ -299,12 +306,11 @@ open class MemoryCredentials : Credentials {
     }
 
     /** The same rule the real store applies, so a test cannot pass where the phone would leak. */
-    private fun hostMatches(allowed: String, asked: String): Boolean {
-        val a = asked.trim().lowercase()
-        val s = allowed.trim().lowercase()
-        if (s.isEmpty() || a.isEmpty()) return a == s
-        return a == s || a.endsWith(".$s")
-    }
+    /**
+     * **The same rule the store applies**, because a fake that answered more generously would let the
+     * suite pass where the phone leaks. [hostCovers] is the single copy of it.
+     */
+    private fun hostMatches(allowed: String, asked: String): Boolean = hostCovers(allowed, asked)
 }
 
 /**

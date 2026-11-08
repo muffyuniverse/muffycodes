@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -99,6 +100,41 @@ class ConnectionsTest {
             "the chain it does have",
             connectionScopes(null, null),
             choiceScopes(null, null, SecretScope.Project("somewhere")),
+        )
+    }
+
+    // ---- which host a key may be offered to ---------------------------------------------
+
+    @Test
+    fun `a host covers its subdomains and no look-alike`() {
+        // **The check an attacker tries first.** A bare `endsWith` accepts `notgithub.com` for
+        // `github.com`; whole labels accept `api.github.com` (which is the case that must work) and
+        // refuse the look-alike.
+        assertTrue("a subdomain is covered", hostCovers("github.com", "api.github.com"))
+        assertTrue("the host itself is covered", hostCovers("github.com", "github.com"))
+        assertTrue("and case is not a difference", hostCovers("GitHub.com", "API.github.com"))
+        assertFalse("a look-alike is not", hostCovers("github.com", "notgithub.com"))
+        assertFalse(
+            "nor is another host that merely ends with the same letters",
+            hostCovers("hub.com", "github.com"),
+        )
+        // **An empty host on either side is a match only with itself**, which is how "this secret is
+        // not being sent anywhere" is expressed.
+        assertTrue("empty is empty", hostCovers("", ""))
+        assertFalse("and empty covers no host", hostCovers("", "github.com"))
+    }
+
+    @Test
+    fun `an address names its host whether it was written as a host or as a base URL`() {
+        // **The two kinds store different things on purpose**: a git connection stores the host a
+        // token is for, an llm connection stores the base URL a request goes to. Comparisons must not
+        // have to know which one they have.
+        assertEquals("github.com", hostOfAddress("github.com"))
+        assertEquals("openrouter.ai", hostOfAddress("https://openrouter.ai/api/v1"))
+        assertEquals("192.168.1.9", hostOfAddress("http://192.168.1.9:8000/v1"))
+        assertTrue(
+            "and a base URL is matched by the host it names",
+            hostCovers(hostOfAddress("https://gitlab.com/api/v4"), "gitlab.com"),
         )
     }
 
