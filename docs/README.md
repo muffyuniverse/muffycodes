@@ -30,7 +30,7 @@ in the app. **None is a work list.** Each now says so at the top, and each item 
 | `PLAN-bug-reports-v149*.md` | The v1.4.9 report rounds | Historical, kept for the reasoning. |
 | `PLAN-remaining-2026-10-29.md` | What was left on that day | Historical. |
 | `PLAN-universal-2026-11-06.md` | **`http`, git and the layers that stay** — what makes the app portable to any git and any OpenAI-compatible provider, what is deleted, what is kept and why, and the two live bugs found on the way. | **Not started.** Parts 1–2 are a live bug each; parts 3–6 are the feature work. |
-| `PLAN-portable-2026-11-08.md` | **The portable rule**: two boundaries (the app owns the device, the token owns the remote), what it strikes down (host-specific gates, Apps, main-as-trunk-only), and the phases P0–P3. | **P0 landed.** The device boundary is now a canonical test in the write funnel, with four falsifying tests. |
+| `PLAN-portable-2026-11-08.md` | **The portable rule**: two boundaries (the app owns the device, the token owns the remote), what it strikes down (host-specific gates, Apps, main-as-trunk-only), and the phases P0–P3. | **P0 and P1 landed.** The write boundary is a canonical test in the funnel; a project on any host authenticates from the vault, and no host is named in the code. P2 (the typed GitHub tools onto `http`) is not started. |
 
 ## The design notes
 

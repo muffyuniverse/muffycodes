@@ -49,6 +49,7 @@ no tool that speaks to a release at all. That is true on every host.
 | `push` cannot name a ref | `AgentTools.push()` takes no arguments; `GitService.pushNow` sends `currentBranch(repo) → remoteBranch(repo, local)` | **Structural.** An agent can only send the branch it stands in. |
 | a write to another project is refused | `mayWrite` → `projectOf` → the "belongs to `$owner`" sentence | **True, and tested** (`AgentTest`: *another project may be read, and not written*). |
 | a write into another **branch's** tree of the same project is refused | falls through the owner check (same project), then `rel` gives `../.muffy/worktrees/…` and the dot-name fallback refuses it | **True by accident.** The sentence printed is *"A name that starts with a dot belongs to the app"* about a path whose first segment is `..` — a rule the path did not break. **No test holds it.** |
+| a push to a host that is not the account's own uses that host's secret, or says which one to add | `ProjectGit.credentialFor` → `GitCredentials`, before anything leaves the phone | **True, and tested** (`GitCredentialsTest`, and a `ProjectGitTest` that pushes to `gitlab.com` and gets a sentence rather than a request) |
 | a write through the `system` link is refused | `projectOf` canonicalises (its `partsOf` resolves links), so the target reads as `system` and the "another project" refusal fires | **True by accident**, and with a sentence that offers an action that does not exist: *"changing it needs `system` open"* — there is no way to open it. **No test holds it.** |
 
 **So the boundary holds, but by two accidents and with refusals that name the wrong rule.** P0 makes it the
@@ -75,21 +76,34 @@ happen to agree is one that stops holding the day one of them changes.
 **Deliberately not in P0:** nothing about credentials, nothing about GitHub. This phase is portable by
 construction — it is about folders.
 
-### P1 — a credential is data, not a provider table
+### P1 — a credential is data, not a provider table  ✅ *landed*
 
-Today `GitService.credentials()` hardcodes two GitHub conventions in one function: the token is the
-**username**, and any host that is not GitHub gets **no credential at all and no message**.
+`GitService.credentials()` hardcoded two GitHub conventions in one function: the token was the
+**username**, and any host that was not GitHub got **no credential at all and no message**. The second was
+worse than it looked — it is a rule about *whose token it is*, written where the token becomes a header, so
+the vault's own credential for `gitlab.com` could never be used: the project was refused before it was
+offered, and the server's 401 was the only explanation anybody saw.
 
-1. `Secret(value, host, user, scheme)` — the store keeps the username git should send and the scheme an
-   `Authorization` header uses, beside the host it already keeps. The host rule does not change: a secret
-   bound to `api.example` still cannot be sent to `evil.example`.
-2. `GitService.credentials(remoteUrl, secret)` builds `UsernamePasswordCredentialsProvider(user, value)` from
-   the record, and stops consulting a list of providers.
-3. `http` builds its header from the scheme; `push` uses the same record, so the two cannot disagree about
-   what a credential is.
-4. **A project on another host becomes possible**: a secret named `git`, bound to that host, is the
-   credential its `push` uses. Absent one, the account's own token is used only for the account's own host —
-   and when neither applies the refusal *says so* instead of returning null.
+**What landed:**
+
+1. **`GitCredentials`** — a pure object, no Android, tested with strings. Three answers: *use this token*,
+   *nothing to send* (no host: a local path), or *a sentence saying why*. The order is: a secret for that
+   host wins; otherwise the account's token **only for the account's own host**; otherwise say which secret
+   to add, **before anything is sent**.
+2. **`GitService.credentials`** keeps only the mechanism, and learns the one portable thing it was missing:
+   the username comes from the remote's address when it names one (`x-token-auth@bitbucket.org` is git's own
+   convention, and the only place a host-specific name can live without a table), otherwise the token is the
+   username with an empty password.
+3. **`push`, `pull` and `sync` ask once, at the top** — one answer instead of three — and `ProjectGit` takes a
+   `vaultToken` provider, so a `ProjectGit` in a test needs no keystore.
+4. **The app passes `Credentials::secret`**, which already answers narrowest-first (project, then account,
+   then shared). So supporting a host is an act in the vault, not a commit here.
+5. **Sentences that named GitHub stopped naming it** in the places a person reads them during a sync.
+
+**Not in P1, and known:** `GitService.clone` still refuses a non-GitHub host in its own words, because the
+app's *add a project* flow is GitHub's API and a non-GitHub clone is not reachable from the UI. When that
+flow becomes portable the guard moves to `GitCredentials` with the other verbs. Recorded rather than
+half-done.
 
 ### P2 — the typed GitHub tools become the first user of `http`
 
