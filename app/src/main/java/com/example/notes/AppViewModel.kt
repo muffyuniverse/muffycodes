@@ -5601,6 +5601,13 @@ class AppViewModel @JvmOverloads constructor(
     fun dropBranch(name: String) {
         Trace.tap("confirm remove branch", name)
         val project = choosingBranchFor ?: return
+        // **Not while its agent is working.** The tree is deleted with the branch, so an agent part way
+        // through a turn would be writing into a folder somebody else just removed — and the rule that
+        // a running agent means "not now" is the one housekeeping already follows.
+        if (agentBusy(project, name)) {
+            message = "$project is working on $name, so its agent has to stop first."
+            return
+        }
         val repo = git?.open(project) ?: run {
             message = "There is no repository for $project, so there is no branch to remove."
             return
@@ -5609,6 +5616,16 @@ class AppViewModel @JvmOverloads constructor(
             GitService.deleteBranch(repo, name)
         } finally {
             repo.close()
+        }
+        // **The tree goes with the branch, and only when the branch really went.** A fork point is a
+        // folder git still lists and the app still offers; left behind it would be a directory whose
+        // branch does not exist, holding the system link and whatever was checked out.
+        val removed = outcome.getOrNull()
+        if (removed != null) {
+            Worktrees(workspace ?: return).remove(project, removed)
+            // **If the person is standing in it, back to main.** Deleting the tree under an open
+            // screen leaves every path resolving into a folder that is gone.
+            if (activeBranch == removed) backToMain()
         }
         message = outcome.fold(
             { "Removed $it." },

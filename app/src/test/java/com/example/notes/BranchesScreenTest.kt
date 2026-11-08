@@ -193,6 +193,30 @@ class BranchesScreenTest {
     }
 
     @Test
+    fun `removing a branch removes its working tree too`() {
+        // **A fork point is a folder git still lists and the app still offers.** Deleting only the ref
+        // left a directory whose branch no longer exists, holding the system link and whatever was
+        // checked out — and `branches()` would keep offering it, because it asks for a `.git` file.
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
+        val ws = scene.workspace!!
+        val trees = Worktrees(ws)
+        // **The folder made the way the app makes it.** `enterBranch` needs the branch screen open,
+        // which is where the test already is.
+        val dir = trees.make("Shopping", "feature").getOrThrow()
+        assertTrue("the tree is there", File(dir, ".git").isFile)
+
+        scene.viewModel.dropBranch("feature")
+        scene.await("the branch to go") { "feature" !in scene.viewModel.choosingBranches }
+
+        assertFalse("the tree went with it", dir.exists())
+        assertFalse("and git's record of it", trees.exists("Shopping", "feature"))
+        assertEquals("main is still the only branch", listOf("main"), trees.branches("Shopping"))
+    }
+
+    @Test
     fun `a new branch is made and appears in the list`() {
         // **The whole loop, through the door a person uses**: the view model makes it, re-reads the
         // list, and the list is state so the screen redraws.
