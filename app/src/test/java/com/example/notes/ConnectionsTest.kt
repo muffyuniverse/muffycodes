@@ -464,7 +464,7 @@ class ConnectionsTest {
     fun `a connection is invisible to auth unless the checkmark is on`() {
         // **The default is off, and that is a permission's only safe default.** A git token can push;
         // a model key can spend money. Neither is handed to an agent because a row exists.
-        val off = mapOf(
+        val off = mapOf<SecretScope, Connection>(
             SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = false),
         )
 
@@ -481,7 +481,7 @@ class ConnectionsTest {
         // **The rule that makes `auth:` an authentication feature rather than an exfiltration
         // primitive.** The agent names the value; the vault decides where it may go. A token stored
         // for gitlab.com is not answered for another host, and not for "nowhere".
-        val on = mapOf(
+        val on = mapOf<SecretScope, Connection>(
             SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = true),
         )
 
@@ -496,7 +496,7 @@ class ConnectionsTest {
         // **Independent checkmarks, because the blast radii differ.** A person may let the agent ask
         // the model server what models exist without letting it push as them — and a name that
         // resolved the other kind's token would be the worst of both.
-        val both = mapOf(
+        val both = mapOf<SecretScope, Connection>(
             SecretScope.Project("acme") to Connection("gitlab.com", "glpat-git", nameable = true),
             SecretScope.Branch("acme", "feature") to Connection(
                 address = "https://models.example/v1",
@@ -519,7 +519,7 @@ class ConnectionsTest {
         // the absence of a grant for that row.
         val project = SecretScope.Project("acme")
         val branch = SecretScope.Branch("acme", "feature")
-        val grant = mapOf(
+        val grant = mapOf<SecretScope, Connection>(
             project to Connection("gitlab.com", "glpat-project", nameable = true),
             branch to Connection("gitlab.com", "glpat-branch", nameable = true),
         )

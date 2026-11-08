@@ -1733,6 +1733,7 @@ class AppViewModel @JvmOverloads constructor(
                 kind = ConnKind.GIT,
                 address = own?.address ?: host(project, branch).orEmpty(),
                 user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
+                nameable = own?.nameable == true,
             )
         }
         val asked = ws?.let { AgentWiring.wiredFor(it, credentials, project, branch) }
@@ -1745,6 +1746,7 @@ class AppViewModel @JvmOverloads constructor(
             shapeKind = ShapeKind.CHAT,
             shapeUrl = own?.shapeFor(ShapeKind.CHAT)?.url.orEmpty(),
             shapeBody = own?.shapeFor(ShapeKind.CHAT)?.body?.toString().orEmpty(),
+            nameable = own?.nameable == true,
         )
     }
 

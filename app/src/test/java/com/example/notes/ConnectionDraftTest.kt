@@ -241,4 +241,34 @@ class ConnectionDraftTest {
         assertEquals("", draft.secret)
         assertEquals("and the shape it would send", Shape.CHAT.url, draft.shapeUrl)
     }
+
+    // ---- the grant ------------------------------------------------------------------------
+
+    @Test
+    fun `the grant is off unless it was ticked`() {
+        // **A permission's only safe default.** A row existing is not a grant: a git token can push
+        // and a model key can spend money, so neither becomes nameable because somebody typed an
+        // address.
+        val unticked = ConnectionDraft(
+            kind = ConnKind.LLM,
+            address = "https://models.example.org/v1",
+            model = "m",
+        )
+        val ticked = unticked.copy(nameable = true)
+
+        assertEquals("off", false, unticked.connection()?.nameable)
+        assertEquals("and on when it is ticked", true, ticked.connection()?.nameable)
+    }
+
+    @Test
+    fun `a window opens showing whether the grant is already on`() {
+        // A window that always opened with it off would look like the grant had been withdrawn, and a
+        // person would tick it again — or not notice that it was.
+        assertTrue(
+            ConnectionDraft.opening(kind = ConnKind.GIT, at = "gitlab.com", nameable = true).nameable,
+        )
+        assertFalse(
+            ConnectionDraft.opening(kind = ConnKind.GIT, at = "gitlab.com").nameable,
+        )
+    }
 }

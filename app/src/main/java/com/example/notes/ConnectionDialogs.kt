@@ -9,6 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -58,6 +59,10 @@ fun LlmConnectionDialog(
     var effort by remember { mutableStateOf(inForce.effort) }
     var shapeUrl by remember { mutableStateOf(inForce.shapeUrl) }
     var shapeBody by remember { mutableStateOf(inForce.shapeBody) }
+    // **Off unless ticked, and it starts off even when the row already has it on**, because a window
+    // that opened with a permission already ticked would re-grant it on every save — silently, and
+    // after somebody had turned it off somewhere else. The hint says whether it is on now.
+    var nameable by remember { mutableStateOf(inForce.nameable) }
     var editingShape by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
     var checkSaid by remember { mutableStateOf<String?>(null) }
@@ -70,6 +75,7 @@ fun LlmConnectionDialog(
         effort = effort,
         shapeUrl = shapeUrl,
         shapeBody = shapeBody,
+        nameable = nameable,
     )
     val problem = draft.problemSaid()
 
@@ -139,6 +145,17 @@ fun LlmConnectionDialog(
                     supportingText = { Text("none, low, medium, high or max. Blank means the server's own default.") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // **The grant, and it is a grant rather than a setting.** Off, this key is exactly as
+                // invisible to the agent as it is today; on, `auth: llm` resolves to it for this
+                // server only. The sentence says both halves, because "allow" alone would read as
+                // "allow anywhere".
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = nameable, onCheckedChange = { nameable = it })
+                    Text(
+                        "Let the agent spend this on its own requests to this host",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 // **The shape, behind one button.** It is the advanced half — most servers answer the
                 // app's own preset — and a window that showed a JSON body beside four fields would
                 // make a person think they had to have one.
@@ -226,6 +243,7 @@ fun GitConnectionDialog(
     var address by remember { mutableStateOf(inForce.address) }
     var secret by remember { mutableStateOf("") }
     var user by remember { mutableStateOf(inForce.user) }
+    var nameable by remember { mutableStateOf(inForce.nameable) }
     var checking by remember { mutableStateOf(false) }
     var checkSaid by remember { mutableStateOf<String?>(null) }
 
@@ -234,6 +252,7 @@ fun GitConnectionDialog(
         address = address,
         secret = secret,
         user = user,
+        nameable = nameable,
     )
     val problem = draft.problemSaid()
 
@@ -282,6 +301,16 @@ fun GitConnectionDialog(
                     supportingText = { Text("What the host wants beside the token: oauth2 on GitLab, blank on GitHub.") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // **The grant, per kind.** A person may let the agent ask a model server what models
+                // exist without letting it push as them, which is why this checkmark is separate from
+                // the model window's — and why neither defaults to on.
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = nameable, onCheckedChange = { nameable = it })
+                    Text(
+                        "Let the agent spend this on its own requests to this host",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (problem != null) {
                     Text(
                         problem,

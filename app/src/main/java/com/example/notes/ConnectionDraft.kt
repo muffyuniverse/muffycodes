@@ -45,6 +45,14 @@ data class ConnectionDraft(
     val shapeUrl: String = "",
     /** The shape's body, as JSON text, or blank for the app's preset. */
     val shapeBody: String = "",
+    /**
+     * **May the agent spend this on its own requests to this host?**
+     *
+     * One checkmark per kind, independent, **off unless ticked** — and it is the only way a credential
+     * the app itself uses becomes nameable by `auth:` ([Connection.nameable]). A window that defaulted
+     * it on would be handing an agent a token because a row exists, which is the opposite of a grant.
+     */
+    val nameable: Boolean = false,
 ) {
 
     /**
@@ -136,6 +144,7 @@ data class ConnectionDraft(
             secret = secret,
             user = if (kind == ConnKind.GIT) user.trim() else "",
             shapes = shape?.let { mapOf(shapeKind to it) } ?: emptyMap(),
+            nameable = nameable,
         )
     }
 
@@ -177,6 +186,7 @@ data class ConnectionDraft(
             effort: String = "",
             shape: Shape? = null,
             shapeKind: ShapeKind = ShapeKind.CHAT,
+            nameable: Boolean = false,
         ): ConnectionDraft = ConnectionDraft(
             kind = kind,
             address = at,
@@ -187,6 +197,7 @@ data class ConnectionDraft(
             shapeKind = shapeKind,
             shapeUrl = shape?.url.orEmpty(),
             shapeBody = shape?.body?.toString().orEmpty(),
+            nameable = nameable,
         )
     }
 }
