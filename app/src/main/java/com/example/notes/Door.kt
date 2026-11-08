@@ -297,6 +297,15 @@ class OpenRouterDoor(
      * no second pass over the reply is needed.
      */
     private val onStats: ((RequestLog.Stats) -> Unit)? = null,
+    /**
+     * **The request this door sends**, for the kind [ShapeKind.CHAT] — the connection's own when it
+     * was recorded, the app's preset when it was not.
+     *
+     * A door *without* a shape is the compatible default, which is the whole of the preset; a door
+     * *with* one is a server that answers at another path or in another dialect, and it must be the
+     * same object the window stored or the app would send two different requests to one server.
+     */
+    internal val shape: Shape = Shape.CHAT,
 ) : Door {
 
     /**
@@ -495,7 +504,7 @@ class OpenRouterDoor(
         // only the answer's size differs, and that is not part of the prompt. A blank effort and a
         // null `max_tokens` therefore have to *remove* their keys rather than send `""` and `null`,
         // which is the shape's rule (see `Shape`) and not an accident of this map.
-        Shape.CHAT.bodyOf(
+        shape.bodyOf(
             mapOf(
                 "model" to request.model,
                 "messages" to messagesOf(request),
@@ -514,7 +523,7 @@ class OpenRouterDoor(
 
         var connection: HttpURLConnection? = null
         val text = try {
-            connection = (URL(chatEndpoint(baseUrl)).openConnection() as HttpURLConnection).apply {
+            connection = (URL(shape.address(baseUrl)).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = CONNECT_MS
                 readTimeout = timeoutMs
@@ -563,7 +572,7 @@ class OpenRouterDoor(
 
         var connection: HttpURLConnection? = null
         try {
-            connection = (URL(chatEndpoint(baseUrl)).openConnection() as HttpURLConnection).apply {
+            connection = (URL(shape.address(baseUrl)).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = CONNECT_MS
                 // **The ack's number for the first read.** It is replaced by the idle one as soon

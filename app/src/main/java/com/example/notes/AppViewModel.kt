@@ -4702,6 +4702,7 @@ class AppViewModel @JvmOverloads constructor(
             key = { asked.key() },
             keyState = { asked.keyState() },
             keyless = asked.keyless,
+            shape = asked.shape,
             model = asked.active.model,
             provider = asked.active.provider,
             // **Recorded, never enforced.** Nothing is scoped by this - it is what lets the log

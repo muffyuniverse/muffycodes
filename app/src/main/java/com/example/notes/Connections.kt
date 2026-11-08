@@ -180,6 +180,13 @@ data class Wired(
     /** **Why** there is none, when there is none — a locked phone is not a key that was never set. */
     val keyState: () -> KeyState,
     /**
+     * The request shape the connection sends, or the app's preset when it recorded none.
+     *
+     * A fact about the server, so it travels with the address and the key — and it is one of the
+     * three kinds' shapes, chosen by the caller: a chat turn sends the chat's.
+     */
+    val shape: Shape = Shape.CHAT,
+    /**
      * **True when the server wants no key at all**, which is a model server on this phone or on a
      * local network — the one case where "no key" is the whole credential rather than half of one.
      *
@@ -201,7 +208,8 @@ data class Wired(
             key: () -> String? = { null },
             keyState: () -> KeyState = { KeyState.NONE },
             keyless: Boolean = false,
-        ): Wired = Wired(at, active, key, keyState, keyless)
+            shape: Shape = Shape.CHAT,
+        ): Wired = Wired(at, active, key, keyState, shape, keyless)
     }
 }
 
@@ -274,6 +282,10 @@ fun wiredFor(
             ({ if (stored.secret.isBlank()) KeyState.NONE else KeyState.READABLE })
         },
         keyless = stored != null && stored.secret.isBlank(),
+        // **The server's own shape, when it recorded one.** A connection that did not is the
+        // compatible default, and the preset is field-for-field what the app sent before a shape
+        // could be stored — so nothing about an ordinary connection changes here.
+        shape = stored?.shapeFor(ShapeKind.CHAT) ?: Shape.CHAT,
     )
 }
 

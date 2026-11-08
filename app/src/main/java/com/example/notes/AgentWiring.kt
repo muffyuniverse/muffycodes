@@ -35,6 +35,11 @@ object AgentWiring {
                 baseUrl = wired.active.baseUrl,
                 keyState = wired.keyState,
                 keyless = wired.keyless,
+                // **The server's own request shape**, when the connection recorded one. A self-hosted
+                // server that answers at another path, or in another dialect, is asked in its own
+                // words rather than in the app's — and the window that stores a shape and the door
+                // that sends it read the same object.
+                shape = wired.shape,
                 model = wired.active.model,
                 provider = wired.active.provider,
                 effort = wired.active.effort,
