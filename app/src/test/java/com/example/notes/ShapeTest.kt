@@ -63,10 +63,10 @@ class ShapeTest {
         // Keys are not ordered in a JSON object, so "the same document" is compared as the same
         // fields with the same values - which is what a server reads, and all a server can read.
         assertTrue(
-            "every field the app sent, the shape sends: ${shaped.keys().asSequence().sorted().toList()}",
-            shaped.keySet() == expected.keySet(),
+            "every field the app sent, the shape sends: ${keysOf(shaped)}",
+            keysOf(shaped) == keysOf(expected),
         )
-        for (key in expected.keys()) {
+        for (key in keysOf(expected)) {
             assertSameJson("field \"$key\"", expected.opt(key), shaped.opt(key))
         }
     }
@@ -248,14 +248,27 @@ class ShapeTest {
         assertEquals("and the body is what it says", 1, chatty.bodyOf(mapOf("model" to "m", "effort" to "high")).length())
     }
 
+    /**
+     * The names in [json], **because Android's `JSONObject` has `keys()` and no `keySet()`.**
+     *
+     * Written out rather than hidden in the assertion: a test that used a method the phone does not
+     * have compiles here and fails on the build machine, which is exactly what happened once.
+     */
+    private fun keysOf(json: JSONObject): List<String> {
+        val names = mutableListOf<String>()
+        val found = json.keys()
+        while (found.hasNext()) names.add(found.next())
+        return names.sorted()
+    }
+
     /** The same field, with the same value, at every depth. */
     private fun assertSameJson(what: String, expected: Any?, actual: Any?) {
         when {
             expected is JSONObject -> {
                 assertTrue("$what is an object", actual is JSONObject)
                 actual as JSONObject
-                assertEquals("$what has the same fields", expected.keySet(), actual.keySet())
-                for (key in expected.keys()) assertSameJson("$what.$key", expected.opt(key), actual.opt(key))
+                assertEquals("$what has the same fields", keysOf(expected), keysOf(actual))
+                for (key in keysOf(expected)) assertSameJson("$what.$key", expected.opt(key), actual.opt(key))
             }
             expected is JSONArray -> {
                 assertTrue("$what is an array", actual is JSONArray)
