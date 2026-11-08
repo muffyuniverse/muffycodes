@@ -38,7 +38,32 @@ data class ActiveModel(
     val effort: String,
     val contextLength: Int? = null,
     val maxOutput: Int? = null,
+    /**
+     * **Where the requests go** — the connection's own address, not the vendor's.
+     *
+     * This is the field that makes the app host-agnostic for models, and it is the reason [provider]
+     * stops being a pin: OpenRouter's `provider.only` chose one upstream behind one fixed URL, and a
+     * base URL *is* the upstream. Whatever speaks `POST /chat/completions` can be a connection.
+     *
+     * **A default rather than a required field**, so every config written before this existed keeps
+     * working and means exactly what it meant — and so a person editing `model_conf.json` by hand does
+     * not have to know the address to keep using the app.
+     */
+    val baseUrl: String = OPENROUTER_BASE,
 )
+
+/** OpenRouter's base URL, which is the default connection and the one the app ships. */
+const val OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+/**
+ * **The address a request is sent to**, checked rather than trusted.
+ *
+ * A trailing slash in the file would otherwise produce `https://x/api/v1//chat/completions`, which most
+ * servers tolerate and some do not — and a person who typed one would be told the connection is broken.
+ * An empty value falls back to the shipped default rather than producing a relative URL.
+ */
+fun chatEndpoint(baseUrl: String): String =
+    baseUrl.trim().trimEnd('/').ifEmpty { OPENROUTER_BASE } + "/chat/completions"
 
 /**
  * A model chosen for one job, **where the job decides what the third value means.**
@@ -92,6 +117,18 @@ data class ModelConfig(
     val embedding: PickedModel? = null,
     /** The model that reorders search results. */
     val rerank: PickedModel? = null,
+    /**
+     * **The connection this account's models are reached through** — its base URL.
+     *
+     * **Kept beside `active` rather than inside it, and that is the point.** The chat model is one
+     * choice among several, and the *account's* default is what a branch inherits
+     * (`PLAN-credentials` §3.5); the address is a property of what answers, so it sits with the file
+     * rather than with one row of it. Moving the chat model to another id must not move the address,
+     * and moving to another provider must not silently keep the old one's URL.
+     *
+     * Reading is forgiving: a file written before this existed answers with the shipped default.
+     */
+    val baseUrl: String = OPENROUTER_BASE,
 ) {
     /** The endpoints allowed for [model], in the order the person put them. */
     fun providersOf(model: String): List<String> =
@@ -140,6 +177,7 @@ object ModelConfigFile {
     fun default(): ModelConfig = ModelConfig(
         active = ActiveModel(DEFAULT_MODEL, "deepseek", "high"),
         models = listOf(ModelChoice(DEFAULT_MODEL, DEFAULT_PROVIDERS)),
+        baseUrl = OPENROUTER_BASE,
     )
 
     fun file(accountDir: File): File = File(accountDir, NAME)
@@ -215,6 +253,10 @@ object ModelConfigFile {
         // a feature that is off and a config that is broken.
         config.embedding?.let { put("embedding", picked(it)) }
         config.rerank?.let { put("rerank", picked(it)) }
+        // **Written only when it is not the shipped one.** A file the app writes stays the file it
+        // wrote before, so an OpenRouter account's config does not sprout an address it never chose —
+        // and the absence of the field keeps meaning "the default", not "empty".
+        if (config.baseUrl != OPENROUTER_BASE) put("baseUrl", config.baseUrl)
     }
 
     /** One chosen model as JSON, with the dimension only when the job has one. */
@@ -334,12 +376,26 @@ object ModelConfigFile {
             null
         }
         if (failed != null) return Result.failure(failed!!)
+        // **The address, if the file carries one.** Absent means the shipped default, which is what
+        // every config written before this field existed means — and what a person who typed nothing
+        // would expect. A value that is present must look like an address, because "openai" in this
+        // field would produce a relative URL and an error nobody could act on.
+        val base = root.optString("baseUrl").trim()
+        if (base.isNotEmpty() && !base.startsWith("http://") && !base.startsWith("https://")) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "baseUrl must start with http:// or https:// — it is an address, " +
+                        "like https://openrouter.ai/api/v1",
+                ),
+            )
+        }
         return Result.success(
             ModelConfig(
                 ActiveModel(model, provider, effort, window, reply),
                 models,
                 embedding = embedding,
                 rerank = rerank,
+                baseUrl = base.ifEmpty { OPENROUTER_BASE },
             ),
         )
     }

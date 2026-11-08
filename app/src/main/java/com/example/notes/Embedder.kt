@@ -74,7 +74,17 @@ interface Embedder {
          * request parameter. Sending it means the index stores what the person chose; omitting it
          * would give whatever the model defaults to, which is a size nobody picked.
          */
-        fun openRouter(key: () -> String?): Embedder = object : Embedder {
+        fun openRouter(
+            key: () -> String?,
+            /**
+             * **The connection's base URL, read per call.**
+             *
+             * A function rather than a value for the reason [key] is one: the runner is built once and
+             * a person may point the account at another server while it is idle. A string captured at
+             * construction would keep sending vectors to the old one until the process died.
+             */
+            baseUrl: () -> String = { OPENROUTER_BASE },
+        ): Embedder = object : Embedder {
 
             override fun embed(texts: List<String>, model: String, dims: Int): Result<List<FloatArray>> =
                 try {
@@ -86,7 +96,7 @@ interface Embedder {
                         // every model would break the ones that do not support it.
                         if (dims > 0) put("dimensions", dims)
                     }
-                    val answer = post("/api/v1/embeddings", body, key)
+                    val answer = post("/embeddings", body, key, baseUrl())
                     parseEmbeddings(answer, texts.size, dims)
                 } catch (e: Exception) {
                     Result.failure(IllegalStateException(Secrets.explain(e, "The text could not be embedded")))
@@ -106,12 +116,12 @@ interface Embedder {
                 }
         }
 
-        private fun post(path: String, body: JSONObject, key: () -> String?): String {
+        private fun post(path: String, body: JSONObject, key: () -> String?, baseUrl: String): String {
             val token = key()
-                ?: throw IllegalStateException("No OpenRouter key on this account yet")
+                ?: throw IllegalStateException("No model key on this account yet")
             var connection: HttpURLConnection? = null
             return try {
-                connection = (URL("https://openrouter.ai$path").openConnection() as HttpURLConnection)
+                connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection)
                     .apply {
                         requestMethod = "POST"
                         connectTimeout = 20_000

@@ -123,7 +123,7 @@ class AgentServiceTest {
         // because there is nothing to drift from.
         val sessions = listOf(
             AgentSession("a", state = AgentSession.State.IDLE, lastPollAt = 1_000),
-            AgentSession("b", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 2_000),
+            AgentSession("b", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PROVIDER_REFUSED, askedAt = 2_000),
         )
         // **One is on and one needs you, and they are different sessions.** A session that needs
         // help is stopped, so it is not also counted as on: the strip's first number is agents
@@ -140,7 +140,7 @@ class AgentServiceTest {
         // notification is supposed to save them — so Open and Stop this session are the whole
         // content of it.
         val posted = withService { service ->
-            service.notify(AgentSession("shopping", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 1_000))
+            service.notify(AgentSession("shopping", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PROVIDER_REFUSED, askedAt = 1_000))
             notifications().single()
         }
         assertEquals("two buttons", 2, posted.actions.size)
@@ -161,8 +161,8 @@ class AgentServiceTest {
         // A single id means whichever was posted last hides the other, and a person answering one
         // question never learns there was a second.
         val count = withService { service ->
-            service.notify(AgentSession("shopping", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 1_000))
-            service.notify(AgentSession("letters", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 1_000))
+            service.notify(AgentSession("shopping", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PROVIDER_REFUSED, askedAt = 1_000))
+            service.notify(AgentSession("letters", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PROVIDER_REFUSED, askedAt = 1_000))
             notifications().size
         }
 

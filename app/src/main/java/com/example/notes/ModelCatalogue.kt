@@ -115,6 +115,12 @@ enum class CatalogueKind(
 class OpenRouterCatalogue(
     private val key: () -> String?,
     /**
+     * **The connection this catalogue is read from.** OpenRouter's own catalogue is richer (prices,
+     * uptime, effort ladders) and every compatible server that publishes `/models` answers a subset
+     * of the same shape — so the reader is one reader and the address is the argument.
+     */
+    private val baseUrl: () -> String = { OPENROUTER_BASE },
+    /**
      * **Which catalogue to read — the operator's one argument.**
      *
      * The three endpoints answer the same payload shape, so `parseModels` reads all of them and the
@@ -145,10 +151,10 @@ class OpenRouterCatalogue(
 
     private fun get(path: String): String {
         val token = key()
-            ?: throw IllegalStateException("No OpenRouter key on this account yet")
+            ?: throw IllegalStateException("No model key on this account yet")
         var connection: HttpURLConnection? = null
         return try {
-            connection = (URL("https://openrouter.ai$path").openConnection() as HttpURLConnection)
+            connection = (URL(baseUrl().trimEnd('/') + path).openConnection() as HttpURLConnection)
                 .apply {
                     requestMethod = "GET"
                     connectTimeout = 20_000

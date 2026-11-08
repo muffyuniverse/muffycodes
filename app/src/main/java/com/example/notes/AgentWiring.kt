@@ -26,6 +26,9 @@ object AgentWiring {
         door: (ActiveModel) -> Door = { active ->
             OpenRouterDoor(
                 key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
+                // **The account's connection**, read per request: a person who moves to another
+                // compatible server expects the next poll to go there.
+                baseUrl = active.baseUrl,
                 keyState = { credentials.activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
                 model = active.model,
                 provider = active.provider,
@@ -120,6 +123,7 @@ object AgentWiring {
             ws = ws,
             embedder = Embedder.openRouter(
                 key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
+                baseUrl = { ModelConfigFile.load(ws.accountDir).getOrNull()?.baseUrl ?: OPENROUTER_BASE },
             ),
             models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             context = app,
@@ -166,6 +170,7 @@ object AgentWiring {
             scanner = Scanner.openRouter(
                 key = { credentials.modelKey(login) },
                 threshold = { if (settings.scanAllowed) settings.scanThreshold else 0.0 },
+                baseUrl = { ModelConfigFile.load(ws.accountDir).getOrNull()?.baseUrl ?: OPENROUTER_BASE },
             ),
             httpAllowed = { settings.httpAllowed },
             // **Read per call, so a cap lowered while the agent is idle applies to the next request**

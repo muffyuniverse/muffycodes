@@ -15,7 +15,7 @@ package com.example.notes
  *
  * **`STOPPED` already means finished**, which is why there is no reason to carve out. A transient
  * failure never reaches a stop at all: `End.Stopped(retryable = true)` goes to [AgentSession.failed]
- * and stays `RECONNECTING` on the keepalive, retrying. `PIN_REFUSED` is only reached when that
+ * and stays `RECONNECTING` on the keepalive, retrying. `PROVIDER_REFUSED` is only reached when that
  * ladder is spent — an ending the app arrived at by exhaustion. So every reason a session is
  * `STOPPED` for is an ending, and every ending gets the same treatment.
  *
@@ -75,7 +75,7 @@ object AgentStops {
     fun why(session: AgentSession): String = session.lastWords.ifBlank {
         when (session.reason) {
             AgentSession.StopReason.BY_OPERATOR -> "you stopped it"
-            AgentSession.StopReason.PIN_REFUSED -> "the provider kept refusing"
+            AgentSession.StopReason.PROVIDER_REFUSED -> "the provider kept refusing"
             AgentSession.StopReason.LOOP -> "it was going in circles"
             AgentSession.StopReason.ERROR -> "something went wrong"
             null -> "it stopped"

@@ -241,7 +241,10 @@ class AppViewModel @JvmOverloads constructor(
      * OpenRouter would be a picker tested by hand or not at all.
      */
     var catalogue: Catalogue = OpenRouterCatalogue(
-        { activeLogin?.let { credentials.modelKey(it) } }
+        key = { activeLogin?.let { credentials.modelKey(it) } },
+        // **Read per call**, so a person who points the account at another compatible server gets
+        // that server's catalogue on the next picker rather than the one it was built with.
+        baseUrl = { modelConfig.baseUrl },
     )
 
     /**
@@ -601,6 +604,7 @@ class AppViewModel @JvmOverloads constructor(
             // pass should find it. A test passes [Embedder.NONE] and never reaches the network.
             embedder = embedder ?: Embedder.openRouter(
                 key = { activeLogin?.let { credentials.modelKey(it) } },
+                baseUrl = { modelConfig.baseUrl },
             ),
             models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             context = app,
@@ -4671,7 +4675,7 @@ class AppViewModel @JvmOverloads constructor(
         if (next != current) putSession(next)
     }
 
-    /** The door for [model]: the test's, when one is set, and the pinned endpoint otherwise. */
+    /** The door for [model]: the test's when one is set, and the account's connection otherwise. */
     private fun doorFor(model: ActiveModel, project: String = ""): Door = (chatDoor ?: { active ->
         OpenRouterDoor(
             key = { activeLogin?.let { credentials.modelKey(it) } },
@@ -4682,11 +4686,9 @@ class AppViewModel @JvmOverloads constructor(
             // answer "which project costs me most", and a door built without one writes an empty
             // project rather than failing.
             project = project,
-            // **The model's own endpoints, in the order the person arranged them.** This is the
-            // fallback list and nothing else uses it: `provider` above is still the pin, so the
-            // first attempt is always the endpoint they selected. A failure the account owns -
-            // an empty balance, a refused key - never walks this list; see `classify`.
-            fallbacks = modelConfig.providersOf(active.model),
+            // **The account's connection**, which is what replaced the provider tags and their
+            // ladder: an address is the upstream, so a second machine is a second connection.
+            baseUrl = active.baseUrl,
             effort = active.effort,
             // **The person's numbers, not the app's.** A slow network is a fact only they know, and
             // a timeout that is too short turns a long turn into a ladder of retries that never let

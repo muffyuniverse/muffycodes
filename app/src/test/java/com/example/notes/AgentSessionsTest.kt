@@ -32,7 +32,7 @@ class AgentSessionsTest {
     @Test
     fun `a session is written where the app looks for it, and read back whole`() {
         val session = AgentSession(project = "shopping")
-            .needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_700_000_000_000)
+            .needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 1_700_000_000_000)
             .reminded()
             .reminded()
 
@@ -74,7 +74,7 @@ class AgentSessionsTest {
         // The failure this exists for: the app is killed while the agent is waiting for an
         // answer, and on the next open the session has to still be `asked` with its clock — or
         // the person is reminded from minute zero of a question asked yesterday.
-        store.put(AgentSession("shopping").needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000).reminded())
+        store.put(AgentSession("shopping").needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 1_000).reminded())
 
         val reopened = AgentSessions(account).read().single()
 
@@ -136,7 +136,7 @@ class AgentSessionsTest {
         store.put(AgentSession("shopping"))
         store.put(AgentSession("notes"))
 
-        store.put(AgentSession("notes").needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 5))
+        store.put(AgentSession("notes").needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 5))
 
         assertEquals("both are still there", 2, store.read().size)
         assertEquals("and the second one changed", AgentSession.State.STOPPED, store.read().first { it.project == "notes" }.state)

@@ -538,7 +538,7 @@ class AgentSessionFeatureTest : FeatureTest() {
             AgentSession.State.STOPPED,
             session?.state,
         )
-        assertEquals("and knows why", AgentSession.StopReason.PIN_REFUSED, session?.reason)
+        assertEquals("and knows why", AgentSession.StopReason.PROVIDER_REFUSED, session?.reason)
         assertTrue("and said so once", notices.any { it.contains("groceries") })
         assertTrue("with the reason in the label: $last", last.contains("OpenRouter answered 401"))
     }

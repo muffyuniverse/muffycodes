@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -65,6 +66,48 @@ class ModelConfigTest {
 
         assertEquals("the same choice", written.active, read.active)
         assertEquals("and the same catalogue", written.models, read.models)
+    }
+
+    /**
+     * **The connection's address survives a round trip, and its absence means the shipped one.**
+     *
+     * The field is what makes the model layer host-agnostic (`PLAN-credentials` C2): a base URL *is*
+     * the upstream now, so losing it in a write would silently send a person's requests back to
+     * OpenRouter. And a file written before the field existed must keep meaning what it meant — the
+     * default — rather than "no address at all", which would be a relative URL.
+     */
+    @Test
+    fun `the connection's address is stored when it is not the shipped one`() {
+        val own = ModelConfigFile.default().copy(baseUrl = "http://192.168.1.9:8000/v1")
+        ModelConfigFile.write(account, own)
+        assertEquals(
+            "round trip",
+            "http://192.168.1.9:8000/v1",
+            ModelConfigFile.load(account).getOrThrow().baseUrl,
+        )
+
+        // **The shipped one is not written**, so an OpenRouter account's file does not sprout an
+        // address it never chose — and the absence keeps meaning "the default".
+        ModelConfigFile.write(account, ModelConfigFile.default())
+        assertFalse(
+            "no address in the file",
+            ModelConfigFile.file(account).readText().contains("baseUrl"),
+        )
+        assertEquals(
+            "and reading it answers the default",
+            OPENROUTER_BASE,
+            ModelConfigFile.load(account).getOrThrow().baseUrl,
+        )
+    }
+
+    /** **An address that is not an address is refused by name**, because it would be a relative URL. */
+    @Test
+    fun `a base url without a scheme is refused`() {
+        val text = ModelConfigFile.text(ModelConfigFile.default())
+            .replaceFirst("{", "{\n  \"baseUrl\": \"openrouter.ai/api/v1\",")
+        val problem = ModelConfigFile.parse(text).exceptionOrNull()?.message.orEmpty()
+        assertTrue("it names the field: $problem", problem.contains("baseUrl"))
+        assertTrue("and the shape: $problem", problem.contains("https://"))
     }
 
     @Test

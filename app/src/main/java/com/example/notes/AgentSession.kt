@@ -132,8 +132,14 @@ data class AgentSession(
         /** The operator switched it off. Silent, because they were there. */
         BY_OPERATOR,
 
-        /** The pinned provider refused, with no fallback by design. */
-        PIN_REFUSED,
+        /**
+         * **The provider kept refusing** for the whole reconnect window.
+         *
+         * Named `PROVIDER_REFUSED` and not `PIN_REFUSED`: there is no pin any more — the connection is
+         * the address (`PLAN-credentials` C2) — and a name that claims a mechanism the app no longer
+         * has is the kind of lie a reader only finds out by tracing it.
+         */
+        PROVIDER_REFUSED,
 
         /** It kept calling tools without doing anything, so the loop stopped it. */
         LOOP,
@@ -423,7 +429,7 @@ data class AgentSession(
         val spent = forMs > 0 && at - began >= forMs
         if (spent) {
             return stopped(
-                StopReason.PIN_REFUSED,
+                StopReason.PROVIDER_REFUSED,
                 lastWords.ifBlank {
                     "the provider refused for ${forMs / 60_000} minutes ($tries tries)"
                 },
@@ -604,7 +610,7 @@ data class AgentSession(
 
     private fun stopWords(s: AgentSession): String = when (s.reason) {
         StopReason.BY_OPERATOR -> "stopped by you"
-        StopReason.PIN_REFUSED -> s.lastWords.ifBlank { "the pinned provider refused" }
+        StopReason.PROVIDER_REFUSED -> s.lastWords.ifBlank { "the provider kept refusing" }
         StopReason.LOOP -> "it kept going without doing anything"
         StopReason.ERROR -> s.lastWords.ifBlank { "it could not go on" }
         null -> "not running"

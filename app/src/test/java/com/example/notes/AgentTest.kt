@@ -990,23 +990,32 @@ class AgentTest {
         assertNull("nor from nonsense", door.usageOf("not json at all"))
     }
 
+    /**
+     * **The body is the protocol's, not one vendor's.**
+     *
+     * Two things are asserted and one absence: `stream_options.include_usage` because a streamed
+     * answer reports its tokens only when asked — the app used to rely on OpenRouter sending them
+     * unbidden, which is a silence against any other server — and `reasoning_effort`, because it is
+     * OpenAI's own spelling. What is **gone** is the OpenRouter trio: `provider.only` and
+     * `allow_fallbacks` (the address is the connection now) and `reasoning.exclude` (the app wants
+     * the reasoning streamed, as the liveness signal).
+     *
+     * The absence is asserted rather than merely omitted, because a field that comes back would look
+     * exactly like the app working: a provider quietly routing somewhere nobody chose.
+     */
     @Test
-    fun `the request names one provider tag, forbids fallbacks, and asks for no reasoning`() {
-        // **Three agreed rules in one body, and none of them is visible when it is wrong.** A base
-        // slug in `only` turns the pin back into autorouting inside one provider, `allow_fallbacks`
-        // true spends money on an endpoint nobody chose, and reasoning tokens are sent and thrown
-        // away. The body is a function of its own because the call around it needs a socket.
+    fun `the body asks for usage and carries no vendor routing`() {
         val door = OpenRouterDoor(
             key = { "unused-by-this-test" },
-            model = "deepseek/deepseek-v4.1-flash-1017",
-            provider = "decart/fp4",
+            model = "some/model",
+            provider = "somewhere",
             effort = "high",
         )
 
         val body = door.body(
             Request(
-                model = "deepseek/deepseek-v4.1-flash-1017",
-                provider = "decart/fp4",
+                model = "some/model",
+                provider = "somewhere",
                 effort = "high",
                 system = "the instructions",
                 messages = listOf(Msg.user("a task")),
@@ -1014,18 +1023,47 @@ class AgentTest {
             ),
         )
 
-        assertEquals("the tag, never the base slug", "decart/fp4", body.getJSONObject("provider").getJSONArray("only").getString(0))
-        assertFalse("and nothing beside it", body.getJSONObject("provider").getBoolean("allow_fallbacks"))
-        // **Reasoning is requested back, and streaming is why.** It used to be excluded because the
-        // tokens were billed and thrown away; with a streamed answer they arrive first, while the
-        // model is thinking, which is the one signal that tells a diligent model from a dead
-        // connection. The idle timeout is the thing that needs it.
-        assertFalse("reasoning is asked for, not excluded", body.getJSONObject("reasoning").getBoolean("exclude"))
+        assertTrue(
+            "a streamed answer reports its tokens only when asked: $body",
+            body.getJSONObject("stream_options").getBoolean("include_usage"),
+        )
         assertEquals("the model's own way of saying effort", "high", body.getString("reasoning_effort"))
         assertEquals("tool calling is the model's choice", "auto", body.getString("tool_choice"))
+        assertFalse("no routing pin — the address is the connection", body.has("provider"))
+        assertFalse("no reasoning switch — it is not ours to set", body.has("reasoning"))
         // **This body is the ping's**, which is not streamed: a ping reads no answer, so there is
         // nothing to watch for and no ack to time. The turn's body is the same one with this flipped.
         assertFalse("and a ping's answer is not streamed", body.getBoolean("stream"))
+    }
+
+    /**
+     * **The address is the connection's**, so the same door can speak to any compatible server.
+     *
+     * `chatEndpoint` is where the join happens, and it is a function of its own because the two ways a
+     * person writes a base URL — with a trailing slash and without — must produce one address.
+     */
+    @Test
+    fun `a door's request goes to the connection's address`() {
+        assertEquals(
+            "no slash, one path",
+            "https://openrouter.ai/api/v1/chat/completions",
+            chatEndpoint("https://openrouter.ai/api/v1"),
+        )
+        assertEquals(
+            "and a slash the person typed changes nothing",
+            "https://openrouter.ai/api/v1/chat/completions",
+            chatEndpoint("https://openrouter.ai/api/v1/"),
+        )
+        assertEquals(
+            "a server of one's own",
+            "http://192.168.1.9:8000/v1/chat/completions",
+            chatEndpoint("http://192.168.1.9:8000/v1"),
+        )
+        assertEquals(
+            "and an empty address is the shipped default, not a relative URL",
+            "https://openrouter.ai/api/v1/chat/completions",
+            chatEndpoint("   "),
+        )
     }
 
     @Test
@@ -3612,7 +3650,7 @@ class AgentTest {
         )
         val wall = Agent.End.Stopped(
             "OpenRouter answered 401",
-            reason = AgentSession.StopReason.PIN_REFUSED,
+            reason = AgentSession.StopReason.PROVIDER_REFUSED,
         )
 
         assertEquals(

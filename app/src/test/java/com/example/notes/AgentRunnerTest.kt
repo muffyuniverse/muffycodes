@@ -482,7 +482,7 @@ class AgentRunnerTest {
         // that cannot run at all.
         AgentSessions(ws.accountDir).put(
             AgentSessions(ws.accountDir).read().single()
-                .needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000),
+                .needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 1_000),
         )
         bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(5_001)
@@ -769,7 +769,7 @@ class AgentRunnerTest {
 
         // Now it stops for a reason that is the person's to fix: nothing more is spent on it.
         val stopped = AgentSessions(ws.accountDir)
-        stopped.put(stopped.read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 2_000))
+        stopped.put(stopped.read().single().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 2_000))
         runner.tick(2_000 + 10 * AgentSession.POLL_MS)
         settle(runner)
         assertEquals("and one that needs help is left alone", 1, door.pings.size)
@@ -779,7 +779,7 @@ class AgentRunnerTest {
     fun `the reminder is the settings' interval, repeated, and it stops when answered`() {
         on("shopping", now = 1_000)
         AgentSessions(ws.accountDir).put(
-            AgentSessions(ws.accountDir).read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 2_000),
+            AgentSessions(ws.accountDir).read().single().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 2_000),
         )
         settings.keepRemind(5)
         val runner = runner()

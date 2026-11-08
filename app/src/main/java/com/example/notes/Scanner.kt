@@ -180,10 +180,12 @@ class Scanner(
             key: () -> String?,
             model: String = DEFAULT_MODEL,
             threshold: () -> Double = { DEFAULT_THRESHOLD },
+            /** The connection's base URL, read per call — see `Embedder.openRouter`. */
+            baseUrl: () -> String = { OPENROUTER_BASE },
         ): Scanner = Scanner(
             score = { chunks ->
                 try {
-                    Result.success(scoreChunks(key, model, chunks))
+                    Result.success(scoreChunks(key, model, chunks, baseUrl()))
                 } catch (e: Exception) {
                     Result.failure(
                         IllegalStateException(Secrets.explain(e, "The text could not be scanned")),
@@ -203,8 +205,13 @@ class Scanner(
          * parsed by `index`: a model that answers 3, 1, 2 has not answered wrongly, and pairing by arrival would
          * cut the wrong sections.
          */
-        internal fun scoreChunks(key: () -> String?, model: String, chunks: List<String>): List<Double> {
-            val token = key() ?: throw IllegalStateException("No OpenRouter key on this account yet")
+        internal fun scoreChunks(
+            key: () -> String?,
+            model: String,
+            chunks: List<String>,
+            baseUrl: String = OPENROUTER_BASE,
+        ): List<Double> {
+            val token = key() ?: throw IllegalStateException("No model key on this account yet")
             val numbered = chunks.mapIndexed { i, text -> "--- SECTION ${i + 1} ---\n$text" }
                 .joinToString("\n\n")
             val prompt = """
@@ -232,7 +239,7 @@ class Scanner(
                     ),
                 )
                 .put("temperature", 0)
-            val connection = (java.net.URL("https://openrouter.ai/api/v1/chat/completions")
+            val connection = (java.net.URL(chatEndpoint(baseUrl))
                 .openConnection() as java.net.HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 20_000

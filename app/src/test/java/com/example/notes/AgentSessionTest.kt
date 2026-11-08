@@ -99,7 +99,7 @@ class AgentSessionTest {
         val done = session().concluded(at = 10)
         assertTrue("a finished conversation is warm", done.warmDue(10 + 10 * minute, keepAlive = true))
 
-        val needsHelp = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 10)
+        val needsHelp = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 10)
         assertFalse(
             "one that needs help is not",
             needsHelp.warmDue(10 + 10 * minute, keepAlive = true),
@@ -132,7 +132,7 @@ class AgentSessionTest {
 
     @Test
     fun `a question reminds once an interval has passed, and not before`() {
-        val asked = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0)
+        val asked = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 0)
 
         assertFalse("not a second before", asked.reminderDue(AgentSession.REMIND_MS - 1))
         assertTrue("and at the interval", asked.reminderDue(AgentSession.REMIND_MS))
@@ -140,7 +140,7 @@ class AgentSessionTest {
 
     @Test
     fun `each reminder moves the ladder by exactly one step`() {
-        val once = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0).reminded()
+        val once = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 0).reminded()
 
         assertFalse(
             "the second one is a whole interval after the first",
@@ -154,7 +154,7 @@ class AgentSessionTest {
         // Time moves back: a timezone, a device synced to a different server, a person fixing the
         // date. `at - askedAt` going negative is not a reason to speak, and a reminder storm is
         // exactly what a naive comparison would produce on the next forward jump.
-        val asked = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 5 * 60 * minute)
+        val asked = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 5 * 60 * minute)
 
         assertFalse("before it was asked", asked.reminderDue(at = 0))
         assertFalse("and still not", asked.reminderDue(at = 5 * 60 * minute - 1))
@@ -164,7 +164,7 @@ class AgentSessionTest {
     fun `an hour-long interval of zero says it once and never again`() {
         // A person may decide they do not want to be reminded. That is a setting, not a bug, and
         // the very first notice still happens — the session tells them when it happens.
-        val asked = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0)
+        val asked = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 0)
 
         assertFalse("no reminder ever", asked.reminderDue(10 * 24 * 60 * minute, intervalMs = 0))
         assertEquals("but it is still worth one sentence", "shopping: stopped, the pinned provider refused", asked.notice())
@@ -193,7 +193,7 @@ class AgentSessionTest {
             byItself.notice(),
         )
 
-        val refused = session().stopped(StopReason.PIN_REFUSED, "down (503)")
+        val refused = session().stopped(StopReason.PROVIDER_REFUSED, "down (503)")
         assertEquals("the provider's own words", "shopping: stopped, down (503)", refused.notice())
     }
 
@@ -245,7 +245,7 @@ class AgentSessionTest {
 
         // **Counted in reminders, not in notifications.** The sentence that comes with the
         // question is not a reminder; the first repeat is the first one.
-        val first = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0).reminded()
+        val first = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 0).reminded()
         assertEquals("1st reminder · shopping: stopped, the pinned provider refused", first.notice())
         val second = first.reminded()
         assertEquals(
@@ -258,8 +258,8 @@ class AgentSessionTest {
     fun `answering the question puts the reminder ladder back to nothing`() {
         // The trap: the count survives the answer, so the *next* question's first reminder is
         // already called "4th" and fires immediately.
-        val answered = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0).reminded().reminded().resumed(at = 10_000)
-        val next = answered.needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 20_000)
+        val answered = session().needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 0).reminded().reminded().resumed(at = 10_000)
+        val next = answered.needingHelp(AgentSession.StopReason.PROVIDER_REFUSED, at = 20_000)
 
         assertEquals("no reminders spent", 0, next.reminders)
         assertFalse("and the interval starts again", next.reminderDue(20_000 + AgentSession.REMIND_MS - 1))
@@ -271,7 +271,7 @@ class AgentSessionTest {
     fun `the strip counts agents that are on, and only those that need somebody`() {
         val sessions = listOf(
             AgentSession("a", state = State.IDLE, sub = Sub.WAITING),
-            AgentSession("b", state = State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 1),
+            AgentSession("b", state = State.STOPPED, reason = AgentSession.StopReason.PROVIDER_REFUSED, askedAt = 1),
             AgentSession("c", state = State.STOPPED, reason = StopReason.BY_OPERATOR),
         )
 
@@ -357,7 +357,7 @@ class AgentSessionTest {
 
         val spent = first.failed(at = 1_000 + window, forMs = window)
         assertEquals("the moment it is spent, the session stops", AgentSession.State.STOPPED, spent.state)
-        assertEquals("with the reason a person can act on", AgentSession.StopReason.PIN_REFUSED, spent.reason)
+        assertEquals("with the reason a person can act on", AgentSession.StopReason.PROVIDER_REFUSED, spent.reason)
         assertTrue(
             "and words to act on, which are the provider's own when it said any",
             spent.lastWords.isNotBlank(),
