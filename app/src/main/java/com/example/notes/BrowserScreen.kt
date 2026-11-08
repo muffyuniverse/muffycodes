@@ -528,13 +528,10 @@ fun BrowserScreen(
                 // unsent; what the button opens is the app's window, which the screen does not own.
                 ProjectSlimRow(
                     viewModel,
-                    // **A release is published from `main`, so it is offered on main's tree only.** A
-                    // button on a branch would dispatch `main` while the person is looking at
-                    // `feature` — a version named after code they cannot see, from a tree whose count
-                    // is about a different folder. The work has to reach main first, and that is the
-                    // person's act, not a button here.
+                    // **Offered only where a release can honestly be named** — see
+                    // `AppViewModel.canPublish`, which holds the rule rather than this call site.
                     onRelease = viewModel.currentProject
-                        ?.takeIf { viewModel.activeBranch == AgentSession.MAIN }
+                        ?.takeIf { viewModel.canPublish }
                         ?.let { project -> { onRelease(project) } },
                 )
 

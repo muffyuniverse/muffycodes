@@ -189,6 +189,25 @@ class BranchFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a release cannot be started from inside a branch`() {
+        // **The rule the button's presence depends on.** A release is dispatched on `main`, so an offer
+        // inside a branch would name a version of code the person cannot see. It lives in the view
+        // model because it is a rule: a screen that decided it would be a second answer, and the next
+        // screen to draw the button would decide differently.
+        val project = projectWithABranch()
+        scene.viewModel.openBranches(project)
+        scene.viewModel.enterBranch("main")
+        scene.await("main's files to open") { scene.viewModel.path == listOf(project) }
+        assertTrue("on main's tree a release can be named", scene.viewModel.canPublish)
+
+        scene.viewModel.openBranches(project)
+        scene.viewModel.enterBranch("feature")
+        scene.await("the branch's files to open") { scene.viewModel.activeBranch == "feature" }
+
+        assertFalse("and inside a branch it cannot", scene.viewModel.canPublish)
+    }
+
+    @Test
     fun `a branch's file is named the project's path, so every rule about it still applies`() {
         // **The reading everything else rests on.** A worktree path read literally names `.muffy`, a
         // folder with no project — so project rules, locks and the agent's own scope would all stop

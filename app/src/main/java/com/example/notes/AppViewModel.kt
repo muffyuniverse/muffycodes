@@ -5549,6 +5549,23 @@ class AppViewModel @JvmOverloads constructor(
     val activeBranch: String get() = workspace?.activeBranch ?: AgentSession.MAIN
 
     /**
+     * **Whether a release may be started from the screen that is open.**
+     *
+     * A release is dispatched on `main` and published from it, so an offer inside a branch would name
+     * a version of code the person cannot see — the work has to reach `main` first, and that is the
+     * person's act rather than a button's. A local project has no repository to dispatch to at all.
+     *
+     * **In the model rather than in the composable**, because it is a rule and not a layout: a screen
+     * that decided it would be a second answer, and the next screen to draw the button would decide
+     * differently.
+     */
+    val canPublish: Boolean
+        get() {
+            val project = currentProject ?: return false
+            return activeBranch == AgentSession.MAIN && !isLocalProject(project)
+        }
+
+    /**
      * **Drops the branch screen, without a trace line**, because the caller is already leaving.
      *
      * Extracted because **three** paths change which account is in force — `signIn`, `switchTo` and
