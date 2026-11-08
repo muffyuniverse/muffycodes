@@ -194,6 +194,8 @@ class AccountsFeatureTest : FeatureTest() {
     fun `a second account cannot take the first one's name`() {
         // **A login is a folder name**, so two accounts cannot share one — and adopting an existing
         // folder would hand this account somebody else's projects. Said before anything is written.
+        // This class starts with no account, so the first one has to be made before a second can clash.
+        scene.signedIn()
         scene.viewModel.addHostAccount("test-account", "gitlab.com", "", "a-key")
 
         val said = scene.viewModel.message.orEmpty()

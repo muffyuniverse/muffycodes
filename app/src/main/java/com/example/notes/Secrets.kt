@@ -227,11 +227,13 @@ object Secrets {
         }
         // **No scheme, no path, no port, no credentials** — all of which [hostOf] would strip, and a
         // field that silently accepts `gitlab.com:8443` while storing `gitlab.com` is a field that
-        // changes what was typed.
-        if (host != hostOf("https://$host/")) {
+        // changes what was typed. **Case is not one of those things**: a hostname is
+        // case-insensitive, so `GitLab.com` is the same host and is folded rather than refused.
+        val folded = host.lowercase()
+        if (folded != hostOf("https://$folded/")) {
             return "A host is a name only, like ${GITHUB_HOST} — no port, and no user"
         }
-        if (!HOSTNAME.matches(host)) return "`$host` is not a hostname"
+        if (!HOSTNAME.matches(folded)) return "`$host` is not a hostname"
         return null
     }
 
