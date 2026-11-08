@@ -103,7 +103,7 @@ travel together and are atomic; the model id and the effort inherit independentl
 | field | inherits on its own? | why |
 |---|---|---|
 | **address + key** | **no** — a scope has its own pair or inherits the whole pair | a key is bound to one host. A project with its own address and an inherited key would send that key to a host it was never stored for — the one hole this vault exists to close |
-| **model id, effort, window, reply** | **yes**, field by field | a model id is portable (it is the person's business whether that server serves it), so changing only the model must not mean re-typing the key — which would put a second copy of a secret on the phone |
+| **model id, effort, window, reply** | **yes**, field by field — **but only as far as the address is inherited** | changing only the model must not mean re-typing the key, which would put a second copy of a secret on the phone. The limit is measured, not cautious: a model id is a *name the server assigns*, and the names disagree — `deepseek/deepseek-v4.1-flash` (OpenRouter), `deepseek-chat` (DeepSeek's own), `gpt-…` (OpenAI), whatever `--served-model-name` said (vLLM), `gemini-…` (Gemini's compat layer). So a scope that **sets its own address must set its own model**; the choice is inheritable exactly when the pair it belongs to is |
 
 So a window opens showing what the scope *would* use, the person changes any field, and **leaving a field
 alone writes nothing for it** — that is what "save as inherited" means, and it is why the window has no
@@ -165,6 +165,25 @@ that matters and one word off in the strict one:
 
 So a chat connection is **four** fields, and they group two-and-two for inheritance (§2.2): the
 **credential pair** (address + key, atomic) and the **choice** (model + effort, field by field).
+
+**The subset this app promises, and nothing wider.** "OpenAI-compatible" is a claim of varying truth: what
+transfers is a *shape* (`POST {base}/chat/completions`), and above it every implementation negotiates
+separately. The measured divergences that matter here, and what each one cost:
+
+| divergence | who | the app's answer |
+|---|---|---|
+| `max_tokens` → `max_completion_tokens` | OpenAI's newer models reject the old name | the only use of `max_tokens` is the keepalive ping's 1 token; a ping that is refused is a ping skipped, never a failure |
+| `reasoning_effort` (body field) vs `reasoning: {effort, exclude}` (OpenRouter's object) | the OpenAI name is a *shim* OpenRouter accepts; the reverse is not true | send `reasoning_effort` only — the vendor object was deleted in C2 |
+| `developer` role vs `system`; reasoning models refusing `temperature` | OpenAI, model-dependent | the app sends `system` and no `temperature`/`top_p`/`logprobs` at all, so both cases cannot arise |
+| `reasoning_content` echoed back on the next turn | DeepSeek's thinking mode, **400 without it** | already echoed (`Door.kt:690`); it is a vendor requirement the app meets rather than a protocol field |
+| `provider`, `models`, `transforms`, `route`, `plugins`; `usage.cost`; `error.metadata.raw` | OpenRouter's own | **all deleted or ignored** (C2, C5). The error unwrap keeps a `message` fallback, so a server without `metadata.raw` still says its own sentence |
+| `/models` with `context_length`, `top_provider`, `supported_efforts`, `pricing` | OpenRouter's catalogue | already optional per connection: no catalogue means the typed model, the protocol's four efforts, and the ceiling ladder's floor |
+
+So the contract is: `model`, `messages` (with `tool_calls` and `tool_call_id`), `tools`, `tool_choice`,
+`stream`, `stream_options.include_usage`, `reasoning_effort`; answered by `choices[].message.{content,
+tool_calls}`, `choices[].finish_reason`, `usage.{prompt_tokens, completion_tokens,
+completion_tokens_details.reasoning_tokens}`. Everything the app reads beyond that is optional and absent
+without complaint — which is why the research finding changes no code, only the promise.
 
 **One consequence, stated because it would be a silence:** the *ladder* of efforts a model offers is
 `reasoning.supported_efforts` in OpenRouter's catalogue — a catalogue field, not a protocol one. On a
@@ -303,6 +322,7 @@ and a column nobody reads is not a compatibility problem).
 | **C0** | One row per `(scope, name)`: `secretRows()`, rows carry their own host and scope, general secrets listed, Remove acts on the row's scope. Fixes the three defects in §1.1. | **this run** |
 | **C1** | `VaultScope` gains `Branch`; the store, the picker and `ProjectGit` learn it. `GitCredentials` asks by branch. | not started |
 | **C2** | Generic model layer: base URL from the connection, drop `provider.only`/`allow_fallbacks`/`reasoning.exclude`, add `stream_options.include_usage`, catalogue optional. `model_conf.json` gains `baseUrl`. | not started |
+| **C3a** | **Check this connection**: one small request from the connection window, reporting the server's own words — reachable, key accepted, model served, and any parameter it refused. "Compatible" is a claim; this is the measurement. It is the existing ping made useful rather than a new mechanism. | not started |
 | **C3** | Vault B: `conn_<scope>_<kind>` (kind `git` \| `llm`, scope branch/project/account/general), the account entry seeded from today's `token_`/`model_key_`; the ⋮ windows on account/project/branch rows; `ProjectGit` and the runner read it narrowest-first. Per §2.2 the address+key are atomic and model/effort inherit field by field. | not started |
 | **C4** | The two checkmarks, off by default; `auth:` resolves a Vault B entry only when ticked and only for its host; the agent's tool description lists what it may name. | not started |
 | **C5** | Cost removal (§4). | not started |
