@@ -43,6 +43,63 @@ sealed interface SecretScope {
 }
 
 /**
+ * **The scope a stored key belongs to, read from the key itself.**
+ *
+ * Every scoped row this app keeps has its scope *in* its key, so the scope does not need a second
+ * record - and, more important, four hand-written prefix filters over the same key space is how a
+ * deletion came to take a sibling's row. One parse, used by the listing and by both sweeps, means the
+ * question "which rows does this project own" has one answer.
+ *
+ * The formats, all with percent-encoded parts and `/` as the separator, so a part called `a/b` cannot
+ * be read as two parts:
+ *
+ * ```
+ * secret_general_<name>                        SecretScope.General
+ * secret_<login>_<name>                        SecretScope.Account
+ * secret_<login>_project_<p>/<name>            SecretScope.Project(p)
+ * secret_<login>_branch_<p>/<b>/<name>         SecretScope.Branch(p, b)
+ * conn_general_<kind>                          SecretScope.General
+ * conn_<login>_project_<p>/<kind>[_choice]     SecretScope.Project(p)
+ * conn_<login>_branch_<p>/<b>/<kind>[_choice]  SecretScope.Branch(p, b)
+ * ```
+ *
+ * Null for anything else — the active login, the logins list, a token, a model key — which is what
+ * makes it safe to run over the whole store.
+ */
+fun keyScope(key: String, login: String?): SecretScope? {
+    fun decode(encoded: String): String? = try {
+        java.net.URLDecoder.decode(encoded, "UTF-8")
+    } catch (e: Exception) {
+        null
+    }
+    /** The first [count] encoded parts of [rest], or null when there are not that many. */
+    fun parts(rest: String, count: Int): List<String>? {
+        val all = rest.split('/')
+        if (all.size < count + 1) return null
+        return all.take(count).map { decode(it) ?: return null }
+    }
+
+    if (key.startsWith("secret_general_")) return SecretScope.General
+    if (key.startsWith("conn_general_")) return SecretScope.General
+    if (login == null) return null
+    return when {
+        key.startsWith("secret_${login}_project_") ->
+            parts(key.removePrefix("secret_${login}_project_"), 1)?.let { SecretScope.Project(it[0]) }
+        key.startsWith("secret_${login}_branch_") ->
+            parts(key.removePrefix("secret_${login}_branch_"), 2)?.let { SecretScope.Branch(it[0], it[1]) }
+        key.startsWith("conn_${login}_project_") ->
+            parts(key.removePrefix("conn_${login}_project_"), 1)?.let { SecretScope.Project(it[0]) }
+        key.startsWith("conn_${login}_branch_") ->
+            parts(key.removePrefix("conn_${login}_branch_"), 2)?.let { SecretScope.Branch(it[0], it[1]) }
+        // **The account's own rows last**, because a project or branch key also starts with
+        // `secret_<login>_`, and the branches above have already taken those. The underscore after
+        // the login is what keeps `dev` and `dev2` apart.
+        key.startsWith("secret_${login}_") -> SecretScope.Account
+        else -> null
+    }
+}
+
+/**
  * **One row of the vault, addressed by what it is rather than by what it is called.**
  *
  * A name is not unique across scopes — one project can hold `stripe` while the account holds another
@@ -603,21 +660,14 @@ class CredentialStore(context: Context) : Credentials {
     override fun forgetBranchSecrets(project: String, branch: String): Int {
         val login = activeLogin ?: return 0
         val scope = SecretScope.Branch(project, branch)
-        // **One branch's rows, matched by the encoded branch — not by the project.**
+        // **One branch's rows, decided by parsing each key rather than by trusting a prefix.**
         //
         // This used to add every key under `secret_<login>_branch_` whose project part was this one,
         // which is *every branch of the project*: dropping `feature` deleted the tokens kept for
-        // `main`, and the message said "the secrets kept for it". The same lesson as `SecretRow`,
-        // one level down — a row is `(scope, name)`, and here the scope has two parts.
-        //
-        // A prefix match is safe for exactly one branch because every part is percent-encoded and the
-        // prefix ends in a slash: `feature` and `feature/x` encode to `feature` and `feature%2Fx`, so
-        // neither is a prefix of the other's key.
-        val prefixes = listOfNotNull(
-            branchSecretPrefix(login, project, branch),
-            connPrefix(login, scope),
-        )
-        val doomed = prefs.all.keys.filter { key -> prefixes.any { key.startsWith(it) } }
+        // `main`, and the message said "the secrets kept for it". It is the `SecretRow` lesson one
+        // level down — a row is `(scope, name)`, and here the scope has two parts — so the answer is
+        // the same: parse the key, and compare the scope it *is*.
+        val doomed = prefs.all.keys.filter { keyScope(it, login) == scope }
         if (doomed.isEmpty()) return 0
         val edit = prefs.edit()
         for (key in doomed) edit.remove(key)
@@ -760,25 +810,17 @@ class CredentialStore(context: Context) : Credentials {
 
     override fun forgetProjectSecrets(project: String): Int {
         val login = activeLogin ?: return 0
-        // **The branch rows too, and the comment used to claim this while the code did not do it.**
-        // A branch key is `secret_<login>_branch_<p>/<b>/<name>`, whose prefix is not the project's
-        // (`secret_<login>_project_<p>/`), so deleting a project left a credential behind for a
-        // project that no longer exists. The project part is decoded and compared exactly, because
-        // `acme` is a prefix of `acme2` and a `startsWith` on the encoded text would take both.
-        val prefix = projectSecretPrefix(login, project)
-        val branchPrefix = "secret_${login}_branch_"
-        val connBranchPrefix = "conn_${login}_branch_"
+        // **Its branches too, and this comment used to claim that while the code did not do it.**
+        // A branch key is `secret_<login>_branch_<p>/<b>/<name>`, whose prefix is not the project's,
+        // so deleting a project left a credential behind for a project that no longer exists. Both
+        // kinds are decided by the same parse, which is why the parse is a function of its own: a
+        // project called `acme` and one called `acme2` are one `startsWith` away from each other.
         val doomed = prefs.all.keys.filter { key ->
-            key.startsWith(prefix) ||
-                key.startsWith(connPrefix(login, SecretScope.Project(project))!!) ||
-                (
-                    key.startsWith(branchPrefix) &&
-                        decode(key.removePrefix(branchPrefix).substringBefore('/')) == project
-                    ) ||
-                (
-                    key.startsWith(connBranchPrefix) &&
-                        decode(key.removePrefix(connBranchPrefix).substringBefore('/')) == project
-                    )
+            when (val at = keyScope(key, login)) {
+                is SecretScope.Project -> at.name == project
+                is SecretScope.Branch -> at.project == project
+                else -> false
+            }
         }
         if (doomed.isEmpty()) return 0
         val edit = prefs.edit()
