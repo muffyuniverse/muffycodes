@@ -211,7 +211,7 @@ class Worktrees(private val workspace: Workspace) {
         if (!source.renameTo(target)) return false
         // Every branch folder that moved has two files naming its other half, and both must follow.
         (target.listFiles() ?: emptyArray()).forEach { moved ->
-            if (!moved.isDirectory || workspace.isLink(moved)) return@forEach
+            if (!moved.isDirectory || Workspace.isLink(moved)) return@forEach
             val branch = moved.name
             val oldId = idOf(from, branch)
             val newId = idOf(to, branch)
