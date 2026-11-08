@@ -852,6 +852,13 @@ private fun Dialogs(
                         viewModel.pullRepository(repo)
                     }
                 },
+                onAddUrl = { url, name ->
+                    // **The address is never traced**: it may name a private repository, and a trace
+                    // is a file a person shares. The name is the identity, and the name is enough.
+                    tap("add from address", name)
+                    dismiss()
+                    viewModel.addProjectFromUrl(url, name)
+                },
             )
         }
 
@@ -1145,19 +1152,18 @@ private fun PublishProjectUI(viewModel: AppViewModel, project: String, dismiss: 
     )
 }
 
-/** Creates a project: the licence list first, then the name. */
+/** Creates a project: a name, and nothing else. */
 @Composable
 private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
-    var licences by remember { mutableStateOf<List<Licence>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        viewModel.listLicences { licences = it }
-    }
     NewProjectDialog(
-        licences = licences,
         onDismiss = dismiss,
-        onCreate = { name, licence ->
+        onCreate = { name ->
             tap("new project", name)
-            viewModel.createProject(name, licence)
+            // **A project on this phone**, which is what a project is: a folder with its own history.
+            // Making one used to require a GitHub account, because making one meant making a
+            // repository — and that is the coupling this plan removes. An address can be added
+            // whenever the person wants it to live somewhere else as well.
+            viewModel.createLocalProject(name)
         },
     )
 }

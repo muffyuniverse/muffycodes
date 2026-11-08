@@ -109,6 +109,7 @@ object AgentWiring {
             vaultToken = { project, host -> credentials.secret(project, GitCredentials.SECRET, host) },
             // The same fact for the agent's push: the account says which host its key is for.
             accountHost = { accounts.account(login)?.host ?: GITHUB_HOST },
+            gitUser = { accounts.account(login)?.gitUser.orEmpty() },
         )
         // **The indexer, wired before anything can commit.** Both the runner and the screen build a
         // `ProjectGit`, and either of them can be the first to save something, so both wire this —

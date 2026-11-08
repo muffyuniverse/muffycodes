@@ -1017,7 +1017,7 @@ class ScenariosTest {
         scenario(
             compose, "19-a-window-adding-a-project",
             "A window adding a project, before anything is signed in.",
-            "the empty state of the list of repositories on GitHub.",
+            "an address field for any host, and an empty list of repositories on GitHub.",
             screen = {
                 window {
                     AddProjectDialog(
@@ -1028,6 +1028,7 @@ class ScenariosTest {
                         onDismiss = {},
                         onNewProject = {},
                         onPick = {},
+                        onAddUrl = { _, _ -> },
                     )
                 }
             },
@@ -1036,8 +1037,9 @@ class ScenariosTest {
             then("Nothing is picked: there is nothing to pick.") {}
             after()
             result(
-                "An empty list says it is empty rather than looking like a list that failed to " +
-                    "load, and making a project on this phone is offered beside it.",
+                "An address is checked with ls-remote before anything is cloned, so it works on " +
+                    "any host that speaks git; the empty list says it is empty rather than looking " +
+                    "like it failed to load, and making a project on this phone is offered beside it.",
             )
         }
     }
@@ -1047,10 +1049,10 @@ class ScenariosTest {
         scenario(
             compose, "20-a-window-making-a-project",
             "A window making a new project.",
-            "a name, a licence, and nothing else to decide.",
+            "a name, and nothing else to decide.",
             screen = {
                 window {
-                    NewProjectDialog(licences = emptyList(), onDismiss = {}, onCreate = { _, _ -> })
+                    NewProjectDialog(onDismiss = {}, onCreate = {})
                 }
             },
         ) {
@@ -1058,8 +1060,9 @@ class ScenariosTest {
             then("Nothing is created.") {}
             after()
             result(
-                "The name and the licence are the whole question, and the licence's own sentence " +
-                    "is under it rather than hidden behind a link.",
+                "The name is the whole question, because a project on this phone is a folder with " +
+                    "its own history - the licence belongs where the repository is made, on the " +
+                    "host's own page, where visibility and description are asked in the same breath.",
             )
         }
     }

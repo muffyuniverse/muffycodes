@@ -77,6 +77,15 @@ class ProjectGit(
      * default because a `ProjectGit` with no account behind it is a test.
      */
     private val accountHost: () -> String = { GITHUB_HOST },
+
+    /**
+     * **The username this host wants with the key**, or blank for "the token is the username".
+     *
+     * The third piece of the account that a remote needs (`Account.gitUser`). It is a provider for the
+     * same reason the others are, and it is separate from [accountHost] because the two answer different
+     * questions: the host decides *whether* the key may go, the username decides *how it is presented*.
+     */
+    private val gitUser: () -> String = { "" },
 ) {
 
     /**
@@ -89,7 +98,7 @@ class ProjectGit(
     fun onBranch(branch: String): ProjectGit =
         if (branch == this.branch) this
         else ProjectGit(
-            workspace, tokenProvider, authorProvider, index, branch, vaultToken, accountHost,
+            workspace, tokenProvider, authorProvider, index, branch, vaultToken, accountHost, gitUser,
         )
 
     /**
@@ -399,7 +408,7 @@ class ProjectGit(
                     // replaced it with classic gitignore — "a simple tracked/untracked switch" — so
                     // what is on this phone's `main` and what is on GitHub's are now the same
                     // history, and the push is a fast-forward like any other.
-                    GitService.push(it, token)
+                    GitService.push(it, token, gitUser = gitUser())
                 }
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
@@ -445,7 +454,7 @@ class ProjectGit(
                             false,
                         )
                     }
-                    GitService.push(it, token)
+                    GitService.push(it, token, gitUser = gitUser())
                 } catch (e: Throwable) {
                     GitService.RemoteResult(Secrets.describe(e), false)
                 }
@@ -485,7 +494,7 @@ class ProjectGit(
                         is GitCredentials.Answer.Use -> answer.token
                         GitCredentials.Answer.None -> null
                     }
-                    GitService.fetch(it, token)
+                    GitService.fetch(it, token, gitUser())
                     val branch = it.branch ?: "main"
                     val upstream = it.resolve("refs/remotes/origin/$branch")
                         ?: return@use Pulled(true, said = "Nothing to pull: the remote has no $branch yet")
@@ -614,6 +623,24 @@ class ProjectGit(
      * folder that already holds anything — and they go in `.git/info/exclude`, so they are not a
      * change to the person's repository and a project that has just arrived has nothing to send.
      */
+    /**
+     * **Can this address be cloned, with this account's key** — asked before anything is made.
+     *
+     * The same three questions a clone answers, in the order that costs least: can this app even speak
+     * to it (`Secrets.transportProblem`), may this key go to that host (`[credentialFor]`), and does the
+     * host accept it (`GitService.lsRemote`). A person who mistyped a path, or pasted a key that was
+     * revoked, gets a sentence instead of a half-made project and a folder to delete.
+     */
+    fun checkRemote(project: String, remoteUrl: String): GitService.RemoteAnswer {
+        Secrets.transportProblem(remoteUrl)?.let { return GitService.RemoteAnswer.Refused(it) }
+        val token = when (val answer = credentialFor(project, remoteUrl)) {
+            is GitCredentials.Answer.Say -> return GitService.RemoteAnswer.Refused(answer.why)
+            is GitCredentials.Answer.Use -> answer.token
+            GitCredentials.Answer.None -> null
+        }
+        return GitService.lsRemote(remoteUrl, token, gitUser())
+    }
+
     fun cloneInto(
         project: String,
         remoteUrl: String,
@@ -638,6 +665,7 @@ class ProjectGit(
             authorProvider(),
             token,
             deadline,
+            gitUser(),
         )
         if (result.success) {
             open(project)?.use { repo ->

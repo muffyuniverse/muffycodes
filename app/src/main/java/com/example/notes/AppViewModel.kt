@@ -600,6 +600,7 @@ class AppViewModel @JvmOverloads constructor(
         // it, "the account's own host" would be GitHub for every account, which is the assumption
         // making the app GitHub-shaped in the first place.
         accountHost = { activeLogin?.let { accounts.account(it)?.host } ?: GITHUB_HOST },
+        gitUser = { activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty() },
     )
 
     /**
@@ -3894,12 +3895,12 @@ class AppViewModel @JvmOverloads constructor(
             // here meant every project made on GitHub arrived as an empty folder, an error in the
             // snackbar and no repository, which is to say no history at all. The clone makes the
             // folder; `cloneInto` writes the app's two ignore lines into it afterwards.
-            val git = ProjectGit(
-                ws,
-                { credentials.token(login) },
-                { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                index = indexer(ws),
-            )
+            // **The one wiring, not a fifth copy of it.** Every ad-hoc `ProjectGit(...)` here used to
+            // spell the key, the identity and the index again — and each of them therefore had to
+            // remember the account's host and git username separately. `projectGit` is where that
+            // knowledge lives now, so a project cloned on another host gets its key the same way the
+            // editor's commit does.
+            val git = projectGit(ws)
             val clone = git.cloneInto(clean, url)
             // **The folder tree, after the clone and not before.** `cloneInto` refuses a folder that
             // already holds anything, so a folder made first would have stopped the repository
@@ -4236,12 +4237,7 @@ class AppViewModel @JvmOverloads constructor(
         onWorker {
             // As in `createProject`: the clone makes the folder. Making it first is what
             // stopped every pull-in, because git will not clone into a non-empty folder.
-            val result = ProjectGit(
-                ws,
-                { credentials.token(login) },
-                { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                index = indexer(ws),
-            ).cloneInto(repo.name, repo.cloneUrl)
+            val result = projectGit(ws).cloneInto(repo.name, repo.cloneUrl)
             // **Nothing is written into an imported project.** It arrives with whatever the person
             // put in it, and it already works — adding a file to it would put a file in their next
             // push that they never wrote. The tree is made only because the app needs somewhere to
@@ -4255,6 +4251,76 @@ class AppViewModel @JvmOverloads constructor(
                 // Same rule as creating one: pulling a project in adds a row, it
                 // does not take over the screen.
                 refresh()
+            }
+        }
+    }
+
+    /**
+     * **Adds a project from an address the person supplies** — the universal half of the add window.
+     *
+     * The address is checked with `ls-remote` *before* a folder is made, so a mistyped path, a key the
+     * host refuses, or an SSH address this app cannot speak are sentences rather than a half-made
+     * project nobody can clone into. Then the clone itself, which is the same call the GitHub picker
+     * uses — there is only one way a repository arrives on this phone.
+     *
+     * **The name is asked for, not assumed.** The last segment of the address is a prefill, because the
+     * remote may be `my/repo` and a slash cannot be a folder name — and a person who wants their local
+     * project called something other than their repository is doing something ordinary.
+     */
+    fun addProjectFromUrl(
+        url: String,
+        name: String,
+        onDone: (Boolean) -> Unit = {},
+    ) {
+        val ws = workspace ?: return
+        val address = url.trim()
+        if (address.isEmpty()) {
+            message = "An address is needed: this is where the repository lives"
+            onDone(false)
+            return
+        }
+        Secrets.transportProblem(address)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        val clean = name.trim().ifBlank { Workspace.repoNameOf(address) }
+        Workspace.nameProblem(clean)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        val existing = ws.projectNames().firstOrNull { it.equals(clean, ignoreCase = true) }
+        if (existing != null) {
+            // **No replace**, the same rule the picker follows: deleting a project and adding it again
+            // is one act the person already knows, and a second way to destroy a project would be a
+            // second set of rules about what survives.
+            message = "\"$existing\" is already a project on this phone. Delete it first if you " +
+                "want a fresh copy."
+            onDone(false)
+            return
+        }
+        busy = true
+        onWorker {
+            val git = projectGit(ws)
+            // **The check, and it is the feature.** `ls-remote` is the protocol's own answer to "is
+            // this address real, and may this key read it", and it is the only one there is.
+            val checked = git.checkRemote(clean, address)
+            if (checked is GitService.RemoteAnswer.Refused) {
+                main.post {
+                    busy = false
+                    message = checked.why
+                    onDone(false)
+                }
+                return@onWorker
+            }
+            val result = git.cloneInto(clean, address)
+            if (result.success) ProjectTree.create(ws.projectDir(clean))
+            main.post {
+                busy = false
+                message = result.message
+                refresh()
+                onDone(result.success)
             }
         }
     }

@@ -1735,6 +1735,20 @@ class Workspace(val accountDir: File) {
          * it, and a colon cannot be checked out on Windows" is a sentence they can act on, and
          * `my_notes_draft.txt` is a file they did not ask for.
          */
+        /**
+         * **What a remote's last path segment says the project should be called**, or empty.
+         *
+         * A prefill, never an answer: the address may be `my/repo` and a slash cannot be a folder, and a
+         * person who keeps a project's local name different from its repository's is doing something
+         * ordinary. `nameProblem` decides, and this only saves typing.
+         *
+         * **The last non-empty segment, with `.git` off** — which is the one rule that holds for every
+         * host's clone address without a table of conventions: `https://host/team/repo.git`,
+         * `https://host/repo`, and a self-hosted `https://server/git/repo.git` all answer `repo`.
+         */
+        fun repoNameOf(url: String): String =
+            url.trim().trimEnd('/').substringAfterLast('/').substringBefore('?').removeSuffix(".git")
+
         fun nameProblem(name: String): String? = when {
             name.isBlank() -> "A name is needed"
             name == "." || name == ".." -> "That name cannot be used"

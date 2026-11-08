@@ -156,7 +156,11 @@ VOCABULARY = {
     # suggest a page was opened.
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
-    "new project", "confirm add project",
+    # **`add from address` is the universal half of the add window.** `add project` opens the window;
+    # this is its confirm for the address field, and `confirm add project` is the confirm for a row of
+    # GitHub's list. Two confirms because they are two different acts with two different sentences when
+    # they fail — one is a clone from an address, the other is a repository picked from an account.
+    "new project", "confirm add project", "add from address",
     # **What a project is.** Its own name rather than "new project", because the two are different
     # questions: one makes a project and the other changes what an existing one is, and a log that
     # called both "project" could not answer "when did this project stop being an Android app".

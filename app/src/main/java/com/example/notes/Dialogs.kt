@@ -386,8 +386,16 @@ private fun RadioLine(
 }
 
 /**
- * The add window (§6): "New project…" always first, then the account's
- * repositories, newest-changed first, with the ones already here marked.
+ * **Adding a project: an address, or a name.**
+ *
+ * The operator's rule, and it is what makes the window universal: *"we can ask user to add remote urls
+ * on his own via + button, and we just check with git ls-remote command that is part of the protocol."*
+ *
+ * So the address comes first, and it is the only way in on a host this app has no API for. The list
+ * below it is GitHub's — a repository list is a vendor feature and there is no git command for it —
+ * and it is an alternative for the one host that has one.
+ *
+ * **The name is a prefill, not an answer**: the address may be `team/repo` and a slash cannot be a folder.
  */
 @Composable
 fun AddProjectDialog(
@@ -398,19 +406,20 @@ fun AddProjectDialog(
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
     onPick: (Repo) -> Unit,
+    onAddUrl: (url: String, name: String) -> Unit,
 ) {
+    var address by remember { mutableStateOf("") }
+    // **Follows the address until the person types a name of their own.** A prefill that overrides
+    // what somebody typed is the app arguing with them; one that stops following the moment they edit
+    // it is the app helping.
+    var name by remember { mutableStateOf("") }
+    var nameEdited by remember { mutableStateOf(false) }
+    val suggested = Workspace.repoNameOf(address)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add a project") },
         text = {
-            Column(modifier = Modifier.heightIn(max = 420.dp)) {
-                // **One kind of project, and the name says so.** The operator: "remove new local
-                // project option and rename new project on GitHub into new project — all our
-                // projects will be on GitHub (except system...)". A project that stays on this
-                // phone is a project with no remote, which is a *state* a project can be in, not a
-                // second kind of thing to make — and offering both at the moment of creation asked
-                // the person to decide, before they had written anything, whether their work would
-                // ever be shared.
+            Column(modifier = Modifier.heightIn(max = 480.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -420,6 +429,46 @@ fun AddProjectDialog(
                     Text("＋ New project…", style = MaterialTheme.typography.bodyLarge)
                 }
                 HorizontalDivider()
+                Text(
+                    "Or from an address",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = {
+                        address = it
+                        if (!nameEdited) name = Workspace.repoNameOf(it)
+                    },
+                    label = { Text("Repository address") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "https://host/owner/repository.git — checked before anything is cloned.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        nameEdited = it != suggested
+                    },
+                    label = { Text("Name on this phone") },
+                    singleLine = true,
+                )
+                TextButton(
+                    enabled = address.isNotBlank() && name.isNotBlank(),
+                    onClick = { onAddUrl(address, name) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add it") }
+                HorizontalDivider()
+                Text(
+                    "Or from this account's repositories",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
                 when {
                     loading -> Text(
                         "Asking GitHub…",
@@ -580,16 +629,20 @@ fun KeepLocalDialog(
     )
 }
 
-/** The create dialog: a name and a licence (§4.1). */
+/**
+ * **A name, and nothing else** — the project is made on this phone, with no repository behind it.
+ *
+ * The licence used to be asked here, because making a project meant making a repository on GitHub and
+ * seeding it. A local project has nowhere to seed it, and a project that gains a remote later gets one
+ * on the host's own page — where the licence question also has consequences a checkbox in this app
+ * cannot: visibility, the repository's description, who can find it.
+ */
 @Composable
 fun NewProjectDialog(
-    licences: List<Licence>,
     onDismiss: () -> Unit,
-    onCreate: (name: String, licence: String) -> Unit,
+    onCreate: (name: String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
-    var licence by remember { mutableStateOf("gpl-3.0") }
-    var showLicences by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New project") },
@@ -601,40 +654,19 @@ fun NewProjectDialog(
                     label = { Text("Name") },
                     singleLine = true,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showLicences = !showLicences },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Licence: ${licence.ifBlank { "none" }}")
-                }
-                if (showLicences && licences.isNotEmpty()) {
-                    Column(modifier = Modifier.heightIn(max = 200.dp)) {
-                        LazyColumn {
-                            items(licences) { item ->
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            licence = item.key
-                                            showLicences = false
-                                        }
-                                        .padding(vertical = 8.dp),
-                                )
-                            }
-                        }
-                    }
-                }
+                Text(
+                    "It starts here, with its own history. An address can be added whenever you " +
+                        "want it to live somewhere else as well.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = {
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    onCreate(name.trim(), licence)
+                    onCreate(name.trim())
                     onDismiss()
                 },
             ) { Text("Create") }

@@ -220,6 +220,16 @@ object GitService {
      */
     const val DIFF_FILES = 40
 
+    /**
+     * How long `ls-remote` may take, in seconds.
+     *
+     * **A number rather than no limit**, because this runs while a person waits on a window with a
+     * button in it: an address that never answers must become a sentence, not a spinner. Ten seconds
+     * is longer than any server that is going to answer takes to say hello, and short enough that a
+     * person who mistyped a host is told so while they still remember typing it.
+     */
+    const val LS_REMOTE_TIMEOUT = 10
+
     /** A commit in the history. */
     data class CommitInfo(
         val id: String,
@@ -273,6 +283,22 @@ object GitService {
         val message: String,
         val success: Boolean,
     )
+
+    /**
+     * **What a remote answers about itself, without cloning it.**
+     *
+     * This is the one question the git protocol can be asked about an address: `ls-remote` returns the
+     * refs a server is willing to hand out, which answers "can this key read this repository" on every
+     * host that speaks git — GitHub, GitLab, Gitea, a bare folder, a server in somebody's basement.
+     * There is no other verb for it, and no host-specific endpoint worth special-casing.
+     */
+    sealed interface RemoteAnswer {
+        /** The branch names it reported, which is proof the address and the key both work. */
+        data class Branches(val names: List<String>) : RemoteAnswer
+
+        /** **It could not be read, and this is why** — in words a person can act on. */
+        data class Refused(val why: String) : RemoteAnswer
+    }
 
     // ---- repository lifecycle ---------------------------------------------
 
@@ -399,6 +425,7 @@ object GitService {
         author: GitAuthor,
         token: String? = null,
         deadline: Deadline? = null,
+        gitUser: String? = null,
     ): RemoteResult {
         // **The transport, before the credential.** This app packages no SSH, so a `git@host:path`
         // address fails deep inside JGit with a null-shaped error naming nothing — and it *looks*
@@ -426,7 +453,7 @@ object GitService {
             deadline?.let { command.setProgressMonitor(it.monitor()) }
             // **Guarded above, in words, before anything is opened** — `credentials` no longer decides
             // whether this token belongs here, so this call must not be the first place it is asked.
-            credentials(remoteUrl, token)?.let { command.setCredentialsProvider(it) }
+            credentials(remoteUrl, token, gitUser)?.let { command.setCredentialsProvider(it) }
             val git = command.call()
             git.use {
                 // The clone inherits the remote's author; make the local identity ours.
@@ -571,10 +598,66 @@ object GitService {
      * It only learns what GitHub has. A pull needs exactly that — deciding what to do with the
      * answer is the merge's job, not the fetch's.
      */
-    fun fetch(repo: Repository, token: String?) {
+    /**
+     * **Asks a remote what branches it has, without cloning it.**
+     *
+     * The check that makes adding a project by address honest: the address is real, and the key is one
+     * the host accepts — established *before* a folder is made, so a mistyped path or a revoked key is a
+     * sentence rather than a half-made project.
+     *
+     * **The failures are told apart, because they are fixed in different places.** "Unauthorised" means
+     * the key (or the account's git username) is wrong; "not found" means the address is; anything else
+     * is the network's own words. One sentence for all three would send a person to the wrong fix.
+     */
+    fun lsRemote(remoteUrl: String, token: String?, gitUser: String? = null): RemoteAnswer {
+        Secrets.transportProblem(remoteUrl)?.let { return RemoteAnswer.Refused(it) }
+        return try {
+            val command = Git.lsRemoteRepository()
+                .setRemote(remoteUrl)
+                .setHeads(true)
+                .setTags(false)
+                .setTimeout(LS_REMOTE_TIMEOUT)
+            credentials(remoteUrl, token, gitUser)?.let { command.setCredentialsProvider(it) }
+            val refs = command.call()
+            val names = refs
+                .mapNotNull { it.name }
+                .filter { it.startsWith("refs/heads/") }
+                .map { it.removePrefix("refs/heads/") }
+                .sorted()
+            RemoteAnswer.Branches(names)
+        } catch (e: Throwable) {
+            RemoteAnswer.Refused(remoteSaid(Secrets.describe(e), Secrets.hostOf(remoteUrl)))
+        }
+    }
+
+    /**
+     * JGit's own words, turned into the three things that are actually wrong.
+     *
+     * **`Secrets.describe` first**, so no token can reach the sentence: JGit repeats the URI it was
+     * given, and a URI may carry one.
+     */
+    private fun remoteSaid(said: String, host: String): String {
+        val lower = said.lowercase()
+        val where = host.ifBlank { "the server" }
+        return when {
+            // The key, or how it was presented. Both are fixed in the account, not on the project.
+            lower.contains("not authorized") || lower.contains("401") ||
+                lower.contains("authentication") || lower.contains("403") ||
+                lower.contains("forbidden") ->
+                "$where refused the key. Check that the key is for $where, and that its " +
+                    "scopes allow reading this repository."
+            // The address. Nothing about a key can fix a path that does not exist.
+            lower.contains("404") || lower.contains("not found") ||
+                lower.contains("repository not found") ->
+                "There is no repository at that address on $where."
+            else -> "$where could not be reached: $said"
+        }
+    }
+
+    fun fetch(repo: Repository, token: String?, gitUser: String? = null) {
         Git(repo).use { git ->
             val fetch = git.fetch().setRemote("origin")
-            credentials(remoteOf(repo), token)?.let { fetch.setCredentialsProvider(it) }
+            credentials(remoteOf(repo), token, gitUser)?.let { fetch.setCredentialsProvider(it) }
             fetch.call()
         }
     }
@@ -1860,7 +1943,12 @@ object GitService {
     }
 
     /** Pushes the current branch to the remote. */
-    fun push(repo: Repository, token: String?, force: Boolean = false): RemoteResult {
+    fun push(
+        repo: Repository,
+        token: String?,
+        force: Boolean = false,
+        gitUser: String? = null,
+    ): RemoteResult {
         // **The filter is switched off around the push, and this is not an optimisation.**
         //
         // JGit's LFS pre-push hook runs on every push once the filter is enabled, and it asks for an
@@ -1880,7 +1968,7 @@ object GitService {
             repo.config.save()
         }
         try {
-            return pushNow(repo, token, force)
+            return pushNow(repo, token, force, gitUser)
         } finally {
             if (wasEnabled) {
                 repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
@@ -1889,7 +1977,12 @@ object GitService {
         }
     }
 
-    private fun pushNow(repo: Repository, token: String?, force: Boolean): RemoteResult {
+    private fun pushNow(
+        repo: Repository,
+        token: String?,
+        force: Boolean,
+        gitUser: String?,
+    ): RemoteResult {
         return try {
             val local = currentBranch(repo)
                 // **Refused, because the alternative is pushing onto the wrong branch.** A repository
@@ -1912,7 +2005,7 @@ object GitService {
                     .setRefSpecs(RefSpec("refs/heads/$local:refs/heads/$onto"))
                 // **The URL, so a project cloned from elsewhere cannot have the key sent to it.**
                 // This was the call site that had no guard at all.
-                credentials(remoteOf(repo), token)?.let { command.setCredentialsProvider(it) }
+                credentials(remoteOf(repo), token, gitUser)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()
                 val updates = results.flatMap { it.remoteUpdates }
                 val messages = updates
@@ -1961,11 +2054,11 @@ object GitService {
     }
 
     /** Pulls from the remote into the current branch. */
-    fun pull(repo: Repository, token: String?): RemoteResult {
+    fun pull(repo: Repository, token: String?, gitUser: String? = null): RemoteResult {
         return try {
             Git(repo).use { git ->
                 val command = git.pull()
-                credentials(remoteOf(repo), token)?.let { command.setCredentialsProvider(it) }
+                credentials(remoteOf(repo), token, gitUser)?.let { command.setCredentialsProvider(it) }
                 val result = command.call()
                 val ok = result.isSuccessful
                 RemoteResult(
@@ -2184,10 +2277,28 @@ object GitService {
      * **A URL with no host still works**, because a local path — a bare repository beside the project,
      * which is how the tests and a folder-to-folder clone work — needs no username at all.
      */
-    private fun credentials(remoteUrl: String?, token: String?): CredentialsProvider? {
+    /**
+     * How a token is presented to a host.
+     *
+     * **Three sources for the username, in this order, and the order is the rule:**
+     *
+     * 1. **the address**, when it names one — `https://x-token-auth@bitbucket.org/…`. The person wrote
+     *    it on that project, so it beats anything stored;
+     * 2. **the account**, when it was given a git username — GitLab documents `oauth2`, and a host may
+     *    want a person's own name. It is data on the account because there is no universal answer, and
+     *    a table of hosts in this file is exactly what the app stopped having;
+     * 3. **the token as the username**, which is the commonest shape (GitHub, Gitea) and the only one
+     *    that needs nothing typed.
+     */
+    private fun credentials(
+        remoteUrl: String?,
+        token: String?,
+        gitUser: String? = null,
+    ): CredentialsProvider? {
         if (token.isNullOrBlank()) return null
         if (remoteUrl == null) return null
-        val user = Secrets.userOf(remoteUrl)
+        val named = Secrets.userOf(remoteUrl)
+        val user = named ?: gitUser?.takeIf { it.isNotBlank() }
         return if (user == null) {
             UsernamePasswordCredentialsProvider(token, CharArray(0))
         } else {
