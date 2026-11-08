@@ -3867,8 +3867,18 @@ class AgentTools(
         } else {
             ""
         }
+        // **The caveat belongs on every answer, not only on an empty one.** Without a storage
+        // permission the store shows *this app's own* rows: a screenshot the person saved from Chrome
+        // is in the folder and absent from this list. On the empty answer that was said; on a
+        // half-full one it was not, and a model reading three of four files has no reason to doubt the
+        // list — it would tell the person their file is not there. Plan §13e.2 measured the rule; this
+        // is the one place it has to be spoken.
+        val caveat =
+            "\nOnly the files this app itself put in Downloads are listed. A file another app saved, " +
+                "or one dropped there by a shell, is in the folder and absent from this list."
         return success(
-            head + shown.joinToString("\n") { "${it.name}  ${bytes(it.bytes)}  ${day(it.at)}" },
+            head + shown.joinToString("\n") { "${it.name}  ${bytes(it.bytes)}  ${day(it.at)}" } +
+                caveat,
         )
     }
 

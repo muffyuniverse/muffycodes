@@ -129,6 +129,23 @@ class DownloadsTest {
     }
 
     @Test
+    fun `a half-full listing says what it cannot show, too`() {
+        // **The empty answer said it; the half-full one did not.** Without a storage permission the
+        // store answers with *this app's own* rows, so a screenshot saved from another app is in the
+        // folder and absent from the list — and a model reading three of four files has no reason to
+        // doubt it, so it would tell the person their file is not there. Measured in plan §13e.2.
+        phone.holds("mine.log", bytes = 10, at = 1_700_000_000_000)
+
+        val answer = call("downloads", "{}")
+
+        assertTrue("the file it can see is listed: $answer", answer.contains("mine.log"))
+        assertTrue(
+            "and the list says it is not the whole folder: $answer",
+            answer.contains("Only the files this app itself put in Downloads"),
+        )
+    }
+
+    @Test
     fun `a long listing says how many it did not show`() {
         for (n in 1..45) phone.holds("file$n.txt", at = 1_700_000_000_000L + n)
 
