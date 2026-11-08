@@ -194,10 +194,11 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.open("Shopping")
         scene.file("note.txt", "an appointment")
         // A word that exists **only** in the account's own folder, so finding it is the whole question.
-        scene.workspace!!.write(
-            File(File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT), "only-here.txt"),
-            "quarantine",
-        )
+        // **Written around the app's own funnel on purpose**: `system` is held by the app, so `write`
+        // refuses — which is the rule working, and not a thing this test is about.
+        val own = File(File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT), "only-here.txt")
+        own.parentFile?.mkdirs()
+        own.writeText("quarantine")
         scene.workspace!!.linkSystem(scene.workspace!!.repoOf("Shopping"))
 
         scene.viewModel.query = "quarantine"

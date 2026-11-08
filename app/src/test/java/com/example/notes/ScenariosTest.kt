@@ -314,6 +314,13 @@ class ScenariosTest {
                 records.mkdirs()
                 File(records, AgentLog.SESSION).writeText("what the model was sent")
                 scene.viewModel.refresh()
+                // **The strip is the visible half of "a file was written".** The row itself lands
+                // below the fold on a screen this tall — folders sort first, then files, and the app's
+                // own folder sorts after both — so the picture that changed was the count at the top
+                // and nothing else. Waiting for it is also what makes the two pictures differ for the
+                // right reason rather than by chance.
+                scene.viewModel.refreshChanges()
+                scene.await("the change to be counted") { scene.viewModel.changesHere > 0 }
             }
             after()
             result(
