@@ -51,7 +51,7 @@ search, LFS, and **a remote URL per project that the person supplies and the app
 
 | file | lines | what it is | verdict |
 |---|---|---|---|
-| `GitHub.kt` | 1762 | the whole client: identity, repos, licences, CI, environments, secrets | **deleted** |
+| `GitHub.kt` | 1762 | the whole client: identity, repos, licences, CI, environments, secrets | **deleted** except `identity()` (`GET /user`), which the device door keeps (§7.1) |
 | `Workflows.kt` | 386 | GitHub Actions files, approvals, reach | **deleted** |
 | `ReleaseKey.kt` | 388 | sends a project's signing key to a GitHub environment | **deleted** (the key file stays; sending was the GitHub part) |
 | `DeviceFlow.kt` | 343 | GitHub OAuth device flow | **keep or delete — the one decision, §7** |
@@ -67,8 +67,10 @@ Call sites in `AppViewModel` (each is a feature a person can press):
 |---|---|---|
 | `listRepositories` → `AddProjectDialog`'s list | `GET /user/repos` | **the URL field** (§4) |
 | `createProject` | `POST /user/repos`, then clone | **`createLocalProject`**, which already exists and is tested but has **no UI caller** — then the URL field |
+| `makeRemote` (already built) | nothing GitHub — it takes a URL | kept, and gains the `ls-remote` check: *add on remote* means **point at one**, not create one (§8.1) |
+| `deleteProject(…, everywhere)` | `DELETE /repos/…`, already removed on 2026-11-08 | one choice, plus **Go local** (`git remote remove`), which is the universal half (§8.2) |
 | `pullRepository(repo)` | clone from a chosen `Repo` | the URL field, same code |
-| `renameProject` | `PATCH /repos/…` — renames on the host, repoints the remote | rename the folder only; the remote is the person's to change |
+| `renameProject` | `PATCH /repos/…` — renames on the host, repoints the remote | **the address is the verb**: the person renames on the host, pastes the new URL, and the folder follows what `ls-remote` accepted (§8.3) |
 | `addProjectToGitHub` | `POST /user/repos` for a local project | the URL field, or nothing — a local project is a valid project |
 | `exportArtifact` / `onRowExport` | `GET …/actions/artifacts` | deleted; `http` for an agent, the host's site for a person |
 | `startRelease` / `ReleaseDialog` / `canPublish` | dispatch `build-and-release.yml` | **`git tag` + push** (§5) |
@@ -126,8 +128,10 @@ agent that wants a build dispatches it with `http` and a secret for that host.
 | **V4** | **The picker leaves**: `listRepositories`, `pullRepository(repo)`, `AddProjectDialog`'s list | the list is the vendor feature; the URL replaces it |
 | **V5** | **A release is a tag**: `git {op:"tag"}`, `ReleaseDialog` keeps the field, no dispatch | replaces the biggest remaining GitHub feature |
 | **V4b** | **The two doors become one process** (§7): `acquire(): Result<String>` with a device implementation and a typed one; `addAccount(login, host, gitUser, token)` is the single save; `signInWithToken` and `signIn` collapse into it | a convenience on top of the shared process, not a second process |
-| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, and `renameProject`'s host call — the **one place a feature is lost rather than replaced** (§8.3) | deletion, after V5 so nothing is lost that a tag now covers |
-| **V7** | **`GitHub.kt` and `githubFor` are gone**; the tests that pinned their behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case" |
+| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, `renameProject`'s host call | deletion, after V5 so nothing is lost that a tag now covers |
+| **V6b** | **The address is the verb** (§8.3): *Set the address* runs `ls-remote`, then renames the folder and every branch's tree to the URL's last segment when the name differs. `renameProject` becomes this and nothing else | renaming stops being an app operation and becomes a verified consequence of the address |
+| **V6c** | **Go local** (§8.2): `GitService.disconnect` + one project action + its sentence | the universal half of "remove on remote", and a state the app already models |
+| **V7** | **`GitHub.kt` and `githubFor` are gone — except `identity()`**, which moves into the device door because *a door knows its own host* (§7.1); the tests that pinned the deleted behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case", and the one call that survives has a home |
 | **V8** | **`deleteProject` becomes one choice**, with the sentence naming the host and saying nothing there was touched (§8.2) | the second choice stopped being an act on 2026-11-08, and is now a sentence on every host |
 
 **V6 is the big one and it is last on purpose.** Every one of those features is currently reachable by a
@@ -151,6 +155,31 @@ The shared process, which every door goes through:
 | **2** | **a host** | the hostname the credential binds to. For GitHub's door it is `github.com` — the same field, defaulted rather than assumed |
 | **3** | **a credential** | *or* a **key acquisition**, which is the only thing a door may differ in. `acquire(): Result<String>` has two implementations: the device flow, and "the person typed one" |
 | **4** | **one save** | `AppViewModel.addAccount(login, host, gitUser, token)` — the same function for both doors: `accounts.save(Account(…, host, gitUser))`, `credentials.setToken(login, token)`, `adoptProvisional(login)`, set active, `forgetBranches()`, `backToMain()` |
+
+### 7.1 The GitHub door fills every field it can know — and therefore keeps one API call
+
+**The operator's refinement, 2026-11-08:** *"can device flow be used to fill in name and host as well? we already
+know that github flow is about github, and name can be requested in one line with the token - we can automate
+this window so that for github device flow fills in all the account registration fields and for other hosts user
+does it manually."*
+
+Yes, and it is the argument for what a door *is*: **a door knows its own host.** So for GitHub's:
+
+| field | where it comes from | the manual door |
+|---|---|---|
+| **host** | `github.com` — the door's definition | typed |
+| **name** | `GET /user` → `login` — *"one line with the token"* | typed, `nameProblem`-checked |
+| **commit name / email** | the same response (`name`, `email`, else `noreplyEmail`) | typed, optional |
+| **credential** | the device flow | typed |
+
+So the GitHub door is **two presses and no fields**: start, approve, done. The other door asks for four.
+Both then take the identical step 4.
+
+**This is a correction to the inventory in §3:** `GitHub.kt` cannot be deleted wholesale, because
+`identity()` (`GET /user`) is what a door needs to know who it just signed in. It is **not** the app's GitHub
+client — it is the door's own lookup, and it moves into `DeviceFlow`/the door adapter when the client goes. It
+is the *only* survivor: `listRepos`, `createRepo`, `renameRepo`, `cloneUrlFor`, `licences`, `runs`, `jobs`,
+`logs`, `artifacts`, `environments` and the secret calls all go.
 
 **What disappears:** `signInWithToken` and `signIn` collapse into step 4, because they are the same act with a
 different way of getting the key. `TokenScopes.judge` disappears with `TokenScopes` (V6) — no other host sends
@@ -186,6 +215,22 @@ correct rather than an exception: there is no host to name. The moment a URL is 
 may be `my/repo` and a slash cannot be a folder. The last segment is a prefill the person can correct, not an
 answer.
 
+**"Add on remote" has two meanings, and only one of them is git's.**
+
+| | possible? |
+|---|---|
+| **create a repository on the host** | **no** — `POST /user/repos` and its cousins. Every host has its own form of it, none of them is git |
+| **point a project at a remote that already exists** | **yes** — `remote.origin.url` + the fetch refspec, then `ls-remote` proves the address and the credential, then `push` |
+
+The second is a complete replacement for the first, because **every host has a web page for making a
+repository** and a person is already looking at it. So the flow is: make it there, paste the URL, the app
+verifies and takes over — with the licence choice, the description and the visibility happening where the host
+puts them, which is also where those questions have real consequences.
+
+`ProjectGit.makeRemote(project, url)` already exists for exactly this (a local project gaining a remote). It
+gains the same `ls-remote` check as the clone, so a mistyped or unauthorised address is refused before the
+project starts claiming it is published.
+
 ### 8.2 Removing — the biggest change in the whole cut, and it is a *good* one
 
 Today `deleteProject(project, everywhere)` does two things at once:
@@ -205,37 +250,62 @@ already refuses to pretend otherwise — `deleteProject` is guarded against `sys
 on the row — but the cut must not lose the ordering that makes it safe: **secrets, then worktrees, then the
 folder**, because the reverse leaves a window where the folder is gone and the secrets are not.
 
-### 8.3 Renaming — **the one feature with no universal answer**, and three honest options
+**"Remove on remote" also has two meanings, and one of them is git's.**
 
-`renameProject` today does three things in one worker:
+| | possible? |
+|---|---|
+| **delete the repository on the host** | **no** — and it is already gone from the code: `delete_repo` was dropped on 2026-11-08 because it was the one irreversible capability in the app. It stays a sentence |
+| **disconnect: the project stops having a remote** | **yes** — `git remote remove origin`. Universal, reversible, and it is a state the app already has a name for |
 
-1. `api.renameRepo(token, login, project, clean)` — renames the repository **on the host**
-2. `ws.rename(projectDir, clean, tidy = false)` + `Worktrees(ws).rename(project, clean)` — the folder and
-   every branch's tree, with git's four bookkeeping files repointed
-3. `api.cloneUrlFor(login, clean)` → `setRemoteUrl(clean, …)` — repoints `origin` at the new address
+So the project actions become three, and each says exactly what it did:
 
-The protocol has **no rename**: it is not an operation git can express. So after the cut:
-
-- **(1) is gone** — a host's API.
-- **(3) cannot be computed either**, because the new address is derived from the host's convention: GitHub's
-  `/repos/{o}/{n}` and `clone_url`, GitLab's path rules, Gitea's `clone_url`. Without an API there is nothing
-  to ask, and guessing a URL template per host is the provider table the operator just removed.
-- **(2) still works perfectly**, and it is host-agnostic: it is a folder rename plus git bookkeeping.
-
-**The three options, so this is a decision and not an accident:**
-
-| | what happens | cost |
+| action | what it does | what it says |
 |---|---|---|
-| **A. The name is a label; `origin` is left alone** (recommended) | the folder, the branches and every screen change; the remote keeps its address and the project keeps working. The row's label and the repository's name can then differ | "`shopping` here, `shopping-app` there" — two names, one intent. Mitigated by the label showing the host and by the URL being visible on the project |
-| **B. The name is a label; `origin` is edited to match** | the remote's URL is rewritten by string substitution on its last path segment, then `ls-remote` proves it exists | the substitution is a guess about a host's URL shape, and `ls-remote` catches only *missing*, not *wrong-but-existent* |
-| **C. The name is the label; the remote is untouched and `ls-remote` checks it** | as A, and the URL is verified usable at rename time | one extra round trip, for a rename |
+| **Go local** | removes `origin` (and its fetch refspec); the repository and every version stay | *"`shopping` is local now. It still has its versions; it no longer has an address."* |
+| **Remove from this phone** | what `deleteProject(…, everywhere = false)` does today | *"gone from this phone. Its repository is at `gitlab.com` and nothing here touched it."* |
+| **Set the address** | the URL field for a project that has one, or a new one | verified with `ls-remote` first |
 
-**A is the recommendation** because it is the only one that does not guess. The sentence the app says is what
-makes it honest: *"Renamed here. The repository is still called `old`, at `gitlab.com` — rename it there and
-change the address on this project if you want them to match."*
+`GitService` needs one new function beside `setRemoteUrl` — `disconnect(repo)`: `unsetSection("remote",
+"origin")` and save. `ProjectGit.isLocal` already answers `true` for a project with no remote, so every screen
+that says "local" keeps working with no further change.
 
-**What must not happen:** silently rewriting `origin` and leaving a project that cannot be pushed. That is the
-one outcome worse than not renaming the remote at all, because the row keeps saying "up to date".
+**Why this is the right split:** deleting a person's work is the app's own business (the folder is here); deleting
+a *repository* is a server-side act with no undo, and the host's own UI has it behind a confirmation the person
+cannot misunderstand.
+
+### 8.3 Renaming — **dropped as an operation**, and replaced by "the address changed"
+
+**The operator's decision, 2026-11-08:** *"your option 3 on rename is good one, user renames remote and only then
+renames local to the name remote holds."*
+
+So renaming is not a verb in the app any more. It is a **consequence** of the address changing, and the order
+is the opposite of the one the code has today:
+
+| # | who | what |
+|---|---|---|
+| 1 | **the person** | renames the repository on the host — its own website, its own confirmation |
+| 2 | **the person** | pastes the new URL into the project (*Set the address*) |
+| 3 | **the app** | `ls-remote` with that project's credential — the address works, or a sentence says why |
+| 4 | **the app** | derives the name from the URL's last segment, checks `nameProblem`, refuses a clash, then renames the folder and every branch's tree |
+
+**Local always follows remote, and the app never guesses a URL template.** That is the whole gain: today
+`renameProject` computes the new address with `api.cloneUrlFor(...)`, which is GitHub's convention for
+composing a URL — GitLab's and Gitea's differ, and a table of them is exactly what this cut removes.
+
+**What is deleted:** `api.renameRepo(...)` and the `cloneUrlFor` follow-up. **What stays, unchanged:**
+`ws.rename(projectDir, clean, tidy = false)` and `Worktrees.rename(project, clean)` — the delicate half (git's
+four bookkeeping files, nested branch names, the shared lock) that never asked a host anything.
+
+**The name after a rename is derived, not typed** — from the URL the person just supplied, which is also what
+makes "the local name and the remote name agree" true by construction rather than by discipline. If they want a
+different local name from the remote's, they keep the current name and simply change the address.
+
+**A guard worth writing down:** if the derived name equals the current one, nothing is renamed — only the
+address changed, which is a normal thing to do (a repository moved to another owner or host). The sentence then
+says so rather than reporting a rename that did not happen.
+
+**What must never happen:** silently rewriting `origin` and leaving a project that cannot be pushed. That is the
+outcome that keeps a row saying "up to date" while nothing can be sent.
 
 ### 8.4 What the cut must not lose
 
@@ -257,6 +327,16 @@ one outcome worse than not renaming the remote at all, because the row keeps say
 - **Everything a host's API offers** — repository listing, creation, CI, artifacts, environments — is the
   agent's business through `http`, and the person's through the host's own website.
 
-**The honest sum:** about 3,466 lines and 20 call sites leave, two features are replaced by git itself
-(clone-by-URL, tag-as-release), and one convenience (the repository picker) is lost for a field that works
-everywhere. Nothing that the git protocol can express is lost at all.
+- **Projects have three verbs, all git's**: add (clone a URL, or make one locally), *Set the address*
+  (`ls-remote`, then the folder follows the name the remote holds), and *Go local* (`git remote remove`).
+  Creating and deleting a **repository** stay the host's own business — every host has a page for both, and
+  deleting one has no undo.
+
+**The honest sum:** about 3,466 lines and 20 call sites leave; three features are replaced by git itself
+(clone-by-URL, tag-as-release, and *Go local*); renaming becomes a consequence of the address rather than a
+verb; and one convenience — the repository picker — is lost for a field that works everywhere. Nothing the git
+protocol can express is lost at all, and the one API call that survives (`GET /user`) survives because a door
+must know who it just signed in.
+
+**What is lost and cannot be replaced:** the app can no longer create a repository on a host, delete one, or
+say what a host built from your tag. Each is a sentence naming the host and what to do there.
