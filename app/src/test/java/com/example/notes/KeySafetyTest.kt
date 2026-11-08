@@ -351,6 +351,25 @@ class KeySafetyTest {
     }
 
     @Test
+    fun `a host field refuses an address, and names the host it found`() {
+        // **The field decides which server a key may be sent to**, so a pasted clone address has to be
+        // refused rather than accepted-and-stripped: "gitlab.com:8443" silently stored as "gitlab.com"
+        // is a field that changes what was typed, and the person would never know.
+        val found = Secrets.hostProblem("https://gitlab.com/team/repo.git").orEmpty()
+        assertTrue("it names the host: $found", found.contains("gitlab.com"))
+        assertTrue("and where the address belongs: $found", found.contains("project"))
+        assertNotNull("a port is not a hostname", Secrets.hostProblem("gitlab.com:8443"))
+        assertNotNull("nor is a bare word", Secrets.hostProblem("gitlab"))
+        assertNotNull("nor nothing", Secrets.hostProblem("  "))
+        // **The positive half, and case is not a value.** A hostname is case-insensitive, so
+        // `GitLab.com` is the same host and is folded rather than refused.
+        assertNull(Secrets.hostProblem("gitlab.com"))
+        assertNull(Secrets.hostProblem("GitLab.com"))
+        assertNull(Secrets.hostProblem("github.example.com"))
+        assertNull(Secrets.hostProblem("192.168.1.9"))
+    }
+
+    @Test
     fun `an address this app cannot speak to is refused before any key is considered`() {
         // **The trap this closes.** `hostOf("git@github.com:o/r.git")` answers `github.com` quite
         // happily, so a pasted scp address looked usable right up to the moment a key was attached to it

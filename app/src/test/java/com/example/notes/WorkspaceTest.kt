@@ -471,6 +471,34 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `the name a remote suggests is its last segment without the git suffix`() {
+        // **A prefill, and the one rule that holds for every host without a table of conventions.**
+        // `nameProblem` still decides: this only saves typing, and a person who wants their local
+        // project called something other than its repository is doing something ordinary.
+        assertEquals(
+            "a clone address",
+            "repo",
+            Workspace.repoNameOf("https://github.com/owner/repo.git"),
+        )
+        assertEquals(
+            "no .git, and a deeper path",
+            "repo",
+            Workspace.repoNameOf("https://git.example.org/team/sub/repo"),
+        )
+        assertEquals(
+            "a trailing slash",
+            "repo",
+            Workspace.repoNameOf("https://gitlab.com/team/repo/"),
+        )
+        assertEquals(
+            "a self-hosted path that has no owner segment",
+            "repo",
+            Workspace.repoNameOf("https://server/git/repo.git"),
+        )
+        assertEquals("and an empty address suggests nothing", "", Workspace.repoNameOf("   "))
+    }
+
+    @Test
     fun `the records folder cannot be touched`() {
         // **One thing is structural now.** The two folders the app used to own — `projects/` at the
         // root and a repository folder inside each project — are gone, because the project *is* the

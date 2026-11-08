@@ -362,6 +362,69 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a project is added from an address, and the check catches a wrong one first`() {
+        // **The operator's proposal, end to end**: *"we can ask user to add remote urls on his own via
+        // + button, and we just check with git ls-remote command that is part of the protocol."*
+        //
+        // A bare repository on this phone is a real remote for exactly this purpose: `ls-remote` works
+        // against it, so the check runs for real without a network, and a mistyped address fails the
+        // way a mistyped address fails.
+        val remote = File(scene.root, "address-remote")
+        GitService.initOrOpen(remote, GitAuthor("Test", "test@example.com")).use { repo ->
+            File(remote, "milk.txt").writeText("two litres\n")
+            GitService.commitAll(repo, "milk", GitAuthor("Test", "test@example.com"))
+        }
+
+        // A path that is not there: refused, and **nothing is made** — which is the point of asking
+        // before cloning rather than after.
+        var answered: Boolean? = null
+        scene.viewModel.addProjectFromUrl(
+            File(scene.root, "nothing-here").absolutePath,
+            "wrong",
+        ) { answered = it }
+        scene.await("the refusal to arrive", 30_000) { answered != null }
+        assertEquals("the wrong address was refused", false, answered)
+        assertFalse("and no project was made", scene.viewModel.projectNames.contains("wrong"))
+        assertTrue(
+            "and it says the address has no repository: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("no repository at that address"),
+        )
+
+        // The real one: the same call, a real bare repository, and the project arrives with its file.
+        answered = null
+        scene.viewModel.addProjectFromUrl(remote.absolutePath, "") { answered = it }
+        scene.await("the project to arrive", 30_000) { answered != null && !scene.viewModel.busy }
+
+        assertEquals("it was added", true, answered)
+        assertEquals(
+            "and the name came from the address's last segment",
+            true,
+            scene.viewModel.projectNames.contains("address-remote"),
+        )
+        assertEquals(
+            "with the file the repository held",
+            "two litres\n",
+            File(scene.workspace!!.projectDir("address-remote"), "milk.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `an ssh address is refused in words before anything is made`() {
+        // No SSH transport is packaged, so this would die inside JGit with an error naming nothing —
+        // and it looks usable, because `hostOf` reads a host out of the scp form happily. Every host's
+        // page shows this form first, so it is the address a person will paste.
+        var answered: Boolean? = null
+        scene.viewModel.addProjectFromUrl("git@github.com:owner/name.git", "name") { answered = it }
+
+        assertEquals("it was refused", false, answered)
+        assertTrue(
+            "in words, naming the form that works: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("HTTPS"),
+        )
+        assertFalse("and nothing was made", scene.viewModel.projectNames.contains("name"))
+    }
+
+    @Test
     fun `a new local project arrives with an empty prompts folder`() {
         // **What replaced the preset.** The operator: *"just create empty system_data folder tree for
         // each project when it is added and put there subfolders for all of our doc types"*. Empty is

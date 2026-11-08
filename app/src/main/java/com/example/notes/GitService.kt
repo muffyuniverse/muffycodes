@@ -611,6 +611,12 @@ object GitService {
      */
     fun lsRemote(remoteUrl: String, token: String?, gitUser: String? = null): RemoteAnswer {
         Secrets.transportProblem(remoteUrl)?.let { return RemoteAnswer.Refused(it) }
+        // **A local address is asked about directly, not through JGit.** `ls-remote` against a path
+        // that is not a repository fails deep in the transport with a message about a URI, and the
+        // sentence a person needs — "there is no repository at that address" — is one this code can
+        // already decide by looking. It also makes the check testable without a network, which is why
+        // the local case is worth handling rather than leaving to the general path.
+        localMissing(remoteUrl)?.let { return RemoteAnswer.Refused(it) }
         return try {
             val command = Git.lsRemoteRepository()
                 .setRemote(remoteUrl)
@@ -627,6 +633,28 @@ object GitService {
             RemoteAnswer.Branches(names)
         } catch (e: Throwable) {
             RemoteAnswer.Refused(remoteSaid(Secrets.describe(e), Secrets.hostOf(remoteUrl)))
+        }
+    }
+
+    /**
+     * The sentence for a local address that holds no repository, or null for anything else.
+     *
+     * **A local path is a remote like any other** — it is how a folder-to-folder clone works, and how
+     * this app's own tests talk to a "server" — so it is checked like one rather than special-cased
+     * out of the check.
+     */
+    private fun localMissing(url: String): String? {
+        if (Secrets.hostOf(url).isNotEmpty()) return null
+        val path = url.trim().removePrefix("file:")
+        if (path.isEmpty()) return null
+        val dir = File(path)
+        val looksLikeRepository = isRepository(dir) ||
+            // A bare repository: no `.git`, and the three names every repository root has.
+            (dir.isDirectory && File(dir, "HEAD").isFile && File(dir, "objects").isDirectory)
+        return if (looksLikeRepository) {
+            null
+        } else {
+            "There is no repository at that address."
         }
     }
 
