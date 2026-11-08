@@ -757,7 +757,14 @@ class Scenario(
                     val status = git.status().call()
                     val waiting = status.added + status.changed + status.modified +
                         status.removed + status.missing + status.untracked
-                    appendLine("      waiting: $waiting")
+                    // **The names, not only the count.** A count of 1 says nothing about *what* is
+                    // waiting, and "the person's own file" and "a row the app made" are different
+                    // diagnoses — learning which cost a CI round once, which is once too many.
+                    val named = (status.added + status.changed + status.modified +
+                        status.removed + status.missing + status.untracked)
+                        .sorted().joinToString(", ")
+                    appendLine("      waiting: $waiting" + if (named.isEmpty()) "" else " — $named")
+                    appendLine("      ignored: ${status.ignoredNotInIndex.sorted().joinToString(", ")}")
                     appendLine("      branch: ${git.repository.branch}, " +
                         "remote: ${git.repository.config.getString("remote", "origin", "url")}")
                 }

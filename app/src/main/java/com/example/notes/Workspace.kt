@@ -173,8 +173,15 @@ class Workspace(val accountDir: File) {
         } catch (t: Throwable) {
             false
         }
-        // A real folder, or a real file, is left alone; a working link is left alone.
-        if (link.exists() || (exists && link.isDirectory)) return false
+        // A real folder, or a real file, is left alone; a working link is left alone — **but the
+        // exclusion is written either way.** It used to be written only on the pass that *made* the
+        // link, so a project whose link was made before its repository existed never got the line: the
+        // link was there from then on, the early return kept the line from ever being written, and the
+        // project reported a change nobody made for the rest of its life.
+        if (link.exists() || (exists && link.isDirectory)) {
+            ensureExcluded(worktree)
+            return false
+        }
         val target = File(accountDir, SYSTEM_PROJECT)
         return try {
             worktree.mkdirs()
