@@ -4179,6 +4179,90 @@ class AppViewModel @JvmOverloads constructor(
         onDone(ok)
     }
 
+    /**
+     * **Adds a project from an address the person supplies** — the universal half of the add window.
+     *
+     * The address is checked with `ls-remote` *before* a folder is made, so a mistyped path, a key the
+     * host refuses, or an SSH address this app cannot speak are sentences rather than a half-made
+     * project nobody can clone into. Then the clone itself, which is the same call the picker used to
+     * make — there is only one way a repository arrives on this phone.
+     *
+     * **The name is asked for, not assumed.** The last segment of the address is a prefill, because the
+     * remote may be `my/repo` and a slash cannot be a folder name — and a person who wants their local
+     * project called something other than their repository is doing something ordinary.
+     */
+    fun addProjectFromUrl(
+        url: String,
+        name: String,
+        onDone: (Boolean) -> Unit = {},
+    ) {
+        val ws = workspace ?: return
+        val address = url.trim()
+        if (address.isEmpty()) {
+            message = "An address is needed: this is where the repository lives"
+            onDone(false)
+            return
+        }
+        Secrets.transportProblem(address)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        val clean = name.trim().ifBlank { Workspace.repoNameOf(address) }
+        Workspace.nameProblem(clean)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        val existing = ws.projectNames().firstOrNull { it.equals(clean, ignoreCase = true) }
+        if (existing != null) {
+            // **No replace**, the same rule the picker follows: deleting a project and adding it again
+            // is one act the person already knows, and a second way to destroy a project would be a
+            // second set of rules about what survives.
+            message = "\"$existing\" is already a project on this phone. Delete it first if you " +
+                "want a fresh copy."
+            onDone(false)
+            return
+        }
+        busy = true
+        onWorker {
+            val git = projectGit(ws)
+            // **The check, and it is the feature.** `ls-remote` is the protocol's own answer to "is
+            // this address real, and may this key read it", and it is the only one there is.
+            val checked = git.checkRemote(clean, address)
+            if (checked is GitService.RemoteAnswer.Refused) {
+                main.post {
+                    busy = false
+                    message = checked.why
+                    onDone(false)
+                }
+                return@onWorker
+            }
+            val result = git.cloneInto(clean, address)
+            if (result.success) ProjectTree.create(ws.projectDir(clean))
+            main.post {
+                busy = false
+                message = result.message
+                refresh()
+                onDone(result.success)
+            }
+        }
+    }
+
+    /** The licences a project can be published with, when that is GitHub's to answer. */
+    fun listLicences(onDone: (List<Licence>) -> Unit) {
+        val api = github
+        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
+        if (api == null) {
+            onDone(emptyList())
+            return
+        }
+        onWorker {
+            val result = api.licences(token)
+            main.post { onDone(result.value ?: emptyList()) }
+        }
+    }
+
     // ---- the agent's chat ---------------------------------------------------
 
     /** The project whose conversation is on the screen, or null when none is. */
