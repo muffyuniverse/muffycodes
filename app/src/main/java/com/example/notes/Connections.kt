@@ -309,14 +309,18 @@ fun wiredFor(
     //
     // **A blank key is complete, though.** A model server on this phone wants no key at all, and that
     // is a whole credential rather than half of one — see [Wired.keyless].
-    val at = chain.firstOrNull { scope ->
+    val found = chain.firstOrNull { scope ->
         val pair = connectionAt(scope) ?: return@firstOrNull false
         pair.address.isNotBlank() &&
             choiceScopes(project, branch, scope).firstNotNullOfOrNull(choiceAt) != null
-    } ?: SecretScope.Account
-    // **No row at the account means the account's own records are the pair**, which is where they
-    // live today: `model_key_` and the address in `model_conf.json`.
-    val stored = connectionAt(at)
+    }
+    // **Nothing found means the account's own records are the pair**, which is where they live today:
+    // `model_key_` and the address in `model_conf.json`. **The distinction is the found scope and not
+    // the answer's name**: a half-made row at the account is *not* in force (it has no model to go
+    // with its address), so reading `connectionAt(at)` after a failed walk would have used it anyway —
+    // an address from a row whose model was refused, which is the one pairing the cap forbids.
+    val at = found ?: SecretScope.Account
+    val stored = found?.let(connectionAt)
     val address = stored?.address?.trim()?.takeIf { it.isNotEmpty() } ?: account.baseUrl
     val choice = choiceScopes(project, branch, at).firstNotNullOfOrNull(choiceAt)
 

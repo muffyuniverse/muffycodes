@@ -447,10 +447,15 @@ class ConnectionsTest {
 
     // ---- the checkmark, and the two names it enables --------------------------------------
 
+    /**
+     * The lookup, **keyed by scope and kind** — because that is what a stored row is: a row's kind is
+     * in its key and nowhere else. A fake that ignored the kind would have hidden the bug this class
+     * is about, which is exactly what the suite is for.
+     */
     private fun named(
         name: String,
         host: String,
-        connections: Map<SecretScope, Connection>,
+        rows: Map<Pair<SecretScope, ConnKind>, Connection>,
         project: String? = "acme",
         branch: String? = "feature",
     ): Connection? = namedConnection(
@@ -459,15 +464,16 @@ class ConnectionsTest {
         kind = kindFor(name) ?: ConnKind.LLM,
         project = project,
         branch = branch,
-        at = { scope, _ -> connections[scope] },
+        at = { scope, kind -> rows[scope to kind] },
     )
 
     @Test
     fun `a connection is invisible to auth unless the checkmark is on`() {
         // **The default is off, and that is a permission's only safe default.** A git token can push;
         // a model key can spend money. Neither is handed to an agent because a row exists.
-        val off = mapOf<SecretScope, Connection>(
-            SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = false),
+        val off = mapOf<Pair<SecretScope, ConnKind>, Connection>(
+            (SecretScope.Project("acme") to ConnKind.GIT) to
+                Connection("gitlab.com", "glpat", nameable = false),
         )
 
         assertNull("off means nothing is named", named("git", "gitlab.com", off))
@@ -483,8 +489,9 @@ class ConnectionsTest {
         // **The rule that makes `auth:` an authentication feature rather than an exfiltration
         // primitive.** The agent names the value; the vault decides where it may go. A token stored
         // for gitlab.com is not answered for another host, and not for "nowhere".
-        val on = mapOf<SecretScope, Connection>(
-            SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = true),
+        val on = mapOf<Pair<SecretScope, ConnKind>, Connection>(
+            (SecretScope.Project("acme") to ConnKind.GIT) to
+                Connection("gitlab.com", "glpat", nameable = true),
         )
 
         assertNull("another host gets nothing", named("git", "github.com", on))
@@ -498,9 +505,10 @@ class ConnectionsTest {
         // **Independent checkmarks, because the blast radii differ.** A person may let the agent ask
         // the model server what models exist without letting it push as them — and a name that
         // resolved the other kind's token would be the worst of both.
-        val both = mapOf<SecretScope, Connection>(
-            SecretScope.Project("acme") to Connection("gitlab.com", "glpat-git", nameable = true),
-            SecretScope.Branch("acme", "feature") to Connection(
+        val both = mapOf<Pair<SecretScope, ConnKind>, Connection>(
+            (SecretScope.Project("acme") to ConnKind.GIT) to
+                Connection("gitlab.com", "glpat-git", nameable = true),
+            (SecretScope.Branch("acme", "feature") to ConnKind.LLM) to Connection(
                 address = "https://models.example/v1",
                 secret = "sk-llm",
                 nameable = true,
@@ -521,17 +529,22 @@ class ConnectionsTest {
         // the absence of a grant for that row.
         val project = SecretScope.Project("acme")
         val branch = SecretScope.Branch("acme", "feature")
-        val grant = mapOf<SecretScope, Connection>(
-            project to Connection("gitlab.com", "glpat-project", nameable = true),
-            branch to Connection("gitlab.com", "glpat-branch", nameable = true),
+        val projectRow = project to ConnKind.GIT
+        val branchRow = branch to ConnKind.GIT
+        val grant = mapOf<Pair<SecretScope, ConnKind>, Connection>(
+            projectRow to Connection("gitlab.com", "glpat-project", nameable = true),
+            branchRow to Connection("gitlab.com", "glpat-branch", nameable = true),
         )
 
         assertEquals("the branch's", "glpat-branch", named("git", "gitlab.com", grant)?.secret)
         assertEquals(
             "and without the checkmark the project's is still the answer",
             "glpat-project",
-            named("git", "gitlab.com", grant + (branch to grant.getValue(branch).copy(nameable = false)))
-                ?.secret,
+            named(
+                "git",
+                "gitlab.com",
+                grant + (branchRow to grant.getValue(branchRow).copy(nameable = false)),
+            )?.secret,
         )
     }
 
