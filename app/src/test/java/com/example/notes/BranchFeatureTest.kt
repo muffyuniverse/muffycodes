@@ -105,10 +105,17 @@ class BranchFeatureTest : FeatureTest() {
         scene.await("main's files to open") { scene.viewModel.activeBranch == "main" }
 
         assertEquals("back on main", "main", scene.viewModel.activeBranch)
+        // **The same path a person uses**, resolved after the branch changed: `Shopping/milk.txt` must
+        // now be main's file, not `feature`'s — the whole point of the redirection being one function.
         assertEquals(
-            "and the screen resolves to main's copy",
+            "and the same path now resolves to main's copy",
             File(scene.workspace!!.repoOf(project), "milk.txt").canonicalPath,
-            scene.viewModel.currentDir!!.canonicalPath,
+            scene.workspace!!.fileAt(listOf(project, "milk.txt")).canonicalPath,
+        )
+        assertFalse(
+            "not the branch's copy",
+            scene.workspace!!.fileAt(listOf(project, "milk.txt")).canonicalPath ==
+                File(scene.workspace!!.treeOf(project, "feature"), "milk.txt").canonicalPath,
         )
     }
 
