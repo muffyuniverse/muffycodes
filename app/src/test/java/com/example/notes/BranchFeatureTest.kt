@@ -25,6 +25,11 @@ class BranchFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.open("Shopping")
         scene.file("milk.txt", "two litres\n")
+        // **Synced, so main starts clean.** A file written through the editor is committed by the
+        // app, and a commit nobody has pushed is one path "to send" — so without this every assertion
+        // about the *branch* being the only dirty tree would be about a project that was already
+        // dirty, and would pass for the wrong reason or fail for one.
+        scene.sync("Shopping")
         scene.viewModel.openBranches("Shopping")
         scene.viewModel.newBranch("feature")
         scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
@@ -170,8 +175,12 @@ class BranchFeatureTest : FeatureTest() {
         val project = projectWithABranch()
         scene.viewModel.enterBranch("feature")
         scene.await("the branch's files to open") { scene.viewModel.path == listOf(project) }
+        // **Through the editor**, because "unsent" means "committed and not pushed" — a file written
+        // straight to disk is untracked, which is a different row and not this window's question.
         val branchFile = File(scene.workspace!!.treeOf(project), "notes.txt")
         branchFile.writeText("waiting\n")
+        scene.openEditor(branchFile)
+        scene.saveEditor("waiting\n")
 
         scene.viewModel.openChanges(project)
         scene.await("the window to fill", 20_000) {
