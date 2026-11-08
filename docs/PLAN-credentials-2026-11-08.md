@@ -386,6 +386,26 @@ and a column nobody reads is not a compatibility problem).
 | **C5** | Cost removal (§4). | **landed** (`57e2d4e3`): `usage.cost` and the `reported` denominator are gone from the request shape, the database (raw + all three rollups), the statistics, the agent's SQL schema and every test; the heartbeat's fourth cell counts **requests** |
 | **C6** | Settings holds **no chat model at all**: it keeps embedding and rerank (key + endpoint + model + dimension). `model_conf.json` drops `active` and the `models` list; `ModelSection`'s chat rows, `ModelChoice`, `providers`/`providersOf` and the tag-keyed `ContextBudget.CEILINGS` go with them (§3.5). | **not started — the next step, and now unblocked.** The account scope became **writable** (`conn_<login>_account_llm`, `wiredFor` treating the account's records as the floor rather than a special case), so the account's model has a row to live in; C6 is what stops `model_conf.json` being a second place to say it. It is still a wide removal — `ModelSection`'s chat rows and their tests, `ModelChoice`, `providers`/`providersOf`, the tag-keyed `ContextBudget.CEILINGS` — and the account-scope floor has to keep answering for an account that has no row |
 
+### What C6 still needs before it is a removal rather than a regression
+
+`model_conf.json` holding `active` is not only a second place to name a model — it is, today, the only
+place where a chosen model's **window and reply ceiling** are written down. They come from the
+catalogue (`ModelSection`'s picker) and land in `Choice.contextLength`/`maxOutput`, which the context
+budget reads. A connection window that asks for a model id and nothing else therefore cannot take over
+from the picker: an account whose picker was deleted would have a model and no window, and
+`ContextBudget` would fall back to the unknown-model floor for every turn.
+
+So C6 is two steps wearing one name:
+
+1. **The window becomes the picker** — a list read from the connection's own `/models`, saving the
+   numbers the catalogue reported beside the model id. (The endpoint read already exists; this is where
+   it belongs now that the address is the connection.)
+2. **Then the removal**: `ModelSection`'s chat rows, `ModelChoice`, `providers`/`providersOf`, the
+   tag-keyed `ContextBudget.CEILINGS`, and `active` from the file — with the account's row (or the
+   shipped default when it has none) as the floor.
+
+Doing (2) first would remove the only way to say how big a model is.
+
 **Why C0 first.** It is the only step that fixes sentences the app is currently saying falsely, it is
 small, and every later step addresses a row by scope — so the addressing has to be right before a fourth
 scope is added to it.
