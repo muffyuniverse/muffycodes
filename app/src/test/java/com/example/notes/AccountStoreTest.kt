@@ -214,6 +214,34 @@ class AccountStoreTest {
     }
 
     @Test
+    fun `removing says whether the account is gone, and forgetting says it by the identity`() {
+        store.save(Account("go_away", "G", "g@example.com"))
+        assertTrue("a full removal reports the folder gone", store.remove("go_away"))
+        assertFalse("and the folder really is gone", store.dirOf("go_away").exists())
+
+        // **The kept-copies case is a success with the folder still there.** Keeping the files means
+        // leaving a folder full of projects behind, so the answer cannot be "the folder went" - it is
+        // "this phone no longer has this account", which is what `accounts()` reads, and the thing a
+        // caller has to know before offering a retry.
+        store.save(Account("keep_me", "K", "k@example.com"))
+        File(store.dirOf("keep_me"), "a_note.md").writeText("mine")
+        assertTrue("forgetting reports the account gone", store.forget("keep_me"))
+        assertTrue("while the files stay", store.dirOf("keep_me").isDirectory)
+        assertNull("and the account with them", store.account("keep_me"))
+    }
+
+    @Test
+    fun `a removal that did not finish says the account is still here`() {
+        // **A sentence, because the failure must say what happened.** The person pressed a button
+        // that promised the account would go; the one thing that must not happen is a screen that
+        // has forgotten it while the disk has not.
+        val said = removalProblemSaid("go_away")
+        assertTrue("names the account: $said", said.contains("\"go_away\""))
+        assertTrue("says it is still here: $said", said.contains("still on this phone"))
+        assertTrue("and what to do: $said", said.contains("Remove it again"))
+    }
+
+    @Test
     fun `the commit identity is used when it is set`() {
         val account = Account("someone", "Muffy World", "muffyworld365@gmail.com")
         assertEquals("Muffy World", account.author().name)

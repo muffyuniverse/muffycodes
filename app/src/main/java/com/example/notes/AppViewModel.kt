@@ -5547,7 +5547,12 @@ class AppViewModel @JvmOverloads constructor(
      * without it the folders stay and signing in again returns to them (§5).
      */
     fun removeAccount(login: String, deleteCopies: Boolean) {
-        if (deleteCopies) accounts.remove(login) else accounts.forget(login)
+        // **The answer decides whether there is a second attempt.** A save already on its way to the
+        // worker can write into the tree while this walks it, and then `delete` fails on a folder
+        // that has just been re-made — the account stays on the phone and the person is told nothing.
+        // The walk is re-asked below, **on the worker**, which is the only place it can be ordered
+        // against the writes; here the fast path runs first so the screen changes at once.
+        val gone = if (deleteCopies) accounts.remove(login) else accounts.forget(login)
         credentials.forget(login)
         // Another stored account takes over, so the screen is never left pointing
         // at an account that is no longer here.
@@ -5567,6 +5572,34 @@ class AppViewModel @JvmOverloads constructor(
         editingPath = null
         historyPath = null
         refresh()
+        if (!gone) finishRemoval(login, deleteCopies)
+    }
+
+    /**
+     * The removal, asked a second time **after every write already in flight has landed**.
+     *
+     * Two things make this the right shape rather than a retry loop on the main thread:
+     *
+     * - **The worker is single-threaded and in order**, so a walk queued here runs after the save
+     *   that was queued before it — which is exactly the interleaving that lost the folder. A save
+     *   queued *after* this runs with the folder already gone, and its own guard refuses it.
+     * - **Nothing blocks.** The first walk still happens where it always did, so the screen changes
+     *   at the moment the person presses the button; only the correction waits.
+     *
+     * A second failure is said rather than swallowed: the account is still on the phone, and a
+     * person who is told it went would go looking for the wrong thing.
+     */
+    private fun finishRemoval(login: String, deleteCopies: Boolean) {
+        onWorker {
+            val now = if (deleteCopies) accounts.remove(login) else accounts.forget(login)
+            if (now) return@onWorker
+            main.post {
+                message = removalProblemSaid(login)
+                // The folder is still there, so the account is still this phone's — a list that
+                // carried on without it would be the app disagreeing with its own disk.
+                refresh()
+            }
+        }
     }
 
     /** The token of the active account, for the sign-in check. */

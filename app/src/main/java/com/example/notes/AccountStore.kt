@@ -57,6 +57,17 @@ data class Account(
  * Any other host answers the login at the host's own domain, which is a convention rather than a
  * promise — and a local project, which has no host at all, is left to [fallbackEmail].
  */
+/**
+ * What is said when an account is still on the phone after two attempts to remove it.
+ *
+ * **Named, not implied.** The person pressed a button that promised the account would go; the one
+ * thing that must not happen is a screen that has forgotten it while the disk has not. The sentence
+ * says which account, that it is still there, and what to do — the same three things every refusal
+ * in this app says.
+ */
+fun removalProblemSaid(login: String): String =
+    "\"$login\" is still on this phone: something was still writing into it. Remove it again."
+
 internal fun noreplyEmail(login: String, id: Long = 0L, host: String = GITHUB_HOST): String {
     if (!Secrets.isHost("https://$host/", GITHUB_HOST) && host.isNotBlank()) {
         // Not GitHub's domain, so not GitHub's address form. `user@host` is what every mail-shaped
@@ -222,12 +233,19 @@ class AccountStore(private val filesDir: File) {
         return account
     }
 
-    /** Removes everything this phone holds for [login]. */
-    fun remove(login: String) {
+    /**
+     * Removes everything this phone holds for [login], and says whether it is gone.
+     *
+     * **The answer is the point.** It used to be discarded, and the one case where it mattered is
+     * the one this app keeps finding: a save still on its way to the worker writes into the tree
+     * while this walks it, `delete` fails on the folder that has just been re-made, and the person
+     * is told the account was removed while it is still on the phone. A caller that cannot see the
+     * `false` cannot ask again or say so.
+     */
+    fun remove(login: String): Boolean =
         // The whole account goes, so following a link here would delete nothing that is not already
         // being deleted - but the same function is used for both, so it uses the safe walk.
         Workspace.deleteTree(dirOf(login))
-    }
 
     /**
      * Forgets [login] and leaves everything the person made.
@@ -237,7 +255,7 @@ class AccountStore(private val filesDir: File) {
      * keeping the account — the account is what was removed — so what goes is the
      * app's own folder inside it: the identity, the history, the pretend GitHub.
      */
-    fun forget(login: String) {
+    fun forget(login: String): Boolean {
         // **`Workspace.deleteTree`, because this folder holds links to something that survives.**
         // `.muffy/worktrees/<project>/<branch>/system` points at the account's own system folder, and
         // `deleteRecursively()` follows a symlink - so forgetting an account while keeping its files
@@ -245,6 +263,10 @@ class AccountStore(private val filesDir: File) {
         Workspace.deleteTree(stateDir(login))
         val dir = dirOf(login)
         if (dir.isDirectory && dir.listFiles().isNullOrEmpty()) dir.delete()
+        // **The account is gone when its identity is, not when its folder is.** Keeping the copies
+        // is a decision to leave a folder full of projects behind, so `dir` staying is the success
+        // case here - and `accounts()` reads exactly this file to decide what this phone has.
+        return !detailsOf(login).isFile
     }
 
     /** True when the phone holds any trace of [login]. */
