@@ -41,8 +41,17 @@ object GitCredentials {
     /** The three answers a remote can get. */
     sealed interface Answer {
 
-        /** Send this token. */
-        data class Use(val token: String) : Answer
+        /**
+         * Send this token, and present it as [user].
+         *
+         * **[user] is null when the credential did not name one**, which is the account's own
+         * username — the one place "who am I on this host" is recorded. A connection from the scoped
+         * vault names its own (`gitlab.com` wants `oauth2` beside a personal token, and the account's
+         * name would be a different person's), and a blank one is a person who cleared it rather than
+         * an absence to be filled in: the window shows the name it would use, so "leave the field
+         * alone" means the stored value, not a second inheritance rule.
+         */
+        data class Use(val token: String, val user: String? = null) : Answer
 
         /** Nothing to send, and nothing wrong: there is no host at all. */
         data object None : Answer
@@ -83,6 +92,13 @@ object GitCredentials {
         accountToken: String?,
         accountHost: String,
         vault: (host: String) -> String?,
+        /**
+         * The scoped connection for this host, or null — Vault B's git kind.
+         *
+         * A function rather than a store, so this stays a decision over three strings and one look-up,
+         * and so the *scope* rule (branch, then project, then account) stays where it lives.
+         */
+        connection: (host: String) -> Connection? = { null },
     ): Answer {
         val url = remoteUrl?.trim().orEmpty()
         // **Nowhere to send a key.** `hostOf` answers an empty string for a local path, which is the
@@ -90,8 +106,16 @@ object GitCredentials {
         val host = Secrets.hostOf(url)
         if (host.isEmpty()) return Answer.None
 
-        // **The project's own secret first**, and the store already answers narrowest-first, so this
-        // is one question rather than three.
+        // **The scope's own connection first.** It is what a person sets in a row's ⋮, and it carries
+        // the username with the token — the two are one credential, because a token presented under
+        // the wrong name is a different identity.
+        connection(host)?.takeIf { it.secret.isNotBlank() }?.let {
+            return Answer.Use(it.secret, it.user)
+        }
+
+        // **Then a secret named `git` bound to this host**, which is the way a person reached a host
+        // this app knows nothing about before there was a scoped window. Kept, because a credential
+        // somebody stored must not stop working because a second door onto the same host was added.
         vault(host)?.takeIf { it.isNotBlank() }?.let { return Answer.Use(it) }
 
         if (isAccountHost(accountHost, url)) {

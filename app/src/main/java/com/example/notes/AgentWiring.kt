@@ -115,6 +115,10 @@ object AgentWiring {
             // The same fact for the agent's push: the account says which host its key is for.
             accountHost = { accounts.account(login)?.host ?: GITHUB_HOST },
             gitUser = { accounts.account(login)?.gitUser.orEmpty() },
+            // **The scoped connection, asked the same way the screen asks it.** An agent pushing from
+            // `feature` must present the credential that branch holds, not the project's — a token a
+            // host limits to one branch is a credential a branch owns.
+            gitConnection = { project, branch, host -> credentials.gitConnectionFor(project, branch, host) },
         )
         // **The indexer, wired before anything can commit.** Both the runner and the screen build a
         // `ProjectGit`, and either of them can be the first to save something, so both wire this —

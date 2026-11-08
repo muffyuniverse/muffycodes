@@ -95,6 +95,64 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a git connection supplies the token and the name, and the branch asks as itself`() {
+        // **The wiring, which no push to a real server can show.** Two facts at once: the connection is
+        // asked with *this view's* branch (a token a host limits to one branch belongs to that branch,
+        // so a push from `feature` must not ask as the project), and the username it names is what the
+        // token is presented under. Both are invisible behind a network failure, which is why the
+        // decision is reachable here rather than only through a push.
+        val asked = mutableListOf<Triple<String, String, String>>()
+        val project = ProjectGit(
+            workspace = workspace,
+            tokenProvider = { "ghp_the-account-key" },
+            authorProvider = { author },
+            gitUser = { "the-account-name" },
+            gitConnection = { p, b, h ->
+                asked += Triple(p, b, h)
+                Connection(address = h, secret = "glpat-the-branch-key", user = "oauth2")
+            },
+        )
+        val onFeature = project.onBranch("feature")
+
+        val answer = onFeature.credentialFor("Shopping", "https://gitlab.com/someone/shopping.git")
+
+        assertEquals(
+            "the branch asked as itself, for the host it is talking to",
+            listOf(Triple("Shopping", "feature", "gitlab.com")),
+            asked,
+        )
+        assertEquals(
+            "and the pair travelled together",
+            GitCredentials.Answer.Use("glpat-the-branch-key", "oauth2"),
+            answer,
+        )
+        assertEquals(
+            "the name is the connection's",
+            "oauth2",
+            onFeature.userOf(answer as GitCredentials.Answer.Use),
+        )
+    }
+
+    @Test
+    fun `a credential with no name of its own is presented as the account`() {
+        // **The other half of the same rule**: a named secret and the account's own token say nothing
+        // about a username, and the account's is the one place it is recorded. A blank answer here would
+        // make every push from a scoped vault arrive as nobody.
+        val project = ProjectGit(
+            workspace = workspace,
+            tokenProvider = { null },
+            authorProvider = { author },
+            gitUser = { "the-account-name" },
+        )
+
+        assertEquals(
+            "the account's name",
+            "the-account-name",
+            project.userOf(GitCredentials.Answer.Use("glpat-a-named-secret")),
+        )
+    }
+
+    @Test
     fun `a project of text files can be pushed while the LFS filter is on`() {
         // **The bug that made every sync fail, and it had nothing to do with pictures.**
         //

@@ -30,8 +30,9 @@ class GitCredentialsTest {
         accountToken: String?,
         accountHost: String = GITHUB_HOST,
         vault: (host: String) -> String? = { null },
+        connection: (host: String) -> Connection? = { null },
     ): GitCredentials.Answer =
-        GitCredentials.forRemote(remoteUrl, accountToken, accountHost, vault)
+        GitCredentials.forRemote(remoteUrl, accountToken, accountHost, vault, connection)
 
     @Test
     fun `the account's own host, with a key, uses it`() {
@@ -124,6 +125,69 @@ class GitCredentialsTest {
         }
 
         assertEquals(GitCredentials.Answer.Use("glpat-the-project-key"), answer)
+    }
+
+    @Test
+    fun `a connection supplies the username with the token`() {
+        // **The pair the scoped vault exists to keep together.** A token presented under the wrong name
+        // is a different identity — `gitlab.com` with a personal token wants `oauth2`, and the account's
+        // name would be somebody else's — so `Use` carries the two, and null means "the account's own".
+        val answer = forRemote(
+            "https://gitlab.com/someone/r.git",
+            accountToken(),
+            connection = { host ->
+                if (host == "gitlab.com") {
+                    Connection(address = "gitlab.com", secret = "glpat-scoped", user = "oauth2")
+                } else {
+                    null
+                }
+            },
+        )
+
+        assertEquals(GitCredentials.Answer.Use("glpat-scoped", "oauth2"), answer)
+    }
+
+    @Test
+    fun `a connection is asked before a secret of the same name`() {
+        // **Two doors onto one host, and the newer one answers first.** Vault B is what a person sets in
+        // a row's ⋮; the `git`-named secret is the older way to reach a host this app knows nothing
+        // about. Both are kept — a credential somebody stored must not stop working — and when both
+        // exist the one that was set at the narrower scope wins, because that is what the scopes mean.
+        val answer = forRemote(
+            "https://gitlab.com/someone/r.git",
+            accountToken(),
+            vault = { "glpat-the-named-secret" },
+            connection = { Connection(address = "gitlab.com", secret = "glpat-the-connection") },
+        )
+
+        assertEquals(GitCredentials.Answer.Use("glpat-the-connection", ""), answer)
+    }
+
+    @Test
+    fun `a blank connection is no credential, so the next door is tried`() {
+        // **A connection with no secret is a row somebody emptied**, and an empty token sent as a bearer
+        // is a 401 that explains nothing. The account's own key is what a remote gets instead — the same
+        // answer it would have got if the row had never been made.
+        val answer = forRemote(
+            "https://github.com/o/r.git",
+            accountToken(),
+            connection = { Connection(address = "github.com", secret = "") },
+        )
+
+        assertEquals(GitCredentials.Answer.Use(accountToken()), answer)
+    }
+
+    @Test
+    fun `a connection never answers for a host it was not asked about`() {
+        // **The store decides which connection is offered, and this is the decision refusing to invent
+        // one.** A lambda that answered for every host would be a vault with no host binding at all.
+        val answer = forRemote(
+            "https://github.com/o/r.git",
+            null,
+            connection = { host -> if (host == "gitlab.com") Connection("gitlab.com", "glpat") else null },
+        )
+
+        assertTrue("nothing is sent: $answer", answer is GitCredentials.Answer.Say)
     }
 
     @Test

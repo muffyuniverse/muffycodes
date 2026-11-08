@@ -585,6 +585,13 @@ class AppViewModel @JvmOverloads constructor(
         // making the app GitHub-shaped in the first place.
         accountHost = { activeLogin?.let { accounts.account(it)?.host } ?: GITHUB_HOST },
         gitUser = { activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty() },
+        // **The scoped connection first, and the named secret after it.** `PLAN-credentials` §2.2: a
+        // git connection is a token *and the name it is presented as*, held at branch, project or
+        // account scope. The older `git`-named secret is still read behind it, so a credential
+        // somebody stored keeps working.
+        gitConnection = { project, branch, host ->
+            credentials.gitConnectionFor(project, branch, host)
+        },
     )
 
     /**

@@ -90,6 +90,16 @@ class ProjectGit(
      * questions: the host decides *whether* the key may go, the username decides *how it is presented*.
      */
     private val gitUser: () -> String = { "" },
+
+    /**
+     * **The git connection this branch, project or account holds for a host, or null** (Vault B).
+     *
+     * Asked before the named secret, because it is the one that carries a username with the token and
+     * the one a person sets in a row's ⋮. The store answers narrowest-first and skips a nearer scope
+     * bound to another host, so one lambda is the whole of "this branch has its own key for this host".
+     */
+    private val gitConnection: (project: String, branch: String, host: String) -> Connection? =
+        { _, _, _ -> null },
 ) {
 
     /**
@@ -103,6 +113,7 @@ class ProjectGit(
         if (branch == this.branch) this
         else ProjectGit(
             workspace, tokenProvider, authorProvider, index, branch, vaultToken, accountHost, gitUser,
+            gitConnection,
         )
 
     /**
@@ -120,11 +131,30 @@ class ProjectGit(
      * **Asked before anything is sent**, so a host this phone has no credential for produces a sentence
      * rather than a server's 401 about a key that was never offered — the failure this app forbids
      * most. The decision itself is [GitCredentials], which has no Android in it and is tested alone.
+     *
+     * **`internal` rather than private**, because the wiring is half the decision: that a branch's
+     * `ProjectGit` asks with *its* branch, and that a connection's username travels with its token, are
+     * facts no push to a real server can be made to show in a test — and a decision reachable only
+     * through the network is a decision the suite cannot falsify.
      */
-    private fun credentialFor(project: String, remoteUrl: String?): GitCredentials.Answer =
-        GitCredentials.forRemote(remoteUrl, tokenProvider(), accountHost()) { host ->
-            vaultToken(project, branch, host)
-        }
+    internal fun credentialFor(project: String, remoteUrl: String?): GitCredentials.Answer =
+        GitCredentials.forRemote(
+            remoteUrl = remoteUrl,
+            accountToken = tokenProvider(),
+            accountHost = accountHost(),
+            vault = { host -> vaultToken(project, branch, host) },
+            connection = { host -> gitConnection(project, branch, host) },
+        )
+
+    /**
+     * **The username a credential is presented with**: its own, or the account's.
+     *
+     * One function rather than `answer.user ?: gitUser()` six times, because the six verbs must agree
+     * about who they are — a push made as one person and a tag made as another is the drift that makes
+     * a host's own history unreadable.
+     */
+    internal fun userOf(answer: GitCredentials.Answer.Use): String = answer.user ?: gitUser()
+
 
     /** Opens the project's repository, or null when it has none. */
     fun open(project: String): Repository? {
@@ -386,10 +416,10 @@ class ProjectGit(
                 // **Decided before anything leaves the phone.** A remote this phone has no
                 // credential for is a sentence, not a server's 401 about a key never offered.
                 val remote = remoteUrlOf(it)
-                val token = when (val answer = credentialFor(project, remote)) {
+                val (token, user) = when (val answer = credentialFor(project, remote)) {
                     is GitCredentials.Answer.Say -> return GitService.RemoteResult(answer.why, false)
-                    is GitCredentials.Answer.Use -> answer.token
-                    GitCredentials.Answer.None -> null
+                    is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+                    GitCredentials.Answer.None -> null to gitUser()
                 }
                 val pictures = LfsSync.push(it, token, remote)
                 if (!pictures.ok) {
@@ -412,7 +442,7 @@ class ProjectGit(
                     // replaced it with classic gitignore — "a simple tracked/untracked switch" — so
                     // what is on this phone's `main` and what is on GitHub's are now the same
                     // history, and the push is a fast-forward like any other.
-                    GitService.push(it, token, gitUser = gitUser())
+                    GitService.push(it, token, gitUser = user)
                 }
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
@@ -442,13 +472,13 @@ class ProjectGit(
             repo.use {
                 try {
                     val remote = remoteUrlOf(it)
-                    val token = when (val answer = credentialFor(project, remote)) {
+                    val (token, user) = when (val answer = credentialFor(project, remote)) {
                         is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(
                             answer.why,
                             false,
                         )
-                        is GitCredentials.Answer.Use -> answer.token
-                        GitCredentials.Answer.None -> null
+                        is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+                        GitCredentials.Answer.None -> null to gitUser()
                     }
                     val pictures = LfsSync.push(it, token, remote)
                     if (!pictures.ok) {
@@ -458,7 +488,7 @@ class ProjectGit(
                             false,
                         )
                     }
-                    GitService.push(it, token, gitUser = gitUser())
+                    GitService.push(it, token, gitUser = user)
                 } catch (e: Throwable) {
                     GitService.RemoteResult(Secrets.describe(e), false)
                 }
@@ -493,12 +523,12 @@ class ProjectGit(
                     if (remote.isNullOrBlank()) {
                         return@use Pulled(false, said = "This project has no address to pull from")
                     }
-                    val token = when (val answer = credentialFor(project, remote)) {
+                    val (token, user) = when (val answer = credentialFor(project, remote)) {
                         is GitCredentials.Answer.Say -> return@use Pulled(false, said = answer.why)
-                        is GitCredentials.Answer.Use -> answer.token
-                        GitCredentials.Answer.None -> null
+                        is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+                        GitCredentials.Answer.None -> null to gitUser()
                     }
-                    GitService.fetch(it, token, gitUser())
+                    GitService.fetch(it, token, user)
                     val branch = it.branch ?: "main"
                     val upstream = it.resolve("refs/remotes/origin/$branch")
                         ?: return@use Pulled(true, said = "Nothing to pull: the remote has no $branch yet")
@@ -656,12 +686,12 @@ class ProjectGit(
                 // **The same decision as a push**, because it is the same push: a tag's ref goes to
                 // the same host with the same key, and a tag refused by a server is no better than a
                 // commit refused by one.
-                val token = when (val answer = credentialFor(project, remote)) {
+                val (token, user) = when (val answer = credentialFor(project, remote)) {
                     is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(answer.why, false)
-                    is GitCredentials.Answer.Use -> answer.token
-                    GitCredentials.Answer.None -> null
+                    is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+                    GitCredentials.Answer.None -> null to gitUser()
                 }
-                GitService.tagAndPush(it, clean, message, token, gitUser())
+                GitService.tagAndPush(it, clean, message, token, user)
             }
         }
     }
@@ -676,12 +706,12 @@ class ProjectGit(
      */
     fun checkRemote(project: String, remoteUrl: String): GitService.RemoteAnswer {
         Secrets.transportProblem(remoteUrl)?.let { return GitService.RemoteAnswer.Refused(it) }
-        val token = when (val answer = credentialFor(project, remoteUrl)) {
+        val (token, user) = when (val answer = credentialFor(project, remoteUrl)) {
             is GitCredentials.Answer.Say -> return GitService.RemoteAnswer.Refused(answer.why)
-            is GitCredentials.Answer.Use -> answer.token
-            GitCredentials.Answer.None -> null
+            is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+            GitCredentials.Answer.None -> null to gitUser()
         }
-        return GitService.lsRemote(remoteUrl, token, gitUser())
+        return GitService.lsRemote(remoteUrl, token, user)
     }
 
     fun cloneInto(
@@ -697,10 +727,10 @@ class ProjectGit(
         // `GitService.clone` so that every way a URL is used answers one question the same way. The
         // project folder does not exist yet, so only the account and shared scopes can answer — which
         // is exactly why an account's key is stored at account scope.
-        val token = when (val answer = credentialFor(project, remoteUrl)) {
+        val (token, user) = when (val answer = credentialFor(project, remoteUrl)) {
             is GitCredentials.Answer.Say -> return GitService.RemoteResult(answer.why, false)
-            is GitCredentials.Answer.Use -> answer.token
-            GitCredentials.Answer.None -> null
+            is GitCredentials.Answer.Use -> answer.token to userOf(answer)
+            GitCredentials.Answer.None -> null to gitUser()
         }
         val result = GitService.clone(
             remoteUrl,
@@ -708,7 +738,7 @@ class ProjectGit(
             authorProvider(),
             token,
             deadline,
-            gitUser(),
+            user,
         )
         if (result.success) {
             open(project)?.use { repo ->
