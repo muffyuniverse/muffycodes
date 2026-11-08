@@ -53,11 +53,22 @@ class ConnectionsTest {
         // **The case that makes scopes worth having**: one server, the cheap model on one project.
         // The project has no address of its own, so the choice may be read at the project and at
         // anything narrower - a branch may even choose differently inside the same project.
-        val at = SecretScope.Account
         assertEquals(
             "the branch, the project and the account may all say what model to ask for",
-            connectionScopes("acme", "feature"),
-            choiceScopes("acme", "feature", at),
+            listOf(
+                SecretScope.Branch("acme", "feature"),
+                SecretScope.Project("acme"),
+                SecretScope.Account,
+            ),
+            choiceScopes("acme", "feature", SecretScope.Account),
+        )
+        // **And the general scope is not among them, which is the same cap doing a second job.** A
+        // general entry is the app-wide embedding key; a chat request is made *as* somebody, so no
+        // wider scope than the account may choose its model - even when the account's address was the
+        // one inherited, because the account is where the chain ends.
+        assertTrue(
+            "the general scope is never a chat choice",
+            SecretScope.General !in choiceScopes("acme", "feature", SecretScope.Account),
         )
     }
 
