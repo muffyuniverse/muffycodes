@@ -81,11 +81,13 @@ enum class CatalogueKind(
     /** What a row is called, in the picker's own words. */
     val label: String,
 ) {
-    CHAT("/api/v1/models", "Model"),
-    EMBEDDING("/api/v1/embeddings/models", "Embedding model"),
+    // **Paths below the connection's base URL**, so a server of one's own is asked in its own
+    // spelling: the base already ends in `/v1` for OpenRouter and for most compatible servers.
+    CHAT("/models", "Model"),
+    EMBEDDING("/embeddings/models", "Embedding model"),
     // **A query parameter, not a path**, because rerank models are chat models filtered by what they
     // can output. The operator's design is one argument and this is what that argument is here.
-    RERANK("/api/v1/models?output_modalities=rerank", "Rerank model"),
+    RERANK("/models?output_modalities=rerank", "Rerank model"),
     ;
 
     /**
@@ -141,7 +143,7 @@ class OpenRouterCatalogue(
     }
 
     override fun endpoints(id: String): Result<List<EndpointInfo>> = try {
-        val text = get("/api/v1/models/$id/endpoints")
+        val text = get("/models/$id/endpoints")
         parseEndpoints(text)
     } catch (e: Exception) {
         Result.failure(

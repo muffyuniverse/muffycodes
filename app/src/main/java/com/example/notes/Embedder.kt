@@ -109,7 +109,7 @@ interface Embedder {
                         put("query", query)
                         put("documents", JSONArray(documents))
                     }
-                    val answer = post("/api/v1/rerank", body, key)
+                    val answer = post("/rerank", body, key, baseUrl())
                     parseRerank(answer)
                 } catch (e: Exception) {
                     Result.failure(IllegalStateException(Secrets.explain(e, "The results could not be reranked")))
