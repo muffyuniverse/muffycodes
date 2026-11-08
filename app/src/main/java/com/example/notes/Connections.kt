@@ -54,13 +54,22 @@ enum class ConnKind {
  *
  * **The shape travels with the pair** ([Shape]), because it is a fact about the same server: a
  * different address means a different shape, and half of one is a request that cannot be sent.
+ *
+ * **[shapes] is a map, not one shape, because one server answers three kinds of request** — a chat
+ * completion, an embedding, a rerank — and each has its own path and its own body. One shape per
+ * connection would have had to be the chat's, and then a self-hosted server would have been told how
+ * to answer a chat and nothing else. A kind that is missing falls back to the app's preset for it,
+ * which is exactly what a connection to a compatible server needs.
  */
 data class Connection(
     val address: String,
     val secret: String,
     val user: String = "",
-    val shape: Shape? = null,
-)
+    val shapes: Map<ShapeKind, Shape> = emptyMap(),
+) {
+    /** The request shape for [kind]: the server's own when it was recorded, the preset otherwise. */
+    fun shapeFor(kind: ShapeKind): Shape = shapes[kind] ?: Shape.preset(kind)
+}
 
 /**
  * One scope's choice: **the model and how hard it should think**, and the two numbers that come with

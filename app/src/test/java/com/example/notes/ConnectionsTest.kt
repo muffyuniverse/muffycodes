@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -369,6 +370,30 @@ class ConnectionsTest {
         assertEquals("http://127.0.0.1:11434/v1", wired.active.baseUrl)
         assertTrue("it is keyless", wired.keyless)
         assertNull("and there is no key to send", wired.key())
+    }
+
+    @Test
+    fun `one server record carries a shape per kind, and a missing kind is the preset`() {
+        // **One connection, three requests.** A self-hosted server answers a chat, an embedding and a
+        // rerank at three paths with three bodies; a single shape on the row would have had to be the
+        // chat's, and a server that speaks all three would have been told how to answer one.
+        val ollama = Shape(
+            url = "/api/chat",
+            body = JSONObject("""{"model":"{{model}}","messages":{{messages}},"stream":{{stream}}}"""),
+            kind = ShapeKind.CHAT,
+        )
+        val connection = Connection(
+            address = "http://127.0.0.1:11434",
+            secret = "",
+            shapes = mapOf(ShapeKind.CHAT to ollama),
+        )
+
+        assertEquals("/api/chat", connection.shapeFor(ShapeKind.CHAT).url)
+        assertEquals(
+            "an embedding is not the chat's shape, and falls back to the app's own",
+            Shape.EMBEDDING.url,
+            connection.shapeFor(ShapeKind.EMBEDDING).url,
+        )
     }
 
     @Test

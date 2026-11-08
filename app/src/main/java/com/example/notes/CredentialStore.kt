@@ -712,19 +712,11 @@ class CredentialStore(context: Context) : Credentials {
         // each reader decides: the git lookup skips a blank secret, and a chat connection with none is
         // [Wired.keyless]. Refusing it here made a keyless server impossible to store at all.
         val secret = json.optString("secret")
-        val shape = json.optString("url").takeIf { it.isNotBlank() }?.let { url ->
-            val body = try {
-                JSONObject(json.optString("shape"))
-            } catch (t: Throwable) {
-                return null
-            }
-            Shape(url, body, shapeKindOf(kind))
-        }
         return Connection(
             address = address,
             secret = secret,
             user = json.optString("user"),
-            shape = shape,
+            shapes = shapesOf(json.optJSONObject("shapes")),
         )
     }
 
@@ -733,14 +725,44 @@ class CredentialStore(context: Context) : Credentials {
         val json = JSONObject().apply {
             put("secret", connection.secret)
             if (connection.user.isNotBlank()) put("user", connection.user)
-            connection.shape?.let {
-                put("url", it.url)
-                put("shape", it.body.toString())
-            }
+            if (connection.shapes.isNotEmpty()) put("shapes", shapesJson(connection.shapes))
         }
         // **The address as written**, not lowercased: it is a base URL, and lowercasing a path is
         // how a connection starts 404ing on a server that is case-sensitive.
         prefs.edit().putString(key, connection.address.trim() + HOST_SEPARATOR + encrypt(json.toString())).apply()
+    }
+
+    /**
+     * **A connection's shapes, one per kind, as a document.**
+     *
+     * Keyed by the kind's name rather than by an index, because the set can gain a kind and an index
+     * would silently move what a stored row means. A shape whose body will not parse is dropped rather
+     * than failing the whole row: the address and the key are still a credential, and a lost shape
+     * falls back to the preset, which is the same request the app sent before it could store one.
+     */
+    private fun shapesJson(shapes: Map<ShapeKind, Shape>): JSONObject = JSONObject().apply {
+        shapes.forEach { (kind, shape) ->
+            put(kind.name, JSONObject().apply {
+                put("url", shape.url)
+                put("body", shape.body.toString())
+            })
+        }
+    }
+
+    private fun shapesOf(json: JSONObject?): Map<ShapeKind, Shape> {
+        if (json == null) return emptyMap()
+        val answer = LinkedHashMap<ShapeKind, Shape>()
+        for (kind in ShapeKind.entries) {
+            val one = json.optJSONObject(kind.name) ?: continue
+            val url = one.optString("url")
+            val body = try {
+                JSONObject(one.optString("body"))
+            } catch (t: Throwable) {
+                continue
+            }
+            if (url.isNotBlank()) answer[kind] = Shape(url, body, kind)
+        }
+        return answer
     }
 
     /**
@@ -1087,14 +1109,6 @@ class CredentialStore(context: Context) : Credentials {
 
     private fun connKey(login: String?, scope: SecretScope, kind: ConnKind, field: String = ""): String? =
         connPrefix(login, scope)?.let { it + kind.name.lowercase() + field }
-
-    /** The shape a kind sends, when the caller did not say (a row read back from storage). */
-    private fun shapeKindOf(kind: ConnKind): ShapeKind = when (kind) {
-        ConnKind.LLM -> ShapeKind.CHAT
-        // **A git connection has no HTTP body at all**, so it never carries a shape; the chat kind is
-        // the harmless answer rather than a new enum value nothing would ever use.
-        ConnKind.GIT -> ShapeKind.CHAT
-    }
 
     private fun branchSecretKey(login: String, project: String, branch: String, name: String): String =
         branchSecretPrefix(login, project, branch) + java.net.URLEncoder.encode(name, "UTF-8")
