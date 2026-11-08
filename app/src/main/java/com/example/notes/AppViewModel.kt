@@ -5518,6 +5518,10 @@ class AppViewModel @JvmOverloads constructor(
         ws.activeBranch = branch
         forgetBranches()
         open(listOf(project))
+        // **The strip's count belongs to the tree, so entering one re-counts it.** Without this the
+        // screen opened a branch still showing main's number — "up to date" beside five unsent files,
+        // which is the same wrong sentence the strip had before, one tap earlier.
+        refreshChanges()
         Trace.note("branch-enter", "$project · $branch · $tree")
     }
 
