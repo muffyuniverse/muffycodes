@@ -640,8 +640,14 @@ class AppViewModel @JvmOverloads constructor(
         // is the ordinary start, and spawning a worker for it costs a thread and a file read on every
         // construction — which in a test shard is hundreds of them, all competing with whatever the
         // shard is actually measuring.
+        // **Every tree, because a marker is kept in a tree's own `agent/`.** Asking only the project
+        // folder would leave a branch's marker for ever, which is housekeeping that never runs while
+        // the app reports that there is nothing to do.
         val any = (ws.accountDir.listFiles() ?: emptyArray())
-            .any { it.isDirectory && !ws.isHidden(it.name) && Maintenance.waiting(it) }
+            .filter { it.isDirectory && !ws.isHidden(it.name) }
+            .any { dir ->
+                Worktrees(ws).branches(dir.name).any { Maintenance.waiting(ws.treeOf(dir.name, it)) }
+            }
         if (!any) return
         // **The account it was started for, named.** A `gc` can run for a minute, and an account
         // deleted while it does would be re-created by nothing here — but the log row a finished pass
@@ -659,8 +665,10 @@ class AppViewModel @JvmOverloads constructor(
                     // running, and the log row a finished pass writes would be written into a folder
                     // they removed — a deleted account coming back in the smallest possible form.
                     alive = { account.isDirectory },
-                    busy = { project ->
-                        sessions.any { it.project == project && it.running }
+                    // **Per worktree**, because two branches of one project are two agents and a
+                    // `gc` must not wait for the wrong one — nor run beside a branch's commit.
+                    busy = { project, branch ->
+                        sessions.any { it.project == project && it.branch == branch && it.running }
                     },
                 )
                 // **Only what did something refreshes the screen.** A start where nothing was

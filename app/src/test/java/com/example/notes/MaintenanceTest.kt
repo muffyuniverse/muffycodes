@@ -106,11 +106,41 @@ class MaintenanceTest {
         repository(2)
         Maintenance.mark(dir, "the history was shortened")
 
-        val done = Maintenance.run(ws, busy = { it == "shopping" })
+        // **(project, branch)** — a run is per worktree, because two branches of one project are two
+        // agents and a collection must not wait for the wrong one.
+        val done = Maintenance.run(ws, busy = { project, _ -> project == "shopping" })
 
         assertEquals("one attempt", 1, done.size)
         assertTrue("it said why: ${done.first().said()}", done.first().said().contains("agent is switched on"))
         assertTrue("and asked again next time", Maintenance.waiting(dir))
+    }
+
+    @Test
+    fun `a marker in a branch's tree is collected, and main's is not touched`() {
+        // **Each tree keeps its own `agent/`**, so a marker written into a branch's worktree was one
+        // the pass never saw: housekeeping would report nothing to do for ever while a branch's index
+        // grew. Both halves are asserted, because "the branch was collected" alone would pass if the
+        // pass had collected *everything* wholesale.
+        repository(2)
+        val worktrees = Worktrees(ws)
+        // **A branch and its tree, made the way the app makes them.** `createBranch` needs a repository
+        // and `make` needs a tip, so both come from the fixture's own history.
+        GitService.openExisting(ws.projectDir("shopping"))!!.use { repo ->
+            GitService.createBranch(repo, "feature").getOrThrow()
+        }
+        val tree = worktrees.make("shopping", "feature").getOrThrow()
+        Maintenance.mark(tree, "the history was shortened")
+        assertEquals("the branch's tree is waiting", listOf("main", "feature"), worktrees.branches("shopping"))
+
+        val done = Maintenance.run(ws)
+
+        assertEquals("one tree was maintained", 1, done.size)
+        assertEquals(
+            "and it was the branch's, named so a person can tell them apart",
+            AgentSession.keyOf("shopping", "feature"),
+            done.first().project,
+        )
+        assertFalse("its marker is gone", Maintenance.waiting(tree))
     }
 
     // ---- 2. the sweep, and its order ---------------------------------------

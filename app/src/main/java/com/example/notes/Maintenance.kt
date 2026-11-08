@@ -127,7 +127,7 @@ object Maintenance {
     fun run(
         ws: Workspace,
         /** Asked per project: true when an agent is switched on there. */
-        busy: (String) -> Boolean = { false },
+        busy: (String, String) -> Boolean = { _, _ -> false },
         /**
          * Asked before every project: false when the account has been deleted.
          *
@@ -149,17 +149,27 @@ object Maintenance {
             .sortedBy { it.lowercase() }
         for (project in folders) {
             if (!alive()) break
-            val dir = ws.projectDir(project)
-            if (!waiting(dir)) continue
-            val why = why(dir)
-            // **A running agent means "not now".** `tryHold` is a point-in-time check, and a `gc`
-            // that got the lock would hold it for a minute with an agent's next commit behind it.
-            if (busy(project)) {
-                out += Done(project, why, 0, 0, false, stopped = "its agent is switched on")
-                continue
+            // **Every working tree, not just main's.** Each branch keeps its own `agent/` — the log,
+            // the index and the marker — so a project whose work happens on a branch would never be
+            // collected, and its index would grow with nothing ever sweeping it. The `Done` row is
+            // labelled by session key, so two trees of one project are two rows rather than one
+            // indistinguishable pair.
+            for (branch in Worktrees(ws).branches(project)) {
+                if (!alive()) break
+                val dir = ws.treeOf(project, branch)
+                if (!waiting(dir)) continue
+                val why = why(dir)
+                // **A running agent means "not now".** `tryHold` is a point-in-time check, and a `gc`
+                // that got the lock would hold it for a minute with an agent's next commit behind it.
+                if (busy(project, branch)) {
+                    out += Done(
+                        AgentSession.keyOf(project, branch), why, 0, 0, false,
+                        stopped = "its agent is switched on",
+                    )
+                    continue
+                }
+                out += one(ws, AgentSession.keyOf(project, branch), why, dir, deadline)
             }
-            val done = one(ws, project, why, dir, deadline)
-            out += done
         }
         return out
     }

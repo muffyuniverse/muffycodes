@@ -183,6 +183,29 @@ class Worktrees(private val workspace: Workspace) {
         Workspace.deleteTree(commonEntry(project, branch))
     }
 
+    /**
+     * **Every branch of [project] that has a working tree**, `main` first.
+     *
+     * A branch's folder may be nested (`feature/x`), so this walks rather than listing one level. The
+     * test for a tree is git's own: a `.git` **file**, which is what a linked worktree has and a real
+     * folder does not.
+     */
+    fun branches(project: String): List<String> {
+        val found = mutableListOf(AgentSession.MAIN)
+        val root = File(worktreesRoot(), project)
+        fun walk(dir: File, prefix: String, depth: Int) {
+            if (depth > 4) return
+            (dir.listFiles() ?: return).forEach { child ->
+                if (!child.isDirectory || Workspace.isLink(child)) return@forEach
+                val name = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                if (File(child, ".git").isFile) found += name
+                walk(child, name, depth + 1)
+            }
+        }
+        walk(root, "", 0)
+        return found
+    }
+
     /** Removes every branch folder of [project], for a project that is being deleted or renamed. */
     fun removeAll(project: String) {
         val root = File(worktreesRoot(), project)
