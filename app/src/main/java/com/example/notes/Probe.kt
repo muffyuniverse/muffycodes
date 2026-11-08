@@ -28,7 +28,7 @@ object Probe {
      * so a server that never sees a `tools` field is not made to answer a question about one — what is
      * being checked is the address, the key, the model and the shape, and a tool call is none of those.
      */
-    fun request(model: String, provider: String, effort: String): Door.Request = Door.Request(
+    fun request(model: String, provider: String, effort: String): Request = Request(
         model = model,
         provider = provider,
         effort = effort,
@@ -45,7 +45,7 @@ object Probe {
      * already names the status and any `error.metadata.raw` the server sent — so this adds the frame and
      * nothing else.
      */
-    fun check(door: Door, request: Door.Request): String = try {
+    fun check(door: Door, request: Request): String = try {
         door.ping(request).getOrThrow()
         "The server answered, so it is reachable, the key was accepted and it serves " +
             "${request.model}. The shape fits."

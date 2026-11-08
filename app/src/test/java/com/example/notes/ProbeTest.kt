@@ -20,10 +20,10 @@ class ProbeTest {
     /** A door that answers a ping the way a server would: with nothing, or with a refusal. */
     private class DoorThat(private val refuses: Throwable? = null) : Door {
         var pings = 0
-        override fun turn(request: Door.Request): Result<Door.Reply> =
+        override fun turn(request: Request): Result<Door.Reply> =
             Result.failure(IllegalStateException("a check must not ask for a turn"))
 
-        override fun ping(request: Door.Request): Result<Unit> {
+        override fun ping(request: Request): Result<Unit> {
             pings += 1
             return refuses?.let { Result.failure(it) } ?: Result.success(Unit)
         }

@@ -1714,6 +1714,191 @@ class AppViewModel @JvmOverloads constructor(
     var secretSaved: Int by mutableStateOf(0)
         private set
 
+    // ---- the connections a scope holds ----------------------------------------------------
+
+    /**
+     * **What a window on [scope] opens showing**: the values in force for this worktree, or the
+     * scope's own when it has one.
+     *
+     * Read through [AgentWiring.wiredFor], the same resolution a turn uses, so a window cannot show
+     * one address and send to another — the class of bug that makes a person distrust a settings
+     * screen. For git the account is the only source, because the account *is* the credential for the
+     * host it was made against.
+     */
+    fun connectionShown(scope: SecretScope, kind: ConnKind, project: String, branch: String): ConnectionDraft {
+        val ws = workspace
+        val own = credentials.connection(scope, kind)
+        if (kind == ConnKind.GIT) {
+            return ConnectionDraft(
+                kind = ConnKind.GIT,
+                address = own?.address ?: host(project, branch).orEmpty(),
+                user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
+            )
+        }
+        val asked = ws?.let { AgentWiring.wiredFor(it, credentials, project, branch) }
+        val choice = credentials.choice(scope, ConnKind.LLM)
+        return ConnectionDraft(
+            kind = ConnKind.LLM,
+            address = own?.address ?: asked?.active?.baseUrl.orEmpty(),
+            model = choice?.model ?: asked?.active?.model.orEmpty(),
+            effort = choice?.effort ?: asked?.active?.effort.orEmpty(),
+            shapeKind = ShapeKind.CHAT,
+            shapeUrl = own?.shapeFor(ShapeKind.CHAT)?.url.orEmpty(),
+            shapeBody = own?.shapeFor(ShapeKind.CHAT)?.body?.toString().orEmpty(),
+        )
+    }
+
+    /**
+     * The host a project's remote names, or null — what a git window fills its address with.
+     *
+     * **Read, not stored.** The address is the remote's own fact (`remote.origin.url`); the vault keeps
+     * the host a token is for, and this is how the window offers the one it already knows.
+     */
+    fun host(project: String, branch: String): String? {
+        val ws = workspace ?: return null
+        val url = try {
+            projectGit(ws).onBranch(branch).remoteUrlOf(project)
+        } catch (e: Throwable) {
+            null
+        } ?: return null
+        return Secrets.hostOf(url).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * **Keeps what a window typed, and writes nothing for a field that was left alone.**
+     *
+     * Two records rather than one, because they inherit differently: the pair (address + key + shape) is
+     * atomic, and the choice (model + effort) is per field. A blank address therefore writes no pair,
+     * and a blank key *beside* an address means "keep the key that is here" — which is why the window
+     * never fills a key back in.
+     */
+    fun saveConnection(
+        scope: SecretScope,
+        project: String,
+        branch: String,
+        draft: ConnectionDraft,
+        onDone: (Boolean) -> Unit = {},
+    ) {
+        draft.problemSaid()?.let { said ->
+            message = said
+            onDone(false)
+            return
+        }
+        val pair = draft.connection()
+        if (pair != null) {
+            // **An emptied key box keeps the stored key.** The window cannot show a secret, so an empty
+            // box is the ordinary case rather than an instruction to delete one; the explicit act is
+            // "Forget", which is a different button with a different word.
+            val kept = if (pair.secret.isBlank()) credentials.connection(scope, draft.kind)?.secret else null
+            credentials.setConnection(
+                scope,
+                draft.kind,
+                if (pair.secret.isBlank() && kept != null) pair.copy(secret = kept) else pair,
+            )
+        }
+        draft.choice()?.let { credentials.setChoice(scope, draft.kind, it) }
+        Trace.note("connection-saved", "${draft.kind.name.lowercase()} at ${scopeLabel(scope)}")
+        connectionSaved++
+        onDone(true)
+    }
+
+    /** Forgets a scope's connection — **both halves**, because a model with no address is meaningless. */
+    fun forgetConnection(scope: SecretScope, kind: ConnKind) {
+        credentials.forgetConnection(scope, kind)
+        Trace.note("connection-forgotten", "${kind.name.lowercase()} at ${scopeLabel(scope)}")
+        connectionSaved++
+    }
+
+    /** Bumped when a connection changes, so a screen showing one can notice. */
+    var connectionSaved: Int by mutableStateOf(0)
+        private set
+
+    /**
+     * **Checks a connection before it is kept**, with the server's own words.
+     *
+     * Runs on the worker because it opens a socket, and hands the sentence back on the main thread
+     * because a dialog is what shows it. The key it uses is the one that *would* be used: a typed one if
+     * the box has one, the stored one otherwise — checking with a key that is not the one a turn will
+     * send would check a different connection.
+     */
+    fun checkConnection(
+        scope: SecretScope,
+        draft: ConnectionDraft,
+        project: String,
+        branch: String,
+        then: (String) -> Unit,
+    ) {
+        draft.problemSaid()?.let {
+            then(it)
+            return
+        }
+        val key = draft.secret.ifBlank {
+            when (draft.kind) {
+                ConnKind.LLM -> credentials.connection(scope, ConnKind.LLM)?.secret
+                    ?: activeLogin?.let { credentials.modelKey(it) }
+                ConnKind.GIT -> credentials.connection(scope, ConnKind.GIT)?.secret
+                    ?: activeLogin?.let { credentials.token(it) }
+            }
+        }
+        val address = draft.address.trim()
+        if (draft.kind == ConnKind.GIT) {
+            // **A git connection is measured by the protocol's own question**: `ls-remote` says whether
+            // the address is real and whether this token may read it, and there is no second way to
+            // ask.
+            //
+            // **Against the project's own address, not the host.** A host is not a repository — asking
+            // `gitlab.com` whether it exists says nothing about whether this token may read *this*
+            // project — so the check uses `remote.origin.url`, which is where the address lives.
+            val ws = workspace
+            val remote = ws?.let {
+                try {
+                    projectGit(it).onBranch(branch).remoteUrlOf(project)
+                } catch (e: Throwable) {
+                    null
+                }
+            }
+            if (remote.isNullOrBlank()) {
+                then(
+                    "This check asks the project's own address, and this project has none yet. " +
+                        "Set the address first, then check the token against it.",
+                )
+                return
+            }
+            val user = draft.user
+            onWorker {
+                val said = when (val answer = GitService.lsRemote(remote, key, user)) {
+                    is GitService.RemoteAnswer.Branches ->
+                        "The host answered and accepted the token. It has " +
+                            "${answer.names.size} branches this token can see."
+                    is GitService.RemoteAnswer.Refused -> "The host refused: ${answer.why}"
+                }
+                main.post { then(said) }
+            }
+            return
+        }
+        val shape = draft.connection()?.shapeFor(ShapeKind.CHAT) ?: Shape.CHAT
+        onWorker {
+            val door = OpenRouterDoor(
+                key = { key },
+                // **A blank key on a stored connection is a server that wants none**, and the check must
+                // measure exactly what a turn would send (see `Wired.keyless`).
+                keyless = key == null && credentials.connection(scope, ConnKind.LLM) != null,
+                model = draft.model.trim(),
+                provider = providerOf(address),
+                effort = draft.effort.trim(),
+                baseUrl = address,
+                shape = shape,
+                timeoutMs = settings.responseMs,
+                responseMs = settings.responseMs,
+            )
+            val said = Probe.check(
+                door,
+                Probe.request(draft.model.trim(), providerOf(address), draft.effort.trim()),
+            )
+            main.post { then(said) }
+        }
+    }
+
     // ---- links in a document ------------------------------------------------
 
     /**

@@ -137,6 +137,14 @@ fun BranchesScreen(
     onEnter: (String) -> Unit,
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
+    /**
+     * **A branch's own credentials** — what makes a token the host limits to one branch expressible.
+     *
+     * Two callbacks rather than one with a kind, because the two windows ask for different fields and
+     * the plane they arrive on is the row's ⋮, the same door every other verb in this app uses.
+     */
+    onModel: (String) -> Unit = {},
+    onGit: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -166,6 +174,9 @@ fun BranchesScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         )
+        // **Which row's menu is open**, held here so it closes when the screen does and so only one
+        // can be open at a time — a menu per row would be a menu per row's state to keep.
+        var menu by remember(project) { mutableStateOf<String?>(null) }
         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
             for (branch in branches) {
                 Row(
@@ -191,10 +202,41 @@ fun BranchesScreen(
                             )
                         }
                     }
-                    // **main cannot be removed**, because it is the branch a project is made of —
-                    // and offering a button that always refuses is worse than not offering it.
-                    if (branch != "main") {
-                        TextButton(onClick = { onRemove(branch) }) { Text("Remove") }
+                    // **The row's own menu**, because a branch is a place a credential can live
+                    // (a host may limit a token to one branch) *and* the place removal is offered —
+                    // and **main cannot be removed**, being the branch a project is made of, so its
+                    // menu has the two credentials and nothing else.
+                    Box {
+                        IconButton(onClick = { menu = branch }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(expanded = menu == branch, onDismissRequest = { menu = null }) {
+                            DropdownMenuItem(
+                                text = { Text("Model connection…") },
+                                onClick = {
+                                    menu = null
+                                    onModel(branch)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Git credential…") },
+                                onClick = {
+                                    menu = null
+                                    onGit(branch)
+                                },
+                            )
+                            if (branch != "main") {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Remove…", color = MaterialTheme.colorScheme.error)
+                                    },
+                                    onClick = {
+                                        menu = null
+                                        onRemove(branch)
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
                 HorizontalDivider()
@@ -311,6 +353,16 @@ fun BrowserScreen(
     actions: BrowserActions,
     onAddProject: () -> Unit,
     onRowChat: (String) -> Unit,
+    /**
+     * **A project's own credentials**, from its row's ⋮ — two entries, because the two kinds are two
+     * independent acts: a git token can push, a model key can spend money.
+     *
+     * The branch is passed so `main`'s row sets the *project*, and a branch row sets that branch. The
+     * row that opens the window decides the scope, which is the only way "where does this go" can be
+     * answered without a second scope picker inside the window.
+     */
+    onRowModel: (String) -> Unit = {},
+    onRowGit: (String) -> Unit = {},
     /** Exports the project's newest artifact, or the project's own files when it has none. */
     /**
      * Opens the window that publishes a release of [project] (§13b.7).
@@ -954,6 +1006,24 @@ private fun ProjectList(
                                 onClick = {
                                     menu = false
                                     onRename(name)
+                                },
+                            )
+                            // **The two credentials this project may hold** (§2.2 of the credentials
+                            // plan). Two entries rather than one window with a switch, because the
+                            // two kinds are independent: a person may want the agent to ask the model
+                            // server what models exist without letting it push as them.
+                            DropdownMenuItem(
+                                text = { Text("Model connection…") },
+                                onClick = {
+                                    menu = false
+                                    onRowModel(name)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Git credential…") },
+                                onClick = {
+                                    menu = false
+                                    onRowGit(name)
                                 },
                             )
                             // **The way back, for a project that has one.** A local project has no

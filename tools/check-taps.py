@@ -88,6 +88,13 @@ VOCABULARY = {
     "export",
     # publishing a release from inside the app (§13b.7): the strip's button, then the window's press
     "publish release", "confirm publish release",
+    # **A row's credentials** (`PLAN-credentials` §2.2). Two kinds because they are two acts with
+    # different blast radii — a git token can push, a model key can spend money — and two doors per
+    # kind (`model connection` opens the window, `confirm model connection` keeps what it typed)
+    # because a log that could not tell them apart could not answer "did the person get as far as
+    # saving it", which is the question a connection that does not work asks.
+    "model connection", "confirm model connection", "check model connection",
+    "git connection", "confirm git connection", "check git connection", "forget git connection",
     # the account
     # **One confirm for both doors.** `add account` opens the choice; the choice is which door. The
     # account that is made is the same kind of thing either way, so the log has one name for the save
