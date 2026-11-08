@@ -5812,7 +5812,10 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return emptyList()
         val path = ws.relative(dir) ?: return emptyList()
         val project = ws.projectOf(dir) ?: return emptyList()
-        val repo = git
+        // **The tree the folder is in** (§13d). A deleted file is a fact about one branch's history:
+        // main's commits do not hold what `feature` deleted, and offering main's would offer files
+        // this branch never had.
+        val repo = git?.onBranch(ws.branchOf(dir))
         // The path as the repository names it: from the project's own folder, which is the root
         // of its history.
         val base = path.drop(1).joinToString("/")
@@ -5909,7 +5912,9 @@ class AppViewModel @JvmOverloads constructor(
                 "cannot be brought back. Deleting one is permanent."
             return false
         }
-        val repo = git
+        // The folder's own tree, for the same reason [deletedIn] read it there.
+        val branch = ws.branchOf(dir)
+        val repo = git?.onBranch(branch)
         val under = path.drop(1) + gone.name.split("/")
         fun bytesAt(name: String): ByteArray? = repo?.bytesAt(project, name, gone.revision)
 
@@ -5955,8 +5960,9 @@ class AppViewModel @JvmOverloads constructor(
         message = what
         refresh()
         // **The project records it, and there is only one project it can be.** The files
-        // were written into a folder of one repository, so its commit is the one that matters.
-        commitProject(project, what)
+        // were written into a folder of one repository, so its commit is the one that matters —
+        // and [branch] is that repository's view, because `ws.fileAt` above resolved into it.
+        commitProject(project, what, branch)
         historyGeneration++
         return true
     }
