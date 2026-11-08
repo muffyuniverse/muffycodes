@@ -1055,11 +1055,11 @@ class CredentialStore(context: Context) : Credentials {
         connPrefix(login, scope)?.let { it + kind.name.lowercase() + field }
 
     /** The shape a kind sends, when the caller did not say (a row read back from storage). */
-    private fun shapeKindOf(kind: ConnKind): Shape.Kind = when (kind) {
-        ConnKind.LLM -> Shape.Kind.CHAT
+    private fun shapeKindOf(kind: ConnKind): ShapeKind = when (kind) {
+        ConnKind.LLM -> ShapeKind.CHAT
         // **A git connection has no HTTP body at all**, so it never carries a shape; the chat kind is
         // the harmless answer rather than a new enum value nothing would ever use.
-        ConnKind.GIT -> Shape.Kind.CHAT
+        ConnKind.GIT -> ShapeKind.CHAT
     }
 
     private fun branchSecretKey(login: String, project: String, branch: String, name: String): String =

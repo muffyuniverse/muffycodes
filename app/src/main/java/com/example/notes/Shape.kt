@@ -41,7 +41,25 @@ import org.json.JSONObject
  *    it the key — to a host nobody chose. This is the one rule that is a security boundary rather
  *    than a predictability rule.
  */
-data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CHAT) {
+/**
+ * The three kinds of request the app makes, each with the placeholders it can fill.
+ *
+ * **Top level rather than nested in [Shape]'s companion object**, because a classifier declared
+ * inside a companion is `Shape.Companion.Kind` from another file - and the store, which reads a shape
+ * back out of the vault, is another file.
+ */
+enum class ShapeKind(val names: Set<String>) {
+    /** The chat turn: a conversation, its tools, its effort and its size. */
+    CHAT(setOf("model", "messages", "tools", "tool_choice", "stream", "effort", "max_tokens")),
+
+    /** One or more texts in, one vector each out. */
+    EMBEDDING(setOf("model", "input", "dimensions")),
+
+    /** A query and some documents in, a score each out. */
+    RERANK(setOf("model", "query", "documents")),
+}
+
+data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = ShapeKind.CHAT) {
 
     /**
      * Why this shape cannot be used, or null when it can.
@@ -79,13 +97,6 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
 
     companion object {
 
-        /** The three kinds of request the app makes, each with its own placeholders. */
-        enum class Kind(val names: Set<String>) {
-            CHAT(setOf("model", "messages", "tools", "tool_choice", "stream", "effort", "max_tokens")),
-            EMBEDDING(setOf("model", "input", "dimensions")),
-            RERANK(setOf("model", "query", "documents")),
-        }
-
         /**
          * The OpenAI chat shape, **which is what the app sent before there was a shape at all.**
          *
@@ -94,7 +105,7 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
          * that could never be checked or sent anywhere.
          */
         val CHAT = Shape(
-            kind = Kind.CHAT,
+            kind = ShapeKind.CHAT,
             url = "chat/completions",
             body = JSONObject(
                 """
@@ -113,7 +124,7 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
         )
 
         val EMBEDDING = Shape(
-            kind = Kind.EMBEDDING,
+            kind = ShapeKind.EMBEDDING,
             url = "embeddings",
             body = JSONObject(
                 """
@@ -127,7 +138,7 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
         )
 
         val RERANK = Shape(
-            kind = Kind.RERANK,
+            kind = ShapeKind.RERANK,
             url = "rerank",
             body = JSONObject(
                 """
@@ -140,10 +151,10 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
             ),
         )
 
-        fun preset(kind: Kind): Shape = when (kind) {
-            Kind.CHAT -> CHAT
-            Kind.EMBEDDING -> EMBEDDING
-            Kind.RERANK -> RERANK
+        fun preset(kind: ShapeKind): Shape = when (kind) {
+            ShapeKind.CHAT -> CHAT
+            ShapeKind.EMBEDDING -> EMBEDDING
+            ShapeKind.RERANK -> RERANK
         }
 
         /**
@@ -164,7 +175,7 @@ data class Shape(val url: String, val body: JSONObject, val kind: Kind = Kind.CH
          * Why a template cannot be filled, or null when it can — **recursively, and naming the
          * placeholder**, because "invalid shape" is useless to the person who wrote the file.
          */
-        fun placeholderProblem(body: JSONObject?, kind: Kind? = null): String? {
+        fun placeholderProblem(body: JSONObject?, kind: ShapeKind? = null): String? {
             if (body == null) return null
             for (key in body.keys()) {
                 val value = body.opt(key)
