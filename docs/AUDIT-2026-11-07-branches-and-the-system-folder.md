@@ -1,7 +1,9 @@
 # The audit: branches, the system folder, and the eleven things that were wrong
 
-**Written 2026-11-07, after the work landed.** Every claim below is re-checked against the code at
-`5dbb4ed`, and each fix names the commit and the test that holds it. Nothing here is recalled from a
+**Written 2026-11-07, after the work landed, and extended the same night as the audit found more.**
+Every claim below is re-checked against the code at `be28ed4`, and each fix names the commit and the
+test that holds it. §2 is what reading the code found; §2b is what writing a test that walks the whole
+loop found afterwards — and it found more, which is the useful thing to know about this file. Nothing here is recalled from a
 plan; the plans are the next file over, and this one is what is actually true.
 
 The scope was the operator's instruction: *"do the full audit, add falsification tests and find gaps
@@ -58,6 +60,31 @@ defect rather than an instance:
 
 And three paths that asked *the project* where the *tree* was meant: the ignore marks on rows, the
 `.gitignore` the ignore button writes, and the file the changes list opens (`3304256`).
+
+### 2b. The second wave — found by writing the walk-through
+
+`BranchFeatureTest` was written *after* the table above, and it found six more in an afternoon. They
+are listed separately because that is the honest shape of the finding: the first eleven were visible
+by reading the code, and these were not.
+
+| # | Defect | What a person would have seen | Fixed |
+|---|---|---|---|
+| 12 | `Background` remembered `project.name` — the tree's folder name, which is the *branch's* | A background command on a branch **never woke its agent**: the completion was filed under `feature` and the tick asked for `Shopping` | `e6392c5` |
+| 13 | The strip's count and the changes window read main's repository | **"up to date"** beside a branch with five unsent files; a changes window that was empty and named files that do not exist there | `3592c58` |
+| 14 | The ignore marks, the ignore button and the changes list all used the project's root | Marks on the wrong paths, an ignore line written into a document the person was not looking at, and a change opening main's copy of the file | `3304256` |
+| 15 | The index rebuild cleared only main's index | Every branch kept vectors from the model the person had just replaced, so a search there compared two spaces | `3304256` |
+| 16 | `deletedIn`/`restoreDeleted` used main's history | A branch offered back files it never had, and a restore committed to main | `dad38e6` |
+| 17 | `dropBranch` deleted the ref only, and left the session | A fork point git still lists, and a conversation whose `put` could recreate the folder through `AgentLog.open` | `5dbb4ed`, `ed3d7c9` |
+| 18 | `linkSystem` returned before writing the exclusion | A project whose link was made before its repository **reported a change nobody made, for ever**; a commit would have put a symlink in the repository | `f32d505` |
+| 19 | `fileAt` tested only `activeBranch`, not whether that branch exists for *this* project | Open a branch, go up, open another project → **an empty project** | `92ca31b` |
+| 20 | Nothing on screen said which branch was open | Editing `feature`'s copy under a header naming only the project | `92ca31b` |
+| 21 | `Worktrees.rename` repointed one level of listing | A branch called `feature/x` kept pointers to paths that no longer exist | `f49492e` |
+| 22 | Two presses began `githubFor(login) ?: return` | `startRelease`, `exportArtifact` and `fixSigning` did **nothing at all** with no account behind them | `1d8d2c5`, `be28ed4` |
+| 23 | The `downloads` listing said it was the folder | Without a storage permission the store answers only this app's own rows — so a screenshot from another app was *absent* from a list that claimed to be complete | `8b4fe01` |
+
+**The pattern worth naming:** every one of these is a place where a *name* was used as a key, or a
+*project* was asked for something only a *tree* knows. The branch made both wrong without changing
+either line, which is why they were invisible until a test walked the whole loop.
 
 ## 3. The system folder
 
