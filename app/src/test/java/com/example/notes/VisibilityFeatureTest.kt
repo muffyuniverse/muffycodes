@@ -185,6 +185,38 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `search does not walk into the account's own folder through the link`() {
+        // **The link is for a person browsing, not for the app's walk.** Every tree holds `system`
+        // pointing at the account root (§13f), so descending would return the prompt and the templates
+        // as though they were this project's text — and the same files again under every other
+        // project, which makes every search result a duplicate of a file the project does not hold.
+        scene.project("Shopping")
+        scene.open("Shopping")
+        scene.file("note.txt", "an appointment")
+        // A word that exists **only** in the account's own folder, so finding it is the whole question.
+        scene.workspace!!.write(
+            File(File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT), "only-here.txt"),
+            "quarantine",
+        )
+        scene.workspace!!.linkSystem(scene.workspace!!.repoOf("Shopping"))
+
+        scene.viewModel.query = "quarantine"
+
+        assertTrue(
+            "the account's own text is not this project's: ${scene.viewModel.visibleEntries.map { it.name }}",
+            scene.viewModel.visibleEntries.none { it.name == "only-here.txt" },
+        )
+        // **And the file is really there**, so a passing test is not one where the write failed.
+        assertTrue(
+            "the folder the link points at holds it",
+            File(
+                File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT),
+                "only-here.txt",
+            ).isFile,
+        )
+    }
+
+    @Test
     fun `search offers nothing the app owns, and does find what it should`() {
         scene.project("Shopping")
         scene.open("Shopping")
