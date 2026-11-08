@@ -123,9 +123,95 @@ is the one thing that must be in place *before* the PAT door ships, so the door 
 - **It does not change `nameProblem`.** `@` is already a legal character there, and every other rule
   (slashes, Windows reserved names, length) still applies to the name itself.
 
-## 8. The next plan, named so it is not lost
+## 8. Step 5 — the PAT door: an account is tied to a host
 
-The PAT door — *name + host + key*, checked by `ls-remote` rather than by an API — is what makes a
-non-GitHub account exist. It needs, in order: `Account.host` (this plan), a name field that `nameProblem`
-validates, `GitService.clone` moving onto `GitCredentials` (the last GitHub-shaped guard), and
-paste-a-URL add. Recorded here rather than drafted, because it depends on step 2 of this plan landing.
+**The operator's decision, 2026-11-08:** *"when you add an account you define what host it is tied to so
+that it is part of account's identity"*, and the accounts screen is *"a list of name@host choices to tap"*.
+
+So `+ Add` gains a second door beside *Sign in with GitHub*:
+
+| field | rule | why |
+|---|---|---|
+| **name** | `Workspace.nameProblem` **and** not already a login on this phone | it is the account's folder (`accounts/<login>`), so it obeys the folder rules; a duplicate is refused in a sentence (§5) |
+| **host** | a hostname: no scheme, no path, no spaces; a pasted URL is refused with *"the host is `gitlab.com`; the address goes in the project, not here"* | this is what a credential binds to, and a person will paste a URL into it |
+| **git username** *(optional)* | free text, blank means "the token is the username" | the one non-universal part of cloning over HTTPS (see §9); it is **data on the account**, not a table of hosts in the code |
+| **key** | non-empty, shown as dots, never traced | — |
+
+**What cannot be checked, and is therefore said rather than faked.** GitHub's door validates a key against
+`GET /user` and its `x-oauth-scopes` header. No other host has an equivalent, and there is no git command
+that answers "is this key valid" without a repository to ask about. So the door says, in its own
+supporting text: *"the key is tried the first time it is used"*. The refusal then comes from the first
+clone, as a sentence that names the account, the host and which of 401 / 404 / unreachable it was — not as
+a red line in a dialog that pretends to have checked.
+
+### 8.1 The steps
+
+| # | Step | Where |
+|---|---|---|
+| **S1** | `Account(login, commitName, commitEmail, dev, host = "github.com", gitUser = "")`; `save`/`read` round-trip both (`text()`'s blank fallback is the default, so a file written before the field existed reads as what it is) | `AccountStore.kt` |
+| **S2** | `GitCredentials.isAccountHost(host, remoteUrl)` replaces `Secrets.isGitHubHost` **in the credential path only**; `ProjectGit.credentialFor` passes `account.host` down | `GitCredentials`, `ProjectGit` |
+| **S3** | `githubFor` answers **null** unless the account's host is GitHub's (`github.com`), so a GitLab account does not get an `HttpGitHub` pointed at `api.github.com` and a 401 with no explanation. Ten call sites, each of which must then say *"this account is on `<host>`; that is GitHub's API"* instead of *"sign in first"* | `AppViewModel` |
+| **S4** | `AppViewModel.addHostAccount(name, host, gitUser, key, onDone)` — no `identity()`, no `TokenScopes`, `Trace.note("host-account", "added · $host")`. It saves the account, stores the key at **account scope**, and sets it active | `AppViewModel` |
+| **S5** | The dialog: `+ Add` offers two rows; the host door has the four fields above and the sentence from §8. Field shapes so a pasted URL into **host** is refused before anything is saved | `Dialogs.SignInDialog` + a new `AddHostAccountDialog` |
+| **S6** | The labels: accounts row, project rows, branches header, chat and notification identity read `Labels` (§2). With one host on the phone every row reads `@github.com`, which is the operator's instruction and also true | five call sites |
+
+**S4's scope decision, and it matters:** the key is stored **at account scope**, not project scope, because
+a clone happens before a project exists — a project-scoped secret could never be present at the moment it
+is first needed. The store's narrowest-first lookup still lets a project override it later.
+
+**S6 is what a person sees, and S1–S3 are what makes it true.** None of them can be skipped: without S3 a
+GitLab account gets GitHub's API silently; without S2 its own token is offered to the wrong host.
+
+### 8.2 What an account on another host cannot do, said in words
+
+These stay GitHub's, because they *are* GitHub's API and not git:
+
+| feature | answer for an account on `gitlab.com` |
+|---|---|
+| add a project by choosing one from a list | the list is GitHub's; that account gets the URL field (§9) |
+| create a project on the host | not offered; a project is made locally and given a remote |
+| release, CI runs, artifacts, signing key | *"that is GitHub's API; this account is on `gitlab.com`"* |
+| `TokenScopes` check | not run at all — it reads a header only GitHub sends |
+
+## 9. Adding a project by URL — and how universal that really is
+
+**The operator's question:** *"which is a part of git protocol and can work universally, right?"*
+
+**Yes for the clone itself, and no for two of the things around it.** Measured, not assumed:
+
+| part | universal? |
+|---|---|
+| cloning over HTTPS with a credential | **yes** — JGit's transport knows nothing about hosts |
+| cloning from a local path | **yes** — and it is how the whole suite talks to a "remote" |
+| **SSH** (`git@host:path`, `ssh://…`) | **no in this app**: `org.eclipse.jgit.ssh.*` is not a dependency, so there is no `SshSessionFactory` and the call fails with a null-pointer-shaped error. It must be **refused in words**, before the credential decision — and it does not fall out for free, because `Secrets.hostOf("git@host:path")` answers `host` quite happily |
+| **the username form** | **no**: GitHub/Gitea take token-as-username, GitLab documents `oauth2:<token>`, Bitbucket uses `x-token-auth` or a user. Handled as **data**: the URL's userinfo (`https://x-token-auth@host/…`) or the account's `gitUser`; blank means token-as-username |
+| **listing a host's repositories** | **no, and it cannot be**: there is no git command for it. `GET /user/repos` is GitHub's; GitLab uses `/api/v4/projects`, Gitea `/api/v1/user/repos`, Bitbucket `2.0/repositories/{workspace}` — different envelopes, clone fields, auth headers and paging. So the *picker* is GitHub-only and everything else uses the URL |
+| branches, history, commits, LFS pointers | **yes** — refs and objects, no host involved |
+
+### 9.1 The steps
+
+| # | Step | Where |
+|---|---|---|
+| **U1** | `Secrets.transportProblem(url)` — *"this app sends over HTTPS only. Use `https://<host>/<owner>/<repo>.git`"* — asked by `cloneInto` and `makeRemote` **before** `GitCredentials`, so no token is ever considered for an address this app cannot speak to | `Secrets.kt` |
+| **U2** | `GitService.clone` loses its own `isGitHubHost` refusal and takes an already-decided token like `push`/`pull`/`sync` do (P1 §4). This is the last GitHub-shaped guard in the tree | `GitService` |
+| **U3** | `ProjectGit.cloneInto` asks `credentialFor(project, url)` — the same decision as the other three verbs. Note the ordering: the project folder does not exist yet, so only the account and shared scopes can answer, which is why S4 stores at account scope | `ProjectGit` |
+| **U4** | `AppViewModel.addProjectFromUrl(url, name, onDone)`: name prefilled from the URL's last segment, through `nameProblem` and the existing "already a project on this phone" refusal (the same one `pullRepository` uses), then `cloneInto` | `AppViewModel` |
+| **U5** | `AddProjectDialog` gains the URL field and the name field. For a GitHub account the list stays and the URL is the second way in; for any other account the list is absent and the URL is the only way | `Dialogs` |
+| **U6** | `makeRemote(project, url)` (a local project getting a remote) asks U1 and U3 too, so all **four** ways a URL is typed share one decision: clone, add-remote, pull, push | `ProjectGit`, `AppViewModel` |
+
+**The name is asked for, not assumed**, because `nameProblem` refuses slashes and the remote may be
+`my/repo`; the last segment is a prefill a person can correct. And a name already on this phone is refused
+rather than replaced — the rule `pullRepository` already follows, for the same reason: deleting a project
+to import a second copy is one act the person already knows.
+
+### 9.2 What this makes possible, and what it does not
+
+- **Possible:** an account on any host; a project cloned from any HTTPS address, including a self-hosted
+  server, with that account's key; every existing feature (history, branches, agent, LFS, search) working
+  unchanged, because none of them asks a host anything.
+- **Not possible, and now said out loud rather than discovered:** browsing a host's repository list,
+  creating a repository on the host, releasing, reading CI — all GitHub's API, and each answers with the
+  account's host named.
+- **Not solved:** a project whose remote needs a username the person did not set and that is not
+  token-as-username. The symptom will be a 401 at the first clone; the message names the account, the host
+  and the `git username` field, which is the actionable form.
