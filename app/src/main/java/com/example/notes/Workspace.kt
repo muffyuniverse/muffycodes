@@ -1017,7 +1017,13 @@ class Workspace(val accountDir: File) {
         val project = path.firstOrNull()
         if (project != null && activeBranch != AgentSession.MAIN) {
             val root = File(accountDir, project)
-            if (isProjectFolder(root)) {
+            // **The branch has to exist for *this* project.** `activeBranch` is ambient, and a person
+            // who left a branch and opened another project still had it set — so `Other/notes.txt`
+            // resolved into `.muffy/worktrees/Other/feature/`, a folder that does not exist, and the
+            // project opened **empty**. The check is a fact about the disk rather than a matter of
+            // resetting state at the right moment, so no door can forget it: a branch that is not
+            // there reads as main, which is what the project's own folder holds.
+            if (isProjectFolder(root) && Worktrees(this).exists(project, activeBranch)) {
                 return path.drop(1).fold(Worktrees(this).dirOf(project, activeBranch)) { dir, name ->
                     File(dir, name)
                 }

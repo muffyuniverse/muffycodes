@@ -375,8 +375,19 @@ fun BrowserScreen(
                         // project type to name. It used to be the type, which was a control as well
                         // as a fact — and with the types gone the honest second line is the path,
                         // which is the thing a person is inside of and can always be shown.
-                        val small = if (here.isEmpty()) "your projects"
-                        else here.dropLast(1).joinToString(" › ")
+                        // **The branch is named when there is one**, because two trees of one
+                        // project hold different files and the header said only the project's name —
+                        // so a person editing `feature`'s copy had nothing on screen telling them so.
+                        // It goes on the second line with the path rather than in the title, because
+                        // the title is the folder's name and a branch is not a folder.
+                        val small = when {
+                            here.isEmpty() -> "your projects"
+                            viewModel.activeBranch != AgentSession.MAIN ->
+                                (here.dropLast(1) + "on " + viewModel.activeBranch)
+                                    .filter { it.isNotEmpty() }
+                                    .joinToString(" › ")
+                            else -> here.dropLast(1).joinToString(" › ")
+                        }
                         if (small.isNotEmpty()) {
                             Text(
                                 text = small,

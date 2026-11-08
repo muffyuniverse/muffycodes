@@ -95,6 +95,29 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `a branch that belongs to another project reads as main, not as an empty folder`() {
+        // **The ambient-branch trap.** `activeBranch` is on the workspace, and a person who left a
+        // branch and opened a second project still had it set — so `Other/notes.txt` resolved into
+        // `.muffy/worktrees/Other/feature/`, which does not exist, and the project opened empty. The
+        // guard is a fact about the disk, so no door can forget it.
+        workspace.ensure()
+        val shopping = workspace.projectDir("Shopping")
+        shopping.mkdirs()
+        File(shopping, ".git").mkdirs()
+        val other = workspace.projectDir("Other")
+        other.mkdirs()
+        File(other, ".git").mkdirs()
+        File(other, "notes.txt").writeText("mine\n")
+
+        workspace.activeBranch = "feature"
+        assertEquals(
+            "another project's file comes from its own folder",
+            File(other, "notes.txt").canonicalPath,
+            workspace.fileAt(listOf("Other", "notes.txt")).canonicalPath,
+        )
+    }
+
+    @Test
     fun `the link is listed last, after the person's files`() {
         // **A given, asserted because a screenshot depends on it.** Sorting the link as a folder put it
         // between `muffycodes_data/` and the files, which pushed the newest file off the bottom of the

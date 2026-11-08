@@ -47,7 +47,7 @@ class BranchFeatureTest : FeatureTest() {
         assertTrue("the branch's copy is here", branchFile.isFile)
 
         scene.openEditor(branchFile)
-        scene.saveEditor(branchFile, "three litres\n")
+        scene.saveEditor("three litres\n")
 
         assertEquals("the branch has the new text", "three litres\n", branchFile.readText())
         assertEquals(
@@ -69,7 +69,7 @@ class BranchFeatureTest : FeatureTest() {
         scene.await("the branch's files to open") { scene.viewModel.path == listOf(project) }
         val branchFile = File(scene.workspace!!.treeOf(project), "milk.txt")
         scene.openEditor(branchFile)
-        scene.saveEditor(branchFile, "three litres\n")
+        scene.saveEditor("three litres\n")
 
         val branchHistory = File(scene.workspace!!.treeOf(project), ".git")
         assertTrue("the branch's tree is its own", branchHistory.isFile)
@@ -95,7 +95,12 @@ class BranchFeatureTest : FeatureTest() {
         scene.viewModel.enterBranch("feature")
         scene.await("the branch's files to open") { scene.viewModel.path == listOf(project) }
 
-        scene.viewModel.backToMain()
+        // **The person's way out is `main` on the branch screen**, which is why `main` is a row there
+        // and not a special case elsewhere. `backToMain` is private on purpose: the account switches
+        // call it for their own reasons, and a screen that could set the branch directly would be a
+        // second door into the redirection.
+        scene.viewModel.enterBranch("main")
+        scene.await("main's files to open") { scene.viewModel.activeBranch == "main" }
 
         assertEquals("back on main", "main", scene.viewModel.activeBranch)
         assertEquals(
