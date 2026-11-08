@@ -4775,7 +4775,7 @@ class AppViewModel @JvmOverloads constructor(
                 burstSpent = chatSpent ?: burstSpent
             }
         }
-    })(asked)
+    })(wired)
 
     /**
      * Hands a freshly read conversation to the screen — **and bumps the generation only when it

@@ -707,8 +707,11 @@ class CredentialStore(context: Context) : Credentials {
             // [modelKeyState]; a scoped row answers null and its absence is what the caller reports.
             return null
         }
+        // **A blank key is a whole credential for a model server on this phone**, and half of one for
+        // git — where a push with no token is a push as nobody. The store keeps the row as written and
+        // each reader decides: the git lookup skips a blank secret, and a chat connection with none is
+        // [Wired.keyless]. Refusing it here made a keyless server impossible to store at all.
         val secret = json.optString("secret")
-        if (secret.isBlank()) return null
         val shape = json.optString("url").takeIf { it.isNotBlank() }?.let { url ->
             val body = try {
                 JSONObject(json.optString("shape"))
@@ -757,6 +760,9 @@ class CredentialStore(context: Context) : Credentials {
 
     override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
         val key = connKey(activeLogin, scope, kind) ?: return
+        // **The choice goes even when the pair is already gone.** A row can be left half-filled by an
+        // earlier version of the window, or by a pair that could not be read back — and a "forget"
+        // that left a model id behind would apply it to whatever the scope inherits next.
         val choice = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
         prefs.edit().remove(key).remove(choice).apply()
     }
