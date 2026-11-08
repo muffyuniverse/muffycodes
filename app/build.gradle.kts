@@ -432,31 +432,11 @@ dependencies {
     implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:7.8.1.202611041320-r")
     implementation("com.google.code.gson:gson:2.11.0")
 
-    // **GitHub's secret API needs libsodium's sealed box**, and there is no way around it: the
-    // endpoint takes an `encrypted_value` produced by crypto_box_seal (X25519 + HSalsa20 +
-    // XSalsa20Poly1305), and Android's own crypto has neither XSalsa20 nor Poly1305.
-    //
-    // Two libraries, both pure Java, so neither adds native code to the APK:
-    //
-    //   * `xsalsa20poly1305` is the AEAD and, crucially, `Keys.sharedSecret` — which is
-    //     crypto_box_beforenm exactly: X25519 followed by HSalsa20. Without it the derivation would
-    //     have to be hand-written, and hand-written Salsa20 is not a thing to ship.
-    //   * BouncyCastle supplies the X25519 scalar multiplication underneath and BLAKE2b for the
-    //     nonce. Its `bcprov-jdk18on` is the JVM variant, which is what a Robolectric test runs on.
-    //
-    // **`lazysodium-android` was the obvious choice and is not usable**: its `.so` files are 4 KB
-    // page-aligned, and Android 15+ (this app is targetSdk 37) requires 16 KB alignment, so the
-    // library would not load on a modern phone. Measured by reading the ELF program headers of the
-    // published AAR, not assumed.
-    // **The exclusion is load-bearing.** `xsalsa20poly1305` declares a dependency on
-    // `bcprov-jdk15on:1.60`, which would sit beside `bcprov-jdk18on` and make the release build fail
-    // with a hundred duplicate classes — the two artifacts contain the same packages under different
-    // names. `jdk18on` is the same provider built for Java 8 and later, and is a superset, so the old
-    // one is dropped rather than the new one.
-    implementation("com.codahale:xsalsa20poly1305:0.11.0") {
-        exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
-    }
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    // **Two crypto dependencies left with the secret API they existed for.** The sealed box
+    // (`xsalsa20poly1305` + BouncyCastle) existed to produce GitHub's `encrypted_value` for an
+    // environment secret, and this app no longer writes one: an environment and its secrets are
+    // configured on the host's own page. Nothing else used either library — the app's own sealed
+    // files go through `EncryptedLog`, which uses platform crypto and needs no dependency.
 
     // **The browser, as its own module.** It wraps the WebView the phone already
     // has, so this adds no bytes to the APK and no engine to keep current - the

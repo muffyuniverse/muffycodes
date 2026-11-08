@@ -43,7 +43,8 @@ import javax.crypto.spec.SecretKeySpec
  *
  * **Nothing here is hand-rolled.** `PBKDF2WithHmacSHA256` and `AES/CBC/PKCS5Padding` are both in
  * `javax.crypto` on every API level this app supports (minSdk 26), which is why this needs no
- * BouncyCastle and no libsodium — unlike [SealedBox], whose XSalsa20 has no platform implementation.
+ * BouncyCastle and no libsodium — the sealed box that needed both left with the environment-secret
+ * API it was written for.
  *
  * ## Why a marker, and why a version number
  *
