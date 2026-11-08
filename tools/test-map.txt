@@ -51,6 +51,7 @@ AccountsFeatureTest app/src/main/java/com/example/notes/AccountStore.kt app/src/
 AccountsScreenTest app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt
 BranchesScreenTest app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
 WorktreesTest app/src/main/java/com/example/notes/Worktrees.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AgentSession.kt
+BranchFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/Worktrees.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/ProjectGit.kt
 ProjectsFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
 SyncFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
 HistoryFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
