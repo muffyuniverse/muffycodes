@@ -809,12 +809,46 @@ jobs:
         if: steps.decision.outputs.changed == 'yes'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
+          MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
         run: |
           # The build reads the key from the environment, so nothing has to be
           # written to disk that is not needed.
+          #
+          # **Asked here, and answered in a sentence, before Gradle spends three minutes.**
+          # This used to say "the release will be unsigned", which was not true: the build
+          # refuses to make an unsigned release, so the run was going to fail either way -
+          # only after `assembleRelease` had compiled everything. On 2026-11-06 an empty
+          # secret here produced a zero-byte keystore and a DER error from the packager
+          # ("Tag number over 30 is not supported"), naming neither the secret nor the cause.
           if [ -z "$MUFFY_KEYSTORE_BASE64" ]; then
-            echo "::warning::No signing key found, the release will be unsigned."
+            echo '::error::MUFFY_KEYSTORE_BASE64 is empty, so a release cannot be signed. Set it to the output of: base64 -w0 release.jks'
+            exit 1
           fi
+          if [ -z "$MUFFY_KEYSTORE_PASSWORD" ]; then
+            echo "::error::MUFFY_KEYSTORE_PASSWORD is empty, so the keystore cannot be opened."
+            exit 1
+          fi
+          printf '%s' "$MUFFY_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/check.jks"
+          if [ ! -s "$RUNNER_TEMP/check.jks" ]; then
+            echo '::error::MUFFY_KEYSTORE_BASE64 decodes to nothing.'
+            exit 1
+          fi
+          # The magic number says which family the file is, and the alias says whether the key
+          # in it carries the name the build will ask for. Neither is a secret - the fingerprint
+          # is printed on every certificate and the alias is in the APK - and together they are
+          # the difference between "the signing key is wrong" and a DER parse error.
+          if head -c 2 "$RUNNER_TEMP/check.jks" | od -An -tx1 | grep -q 'fe ed'; then
+            echo "The secret is a JKS keystore."
+          elif head -c 1 "$RUNNER_TEMP/check.jks" | od -An -tx1 | grep -q ' 30'; then
+            echo "The secret is a PKCS12 keystore."
+          else
+            echo '::error::MUFFY_KEYSTORE_BASE64 is not a keystore: it starts with neither a JKS nor a PKCS12 header. It should be exactly: base64 -w0 release.jks'
+            exit 1
+          fi
+          keytool -list -keystore "$RUNNER_TEMP/check.jks" -storepass "$MUFFY_KEYSTORE_PASSWORD" 2>&1 | grep -E 'Keystore type|contains|PrivateKey' || {
+            echo '::error::The keystore cannot be opened with MUFFY_KEYSTORE_PASSWORD.'
+            exit 1
+          }
 
       - name: Work out the version
         if: steps.decision.outputs.changed == 'yes'

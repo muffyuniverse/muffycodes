@@ -34,10 +34,19 @@ android {
                 }
             }
 
-            val base64Key = System.getenv("MUFFY_KEYSTORE_BASE64")
-            val storePasswordEnv = System.getenv("MUFFY_KEYSTORE_PASSWORD")
-            val keyAliasEnv = System.getenv("MUFFY_KEY_ALIAS")
-            val keyPasswordEnv = System.getenv("MUFFY_KEY_PASSWORD")
+            // **Blank is absent.** A secret that is not set arrives as the empty string, not as
+            // null, so `?: "notes"` never fired and `!= null` was true for a value that says
+            // nothing. On 2026-11-06 that made a run with no signing key at all take the
+            // continuous-integration path, decode nothing, write a **zero-byte** keystore, and
+            // then fail inside the packager with `Tag number over 30 is not supported` - a
+            // certificate error for a file whose real problem was having no content.
+            fun env(name: String): String? =
+                System.getenv(name)?.takeIf { it.isNotBlank() }
+
+            val base64Key = env("MUFFY_KEYSTORE_BASE64")
+            val storePasswordEnv = env("MUFFY_KEYSTORE_PASSWORD")
+            val keyAliasEnv = env("MUFFY_KEY_ALIAS")
+            val keyPasswordEnv = env("MUFFY_KEY_PASSWORD")
 
             // The key is worked out once, as a value. Declaring these with a
             // default they never keep reads as if the default could survive.
@@ -49,9 +58,32 @@ android {
             if (base64Key != null && storePasswordEnv != null) {
                 // A build on the continuous integration: the key arrives as
                 // base64 and is written to a temporary file.
+                val bytes = try {
+                    Base64.getDecoder().decode(base64Key)
+                } catch (e: IllegalArgumentException) {
+                    throw GradleException(
+                        "MUFFY_KEYSTORE_BASE64 is not base64, so it cannot be a keystore: " +
+                            e.message,
+                    )
+                }
+                // **A keystore has a shape, and saying so is worth three lines.** A JKS starts
+                // with `0xFEEDFEED`; a PKCS12 file is DER and starts with a SEQUENCE (`0x30`).
+                // Anything else is a secret holding the wrong thing - a path, a PEM, a second
+                // base64 - and the packager's answer to that is a DER parse error naming neither
+                // the secret nor the file.
+                val looksLikeKeystore =
+                    (bytes.size > 4 && bytes[0] == 0x30.toByte()) ||
+                        (bytes.size > 4 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xED.toByte())
+                if (!looksLikeKeystore) {
+                    throw GradleException(
+                        "MUFFY_KEYSTORE_BASE64 decodes to ${bytes.size} bytes that are not a " +
+                            "keystore (JKS or PKCS12). The secret should be " +
+                            "`base64 -w0 release.jks` and nothing else.",
+                    )
+                }
                 val temp = File.createTempFile("muffy-release", ".jks")
                 temp.deleteOnExit()
-                temp.writeBytes(Base64.getDecoder().decode(base64Key))
+                temp.writeBytes(bytes)
                 keyFile = temp
                 keyStorePassword = storePasswordEnv
                 keyName = keyAliasEnv ?: "notes"
