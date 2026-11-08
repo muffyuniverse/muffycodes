@@ -866,11 +866,16 @@ private fun Dialogs(
 
         is Pending.DeleteProject -> DeleteProjectDialog(
             project = pending.project,
+            address = viewModel.remoteUrlOf(pending.project),
             onDismiss = dismiss,
-            onDelete = { everywhere ->
-                      Trace.tap("confirm delete project", pending.project + if (everywhere) " everywhere" else " here")
-                      viewModel.deleteProject(pending.project, everywhere)
-                  },
+            // **One act, so one tap with no arg.** It used to be `" everywhere"` or `" here"`, because
+            // there were two outcomes; the second is a sentence now, and a name that distinguished
+            // them would describe something that no longer happens.
+            onDelete = {
+                Trace.tap("confirm delete project", pending.project)
+                viewModel.deleteProject(pending.project)
+            },
+        )
         )
 
         is Pending.RenameEntry -> PromptDialog(

@@ -3681,16 +3681,19 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Deletes a project. [everywhere] also deletes the repository on GitHub;
-     * without it only this phone's copy goes and the add button brings it back.
+     * **Deletes a project from this phone, and says where the copy on the host still is.**
      *
-     * **[everywhere] no longer deletes the repository**, because `delete_repo` is gone from the
-     * token's required scopes — it was the one irreversible capability in the set, and the app does
-     * not need it. What it does instead is *say* that the remote is still there, because a person
-     * who chose "everywhere" and found a repository still on GitHub would think the delete had
-     * failed.
+     * **One act, because there is only one act.** The window used to offer a second choice —
+     * "everywhere" — which called `deleteRepo`; that was dropped when `delete_repo` left the token's
+     * scopes, because it was the one irreversible capability in the app and a repository is deleted on
+     * the host's own page. A choice between doing a thing and doing the same thing with a longer
+     * sentence is a question the window has already answered.
+     *
+     * **The order is the safety**: secrets, then the branch folders, then the folder. The reverse
+     * leaves a window in which the folder is gone and its secrets are not, and nothing then knows
+     * which project they belonged to.
      */
-    fun deleteProject(project: String, everywhere: Boolean) {
+    fun deleteProject(project: String) {
         val ws = workspace ?: return
         // **The system project is not deletable.** It holds the settings that belong to the whole
         // account, and a person who deletes it loses the prompt with no way to notice until the
@@ -3710,6 +3713,9 @@ class AppViewModel @JvmOverloads constructor(
             // Ordered secrets-first because the reverse leaves a window where the folder is gone and
             // the secrets are not, and nothing then knows which project they belonged to.
             val forgotten = credentials.forgetProjectSecrets(project)
+            // **Read before the folder goes**, because after `ws.delete` there is nothing left to
+            // read it from.
+            val remote = git?.remoteUrl(project)
             // **The branch folders go first**, because they live outside the project folder and
             // deleting the folder alone leaves them under `.muffy/worktrees/` for ever — a link to the
             // system folder each, and nothing that lists them to notice.
@@ -3717,12 +3723,13 @@ class AppViewModel @JvmOverloads constructor(
             ws.delete(ws.projectDir(project))
             main.post {
                 busy = false
-                message = if (everywhere) {
-                    "Deleted $project from this phone, and ${forgotten} of its secret(s). " +
-                        "Its repository is still on GitHub - delete it there if you want it gone."
-                } else {
-                    "Deleted $project from this phone, and ${forgotten} of its secret(s)."
-                }
+                // **The address, when there is one.** The sentence used to promise the repository was
+                // "still on GitHub" whichever project this was, and to offer a second delete that had
+                // already stopped existing; now it says where the copy is and that the host's page is
+                // where it goes.
+                val address = remote
+                message = "Deleted $project from this phone, and ${forgotten} of its secret(s)." +
+                    (address?.let { " Its repository is still at $it - nothing here touched it." } ?: "")
                 if (currentProject == project) path = emptyList()
                 // **The row must be gone before the sentence about it is read.** The delete window
                 // closed on the old list, so the project was still drawn under the message saying it
@@ -3831,7 +3838,14 @@ class AppViewModel @JvmOverloads constructor(
                 return@onWorker
             }
             val result = git.cloneInto(clean, address)
-            if (result.success) ProjectTree.create(ws.projectDir(clean))
+            if (result.success) {
+                val wrote = ProjectTree.create(ws.projectDir(clean))
+                // **The app's own folders are sent with the project**, exactly as a project made on
+                // this phone commits them: they are files in the repository, so leaving them as an
+                // unsent change would greet a person with "3 to send" on a project they had not
+                // touched — the app's own bookkeeping counting as work waiting to go.
+                if (wrote.isNotEmpty()) git.sync(clean, "Start the project's folders")
+            }
             main.post {
                 busy = false
                 message = result.message

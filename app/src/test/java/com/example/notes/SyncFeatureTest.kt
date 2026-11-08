@@ -134,7 +134,14 @@ class SyncFeatureTest : FeatureTest() {
 
         val stored = File(scene.workspace!!.repoOf("Shopping"), ".git/config")
             .readText().substringAfter("url = ").lines().first().trim()
-        assertEquals("the address is the one that was given", address, stored)
+        // **Compared as a place, not as a string.** JGit rewrites `file:/tmp/x` to `file:///tmp/x`
+        // when it stores a clone's address, and the difference is a spelling of the same path — the
+        // fact that matters is that the address reaches the repository the host made.
+        assertEquals(
+            "the address reaches the repository that was given",
+            File(scene.hostDir, "Shopping.git").canonicalPath,
+            File(java.net.URI(stored)).canonicalPath,
+        )
     }
 
     @Test

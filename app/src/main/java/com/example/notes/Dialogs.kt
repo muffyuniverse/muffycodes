@@ -315,45 +315,40 @@ fun RemoveAccountDialog(
     )
 }
 
-/** The two outcomes of deleting a project (§6), in one dialog. */
+/**
+ * **Deleting a project: one choice, and a sentence naming where the copy on the host still is.**
+ *
+ * There were two radio buttons: "from this phone only" and "everywhere". The second stopped being an
+ * act on 2026-11-08, when `delete_repo` was dropped from the token's scopes — it was the one
+ * irreversible capability in the app, and a repository is deleted on the host's own page, where the
+ * confirmation is the host's. What was left was a choice between doing a thing and doing the same
+ * thing with a longer sentence, which is a window asking a question it has already answered.
+ *
+ * **[address] is the project's own**, so the promise is exact rather than approximate: it said "on
+ * GitHub" for every project, which was true only while every project had a GitHub repository.
+ */
 @Composable
 fun DeleteProjectDialog(
     project: String,
+    address: String?,
     onDismiss: () -> Unit,
-    onDelete: (everywhere: Boolean) -> Unit,
+    onDelete: () -> Unit,
 ) {
-    var everywhere by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete $project?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                RadioLine(
-                    selected = !everywhere,
-                    label = "From this phone only",
-                    detail = "The repository stays on GitHub, and the add button brings it back",
-                    onClick = { everywhere = false },
-                )
-                RadioLine(
-                    selected = everywhere,
-                    label = "Everywhere",
-                    detail = "The copy here and the repository on GitHub. Cannot be undone",
-                    onClick = { everywhere = true },
-                )
-            }
+            Text(
+                "$project is deleted from this phone, with every version it has not sent.\n\n" +
+                    (address?.let {
+                        "Its repository stays at $it — nothing here touches it, and deleting that " +
+                            "is done on the host's own page. The add button brings a copy back."
+                    } ?: "It has no address, so there is nowhere else a copy could be."),
+            )
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    onDelete(everywhere)
-                    onDismiss()
-                },
-            ) {
-                Text(
-                    "Delete",
-                    color = if (everywhere) MaterialTheme.colorScheme.error
-                    else MaterialTheme.colorScheme.primary,
-                )
+            TextButton(onClick = { onDelete(); onDismiss() }) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

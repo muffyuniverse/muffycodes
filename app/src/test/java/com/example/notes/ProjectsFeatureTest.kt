@@ -251,57 +251,38 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `deleting a project from this phone only leaves the repository alone`() {
+    fun `deleting a project removes it here and leaves the repository alone`() {
+        // **One act now.** There were two radio buttons — "from this phone only" and "everywhere" —
+        // and the second stopped being an act when `delete_repo` was dropped: it was the one
+        // irreversible capability in the app, and a repository is deleted on the host's own page.
+        // What was left was a window asking a question it had already answered.
         scene.project("Shopping")
 
-        scene.viewModel.deleteProject("Shopping", everywhere = false)
+        scene.viewModel.deleteProject("Shopping")
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
         assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
         assertTrue("the repository is untouched", scene.remote("Shopping").isDirectory)
-    }
-
-    /**
-     * **"Everywhere" no longer reaches GitHub.** Plan §13b.6: `delete_repo` was the one irreversible
-     * capability, and it was dropped so that no act in this app can destroy something a person cannot
-     * get back. The local folder goes; **the repository stays**, and the message says so and says where.
-     *
-     * This test used to assert the opposite, which is why it is rewritten rather than deleted: the
-     * behaviour changed on purpose, and the record of that is worth keeping.
-     */
-    @Test
-    fun `deleting a project everywhere removes the folder and leaves the repository alone`() {
-        scene.project("Shopping")
-
-        scene.viewModel.deleteProject("Shopping", everywhere = true)
-        scene.await("the delete to finish") { !scene.viewModel.busy }
-
-        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
-        assertTrue(
-            "and the repository is still there, because this app cannot delete one",
-            scene.remote("Shopping").exists(),
-        )
-        assertTrue(
-            "and the message says where it went: ${scene.viewModel.message}",
-            scene.viewModel.message.orEmpty().contains("still on GitHub"),
-        )
+        // **And it says where the copy still is**, by address: this sentence promised "on GitHub" for
+        // every project, which was true only while every project had one.
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("the sentence names the address: $said", said.contains("still at file:"))
+        assertTrue("and says nothing here touched it", said.contains("nothing here touched it"))
     }
 
     @Test
-    fun `deleting a project whose repository is already gone is not an error`() {
-        // §6: "A repository already deleted on GitHub is not an error — the local
-        // side goes." Deleting it on GitHub by hand is a normal thing to do, and the
-        // phone must agree with what is true rather than refuse to tidy up.
-        scene.project("Shopping")
-        scene.remote("Shopping").deleteRecursively()
+    fun `deleting a local project says there is no copy anywhere else`() {
+        // **The other sentence, and it must not promise a copy that does not exist.** A local project
+        // has no address, so "its repository is still at …" would be a fiction.
+        scene.localProject("scratch")
 
-        scene.viewModel.deleteProject("Shopping", everywhere = true)
+        scene.viewModel.deleteProject("scratch")
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
-        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
+        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "scratch").exists())
         assertFalse(
-            "and nothing complained about the missing repository",
-            scene.viewModel.message.orEmpty().contains("no repository", ignoreCase = true),
+            "and nothing claims a copy survived: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("still at"),
         )
     }
 
@@ -588,7 +569,7 @@ class ProjectsFeatureTest : FeatureTest() {
         )
 
         scene.viewModel.message = null
-        scene.viewModel.deleteProject("system", everywhere = false)
+        scene.viewModel.deleteProject("system")
         assertTrue("and it cannot be deleted", scene.viewModel.message != null)
         assertTrue(
             "the folder is still there",
