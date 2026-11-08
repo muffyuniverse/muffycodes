@@ -139,6 +139,52 @@ each. A window may ask for both; the store keeps each thing once.
 
 For llm the base URL *is* part of the credential (there is no other record of it), so it is stored with it.
 
+### 2.4b Only what the protocol defines — the inventory, field by field
+
+The operator's rule, and the test that decides what a scoped window may ask for: **if the protocol does
+not define it, it does not live in the scope.** Written out because one of the four is where the intuition
+is one step off.
+
+| field | where the protocol puts it | in the window? |
+|---|---|---|
+| **address** (base URL) | the request target: `POST {base}/chat/completions` | yes |
+| **key** | `Authorization: Bearer <key>` | yes |
+| **model** | a **body field**, `model` | yes — a connection with no model has nothing to ask for |
+| **effort** | a body field, `reasoning_effort`, **optional** | yes |
+| git user | git's own: basic auth is `username:token` at the address | yes, for the git kind |
+
+**"Provider" is not a protocol word at all** — which is why the operator's reading is right in the sense
+that matters and one word off in the strict one:
+
+- **The provider *is* the endpoint.** There is no routing dimension in the protocol; whoever answers at
+  the address is the provider. C2 deleted `provider.only` precisely because the address made it redundant.
+- **The model is not part of the endpoint.** It is a request field, and one server serves many models —
+  two models on one address share every byte of the endpoint. It still belongs in the same window,
+  because a key and an address with no model is a connection that cannot be used, and **the window's
+  size comes with the model** (`contextLength`, `maxOutput`) rather than with the address.
+
+So a chat connection is **four** fields, and they group two-and-two for inheritance (§2.2): the
+**credential pair** (address + key, atomic) and the **choice** (model + effort, field by field).
+
+**One consequence, stated because it would be a silence:** the *ladder* of efforts a model offers is
+`reasoning.supported_efforts` in OpenRouter's catalogue — a catalogue field, not a protocol one. On a
+connection whose catalogue says nothing, the picker has no ladder to draw, so it offers the protocol's own
+four (`minimal`, `low`, `medium`, `high`). What is sent is unchanged: `chooseModel` falls back to the typed
+effort when nothing is declared, so the field is never silently dropped.
+
+### 2.4c Everything else stays in Settings, because it is the app's
+
+The scoped windows are **credentials and the choice they make**, and nothing else. These are app-wide facts
+and they remain where they are today:
+
+context trigger and hard limit · command execution timeouts · model response timeout · how much of the
+record is kept · keepalive · the web (private-network switch, fetch size) · secrets the agent may use ·
+session log · reminders · what the app did · the chat as drawn · appearance · change history · request-log
+retention · running · background · the notification permission.
+
+A timeout is not a credential, and putting one on every branch would make three numbers to keep in step for
+no gain — the operator's words: *"lest of agent settings stay in general settings where they are."*
+
 ### 2.5 Storage
 
 ```
