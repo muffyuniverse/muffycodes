@@ -3735,6 +3735,43 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * **Go local** — synced → local, and every version stays.
+     *
+     * The universal half of "remove on remote": `git remote remove origin` is the whole of it, it is
+     * reversible, and the repository on the host is untouched because the app has no way to delete one
+     * and no business doing so. The sentence names where the repository still is, because "keep local"
+     * that quietly left a copy somewhere would be a promise the app could not keep.
+     */
+    fun keepProjectLocal(project: String, onDone: (Boolean) -> Unit = {}) {
+        if (Workspace.isSystem(project)) {
+            message = "\"$project\" is where this account's settings live, so it stays"
+            onDone(false)
+            return
+        }
+        if (isLocalProject(project)) {
+            message = "$project is already only on this phone"
+            onDone(false)
+            return
+        }
+        val hadRemote = git?.remoteUrl(project)
+        val ok = git?.makeLocal(project) ?: false
+        Trace.tap("keep local", project)
+        // **The host, named from the address rather than assumed.** This sentence said "on GitHub"
+        // for every project, which was true only while every project had a GitHub repository - and it
+        // is the sentence that decides whether a person believes their copy is still somewhere else.
+        val where = hadRemote?.let { Secrets.hostOf(it) }?.takeIf { it.isNotBlank() }
+        message = if (ok) {
+            "$project is local now. Everything it holds is still here" +
+                (where?.let { ", and its repository is still at $it" } ?: "") +
+                (hadRemote?.let { " ($it)" } ?: "")
+        } else {
+            "$project could not be made local"
+        }
+        refresh()
+        onDone(ok)
+    }
+
+    /**
      * **Adds a project from an address the person supplies** — the universal half of the add window.
      *
      * The address is checked with `ls-remote` *before* a folder is made, so a mistyped path, a key the

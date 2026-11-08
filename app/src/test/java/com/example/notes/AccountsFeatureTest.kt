@@ -712,6 +712,6 @@ class AccountsFeatureTest : FeatureTest() {
  * unrun. This one exists only to say no, the way a host does to an expired or mistyped key.
  */
 private class RefusingWho : Who {
-    override fun identity(token: String): Reply<Identity> =
-        Reply(error = "Bad credentials", status = 401)
+    override fun identity(token: String): WhoAnswer<Identity> =
+        WhoAnswer(error = "Bad credentials", status = 401)
 }

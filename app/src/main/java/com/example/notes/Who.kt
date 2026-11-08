@@ -25,17 +25,20 @@ import java.net.URL
  */
 interface Who {
     /** Who [token] belongs to, or why it was refused. */
-    fun identity(token: String): Reply<Identity>
+    fun identity(token: String): WhoAnswer<Identity>
 }
 
 /**
  * The outcome of asking, whichever host is behind it.
  *
+ * **Not `Reply`**: that name belongs to what the model said (`Door.kt`), and two classes called the
+ * same thing would be a reader's confusion at every call site.
+ *
  * [status] is the HTTP status when there was one, and 0 when the call never got that far — an
  * offline phone, a mock that says no. It is carried structurally because the sign-in door decides
  * "the key was refused" from it rather than from the text of [error].
  */
-data class Reply<T>(
+data class WhoAnswer<T>(
     val value: T? = null,
     val error: String? = null,
     val status: Int = 0,
@@ -72,7 +75,7 @@ data class Identity(
  */
 class HttpWho(private val api: String = API) : Who {
 
-    override fun identity(token: String): Reply<Identity> {
+    override fun identity(token: String): WhoAnswer<Identity> {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL("$api/user").openConnection() as HttpURLConnection).apply {
@@ -97,7 +100,7 @@ class HttpWho(private val api: String = API) : Who {
                 } catch (e: Exception) {
                     "GitHub returned error $code"
                 }
-                return Reply(error = Secrets.scrub(message), status = code)
+                return WhoAnswer(error = Secrets.scrub(message), status = code)
             }
             // **Read before the body is parsed**, because the header is on the connection and the
             // connection is closed in the `finally` below. `null` when the header is absent, which is
@@ -107,7 +110,7 @@ class HttpWho(private val api: String = API) : Who {
             }
             val user = JSONObject(text)
             val login = user.optString("login")
-            if (login.isEmpty()) return Reply(error = "GitHub did not return an account name")
+            if (login.isEmpty()) return WhoAnswer(error = "GitHub did not return an account name")
             // A name is optional on GitHub, and so is a public email. Both have a truthful fallback:
             // the login is what the person is called here, and GitHub's own noreply address is what it
             // uses for a commit that must not expose a real one.
@@ -115,9 +118,9 @@ class HttpWho(private val api: String = API) : Who {
             val email = user.optString("email").ifBlank {
                 noreplyEmail(login, user.optLong("id", 0L), GITHUB_HOST)
             }
-            Reply(value = Identity(login = login, name = name, email = email, scopes = scopes))
+            WhoAnswer(value = Identity(login = login, name = name, email = email, scopes = scopes))
         } catch (e: Exception) {
-            Reply(error = Secrets.scrub(e.message ?: "Could not reach GitHub"))
+            WhoAnswer(error = Secrets.scrub(e.message ?: "Could not reach GitHub"))
         } finally {
             connection?.disconnect()
         }
@@ -141,14 +144,14 @@ class HttpWho(private val api: String = API) : Who {
  */
 class DiskWho(private val owner: String = "dev") : Who {
 
-    override fun identity(token: String): Reply<Identity> =
+    override fun identity(token: String): WhoAnswer<Identity> =
         // A key is required, exactly as GitHub requires one. Returning the owner regardless made this
         // seam unable to say no, so nothing ever exercised the half of signing in that reports a
         // refusal.
         if (token.isBlank()) {
-            Reply(error = "Bad credentials", status = 401)
+            WhoAnswer(error = "Bad credentials", status = 401)
         } else {
-            Reply(
+            WhoAnswer(
                 value = Identity(
                     login = owner,
                     name = "Test Account",
