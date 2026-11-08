@@ -232,10 +232,12 @@ class Worktrees(private val workspace: Workspace) {
         val target = File(worktreesRoot(), to)
         target.parentFile?.mkdirs()
         if (!source.renameTo(target)) return false
-        // Every branch folder that moved has two files naming its other half, and both must follow.
-        (target.listFiles() ?: emptyArray()).forEach { moved ->
-            if (!moved.isDirectory || Workspace.isLink(moved)) return@forEach
-            val branch = moved.name
+        // **The walk, not one level of listing.** A branch called `feature/x` is a folder `feature`
+        // holding `x`, and `feature` itself has no `.git` — so a top-level listing would "repoint" a
+        // folder that is not a worktree and leave the real one pointing at a path that no longer
+        // exists. `branches` is the same walk, and it reads git's own test for a tree.
+        branches(to).filter { it != mainBranch }.forEach { branch ->
+            val moved = dirOf(to, branch)
             val oldId = idOf(from, branch)
             val newId = idOf(to, branch)
             val oldPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$oldId")

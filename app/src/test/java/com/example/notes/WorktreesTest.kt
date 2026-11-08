@@ -368,6 +368,29 @@ class WorktreesTest {
     }
 
     @Test
+    fun `a rename repoints a branch whose name has a slash too`() {
+        // **The nested case, which a one-level listing gets wrong.** `topic/x` is a folder `topic`
+        // holding `x`, and `topic` has no `.git` — so "repoint every child folder" repoints nothing and
+        // leaves the real tree naming a path that no longer exists. The walk is the same one
+        // `branches` uses, so the two cannot disagree about which folders are worktrees.
+        val dir = projectWithBranch()
+        GitService.openExisting(dir)!!.use { repo ->
+            GitService.createBranch(repo, "topic/x", "feature").getOrThrow()
+        }
+        val tree = trees.make("Shopping", "topic/x").getOrThrow()
+
+        assertTrue("the project moved", dir.renameTo(workspace.projectDir("Groceries")))
+        assertTrue("the worktrees moved", trees.rename("Shopping", "Groceries"))
+
+        val moved = trees.dirOf("Groceries", "topic/x")
+        assertTrue("the nested branch's folder is at the new path", moved.isDirectory)
+        GitService.openExisting(moved)!!.use { repo ->
+            assertEquals("and it still opens as its branch", "topic/x", GitService.currentBranch(repo))
+        }
+        assertFalse("the old tree is gone", tree.exists())
+    }
+
+    @Test
     fun `a project with no repository is refused with a sentence about the project`() {
         // Not a crash: a project whose repository has not been made yet is a normal state, and the
         // refusal has to say which project rather than "could not check out".
