@@ -5349,11 +5349,28 @@ class AgentTools(
         // and is false now, so it would have been a refusal that misdescribed the situation.
         val owner = projectOf(file)
         if (owner != null && owner != project) {
+            // **The account's own folder is not a project, and the old sentence offered an action that
+            // does not exist.** It said "changing it needs `system` open" — and there is no way to open
+            // it: it is not a project, it has no branches, and no agent can stand in it. A model told
+            // that tries, and reads the failure as a path mistake.
+            if (owner == Workspace.SYSTEM_PROJECT) {
+                return "$path is in the account's own folder, which belongs to the person and to " +
+                    "every project. You may read it, and nothing you can do changes it."
+            }
             return "$path belongs to `$owner`, another project. You may read it; changing it needs " +
                 "`$owner` open. Say so if the change is needed and the person can make it there."
         }
         ws.agentLockProblem(file)?.let { return it }
         if (insideWorktreeOrAgent(file)) return null
+        // **A path that reaches another tree, named for what it reaches.** This is the branch case
+        // (§13d): `../.muffy/worktrees/shopping/feature/x` belongs to *this* project, so the sentence
+        // above does not apply — and the dot-name fallback below then claimed "a name that starts with
+        // a dot belongs to the app" about a path whose first segment is `..`. Both facts are wrong, and
+        // a refusal that names the wrong rule sends the model to try another spelling of the same path.
+        if (!insideOwnTree(file)) {
+            return "$path resolves to ${beyondThisTree(file)}. This agent writes in `$branch`'s tree " +
+                "only: another tree's files are read here and changed there, by whoever is in it."
+        }
         // **Why, and not "outside this project".** That sentence was given for a path that is
         // inside the project, so a model read it as "my path is wrong" and tried another spelling
         // of the same path. What it needs is the rule it broke.
@@ -5380,10 +5397,69 @@ class AgentTools(
         // would have been "inside the worktree" and writable. The owner check in [mayWrite] catches it
         // first; this makes the predicate true on its own rather than true only because of the order.
         if (!isMine(file)) return false
+        // **Where it really is, not where it is spelled.** Every tree holds `system` as a link to the
+        // account's own folder (§13f), so a path through it is inside the tree by spelling and in
+        // somebody else's folder in fact. That case is caught today by the owner check above — but the
+        // owner check is the wrong place to rely on for it: it answers the same question from the path
+        // text, and a guard that holds only because two spellings agree is a guard that stops holding
+        // the day one of them changes. This is the boundary itself.
+        if (!insideOwnTree(file)) return false
         val path = rel(file)
         if (path.isEmpty()) return true
         val first = path.substringBefore('/')
         return !first.startsWith(".") && first != AgentLog.DIR
+    }
+
+    /**
+     * True when [file] resolves — through every link on the way — to somewhere inside this agent's tree.
+     *
+     * **The device half of the portability rule** (§PLAN-portable-2026-11-08): an agent may write inside
+     * its own worktree and nowhere else, and "its own worktree" is a fact about the filesystem rather
+     * than about a path string. A tree that does not exist yet is still answered by its parent chain,
+     * which is what `canonicalFile` resolves.
+     */
+    private fun insideOwnTree(file: File): Boolean = try {
+        val base = projectDir.canonicalFile
+        val target = file.canonicalFile
+        target == base || target.path.startsWith(base.path + File.separator)
+    } catch (e: Exception) {
+        // **Unanswerable is not permission.** A path this app cannot resolve is a path it cannot promise
+        // is inside the tree, and the refusal that follows is the honest one.
+        false
+    }
+
+    /**
+     * What a path that leaves this tree reaches, as a phrase a refusal can use.
+     *
+     * **Three answers, because they need three different next steps**: the account's own folder (read it,
+     * nothing to do), another branch's tree (that branch's own agent), another project (that project has
+     * to be open). The caller has already dealt with the project case, so this names the other two.
+     */
+    private fun beyondThisTree(file: File): String {
+        val target = try {
+            file.canonicalFile
+        } catch (e: Exception) {
+            return "somewhere this app cannot follow"
+        }
+        val account = try {
+            ws.accountDir.canonicalFile
+        } catch (e: Exception) {
+            return "outside this project"
+        }
+        val under = target.path.removePrefix(account.path + File.separator)
+        if (under == target.path) return "outside this account"
+        val parts = under.split(File.separatorChar)
+        if (parts.firstOrNull() == Workspace.SYSTEM_PROJECT) return "the account's own folder"
+        if (parts.size > 3 && parts[0] == Workspace.STATE_DIR && parts[1] == Worktrees.WORKTREES) {
+            val other = parts[2]
+            val otherBranch = ws.branchOf(target)
+            return if (other == project) {
+                "`$other`'s `$otherBranch` tree"
+            } else {
+                "`$other`, another project"
+            }
+        }
+        return "the account's own folder"
     }
 
     /** A version's time, in the one shape a row reads in. */

@@ -219,6 +219,17 @@ class AgentToolsTest {
     }
 
     @Test
+    fun `push and pull take no argument, so no agent can name a branch`() {
+        // **The portable half of the isolation rule**, and the reason it survives every provider
+        // decision (PLAN-portable-2026-11-08 §3): `push` sends `currentBranch(repo)` and there is no
+        // argument through which a model could name another ref. A `branch` argument here would turn
+        // "an agent can only send the branch it stands in" into a promise, and a promise is what the
+        // next refactor removes. This test is the thing that would fail first.
+        assertEquals("push takes no argument", emptySet<String>(), AgentTools.KEYS["push"])
+        assertEquals("and neither does pull", emptySet<String>(), AgentTools.KEYS["pull"])
+    }
+
+    @Test
     fun `a tool's parameters survive being written to JSON and read back`() {
         // The schema is serialised into the request body, so a value that only exists in memory -
         // `JSONObject.NULL`, an `Int` where the wire wants a `Number` - would arrive differently

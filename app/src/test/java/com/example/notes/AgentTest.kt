@@ -2608,6 +2608,110 @@ class AgentTest {
     }
 
     @Test
+    fun `an agent on main cannot write into a branch's tree, and the refusal names both trees`() {
+        // **The operator's named concern** (2026-11-08): *"agent from one branch modifying repo of another
+        // branch"*. The write was refused before this test existed, but by the dot-name fallback, so the
+        // sentence was *"A name that starts with a dot belongs to the app"* about a path whose first
+        // segment is `..` — a rule the path had not broken, which sends a model to try another spelling
+        // of the same path instead of stopping.
+        val tree = branchWithWorktree()
+
+        val body = AgentTools(ws, "shopping", git, log).run(
+            Call(
+                "c1",
+                "write",
+                """{"path":"../.muffy/worktrees/shopping/feature/milk.txt","text":"hijacked"}""",
+            ),
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the tree it reached: $body", body.contains("`feature` tree"))
+        assertTrue("and the tree this agent writes in: $body", body.contains("`main`"))
+        assertEquals(
+            "and the branch's file is untouched",
+            "three litres",
+            File(tree, "milk.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `a delete, a move and a restore cannot reach another branch's tree either`() {
+        // **One test for the other three verbs**, because they share the funnel and a rule that holds for
+        // `write` alone is a rule three tools can forget. Each is asserted refused *and* the tree is
+        // asserted unchanged: a refusal that had already half-done the act would read as a clean refusal.
+        val tree = branchWithWorktree()
+        val tools = AgentTools(ws, "shopping", git, log)
+        val path = "../.muffy/worktrees/shopping/feature/milk.txt"
+
+        val deleted = tools.run(Call("c1", "delete", """{"path":"$path"}"""))
+        val moved = tools.run(Call("c2", "move", """{"path":"$path","into":"stolen.txt"}"""))
+        val restored = tools.run(
+            Call("c3", "restore", """{"path":"$path","revision":"0000000"}"""),
+        )
+
+        assertTrue("the delete is refused: $deleted", deleted.startsWith(AgentLog.FAILURE))
+        assertTrue("the move is refused: $moved", moved.startsWith(AgentLog.FAILURE))
+        assertTrue("the restore is refused: $restored", restored.startsWith(AgentLog.FAILURE))
+        assertTrue(
+            "and every sentence names the tree it reached",
+            listOf(deleted, moved, restored).all { it.contains("`feature` tree") },
+        )
+        assertEquals(
+            "the branch's file is still exactly as it was",
+            "three litres",
+            File(tree, "milk.txt").readText(),
+        )
+        assertFalse(
+            "and nothing was copied into main's tree",
+            File(ws.repoOf("shopping"), "stolen.txt").exists(),
+        )
+    }
+
+    @Test
+    fun `a write through the account's own link is refused as the account's folder`() {
+        // **Every working tree holds `system` as a link to the account root** (§13f), so this path is
+        // inside the tree *by spelling* and in the person's own folder *in fact*. It was refused before
+        // by the "belongs to `system`, another project" sentence — which then told the model *"changing it
+        // needs `system` open"*, and there is no way to open it: it is not a project, it has no branches,
+        // and no agent can stand in it. A refusal that offers an impossible next step is one a model
+        // spends a turn on.
+        assertTrue("the link was made", ws.linkSystem(ws.repoOf("shopping")))
+        val own = File(File(ws.accountDir, Workspace.SYSTEM_PROJECT), "prompt.txt")
+        own.parentFile?.mkdirs()
+        own.writeText("the brief")
+
+        val body = AgentTools(ws, "shopping", git, log).run(
+            Call("c1", "write", """{"path":"system/prompt.txt","text":"a different brief"}"""),
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it says whose folder it is: $body", body.contains("the account's own folder"))
+        assertFalse(
+            "and it does not offer to open a folder that cannot be opened: $body",
+            body.contains("needs `system` open"),
+        )
+        assertEquals("the brief is unchanged", "the brief", own.readText())
+    }
+
+    @Test
+    fun `the same acts inside its own tree still work`() {
+        // **The positive control**, without which the four refusals above are satisfied by a guard that
+        // refuses everything. The canonical containment test is the one line that could have done that:
+        // a tree compared to itself wrongly is a tree that refuses every write inside it.
+        val tools = AgentTools(ws, "shopping", git, log)
+
+        val made = tools.run(Call("c1", "write", """{"path":"list.txt","text":"milk\nbread"}"""))
+        val edited = tools.run(Call("c2", "write", """{"path":"milk.txt","text":"three litres"}"""))
+        val gone = tools.run(Call("c3", "delete", """{"path":"list.txt"}"""))
+
+        assertTrue("a new file is made: $made", made.startsWith(AgentLog.SUCCESS))
+        assertTrue("an existing one is changed: $edited", edited.startsWith(AgentLog.SUCCESS))
+        assertTrue("and a delete works: $gone", gone.startsWith(AgentLog.SUCCESS))
+        assertEquals("the change landed", "three litres", File(ws.repoOf("shopping"), "milk.txt").readText())
+        assertFalse("and the delete did", File(ws.repoOf("shopping"), "list.txt").exists())
+    }
+
+    @Test
     fun `a file in a worktree belongs to its project, not to the state folder`() {
         // **The refusal that made branches useless.** `projectOf` took the first segment of the absolute
         // path — `.muffy` for every worktree file — so `isMine` was false and every write was refused
