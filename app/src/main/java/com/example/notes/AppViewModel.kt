@@ -574,8 +574,8 @@ class AppViewModel @JvmOverloads constructor(
         // **A project on another host carries its own key** (PLAN-portable-2026-11-08 §4 P1). The
         // store answers narrowest-first — the project's, then the account's, then the shared one — so a
         // single lambda is the whole of "this project can reach a host this app knows nothing about".
-        vaultToken = { project, host ->
-            credentials.secret(project, GitCredentials.SECRET, host)
+        vaultToken = { project, branch, host ->
+            credentials.secret(project, branch, GitCredentials.SECRET, host)
         },
         // **The host the key belongs to is a fact about the account, not about this app.** Without
         // it, "the account's own host" would be GitHub for every account, which is the assumption
@@ -1591,56 +1591,14 @@ class AppViewModel @JvmOverloads constructor(
     fun secretHost(name: String): String? = credentials.secretHost(name)
 
     /**
-     * Keeps a secret, **and reads it back before saying so**.
-     *
-     * The same rule as [saveModelKey], for the same reason: "kept" is a claim about this phone, and
-     * the only way to know it is true is to ask the store to open the door it was put behind. A write
-     * that a keystore refused (a locked phone is enough) would otherwise be reported as success, and
-     * the person would find out at the moment a request needed the secret.
-     *
-     * @return null when the secret is kept, or the sentence to show when it is not.
-     */
-    /**
-     * The project a secret is scoped to, or null when it is account-wide.
-     *
-     * **On the row, not behind a tap.** Which projects can read a value is the fact a person needs in
-     * order to answer "why can this project see that token", and a scope that is only visible after
-     * opening an editor is a scope nobody checks.
-     */
-    fun secretProject(name: String): String? = credentials.secretProject(name)
-
-    /**
-     * **Which scope a listed secret lives in**, for the row (§13c.4).
-     *
-     * The row is drawn from a name, and a name is not unique across scopes — so this answers the
-     * narrowest scope that holds it. Project first, then general, then the account: the same order
-     * `secret()` resolves in, so the row cannot claim a scope the lookup would not use.
-     */
-    /**
      * Keeps a **general** secret, and reads it back before saying so.
      *
-     * The same read-back rule as [saveSecret], for the same reason: "kept" is a claim about this phone,
-     * and the only way to know it is true is to ask the store to open the door it was put behind.
-     *
-     * @return null when it is kept, or the sentence to show when it is not.
+     * **A shorthand for [saveSecret] with the general scope**, whose read-back has to ask the general
+     * store: the precedence lookup would answer with an account secret of the same name, and this
+     * would then say "kept" about a row that was never written.
      */
-    fun saveGeneralSecret(name: String, value: String, host: String): String? {
-        val problem = secretProblem(name, value, host)
-        if (problem != null) return problem
-        val trimmedHost = Secrets.hostOf(host).ifEmpty { host.trim().lowercase() }
-        credentials.setGeneralSecret(name.trim(), value, trimmedHost)
-        return if (credentials.generalSecret(name.trim(), trimmedHost) != null) {
-            Trace.note("secret-kept", "$name for $trimmedHost (every project, every account)")
-            Trace.said("The secret $name is kept for $trimmedHost, for every project")
-            secretSaved++
-            null
-        } else {
-            Trace.note("secret-not-kept", "$name saved and could not be read back")
-            "The secret was stored, and this phone could not read it back. Unlock the phone and try " +
-                "again; if it keeps happening, the phone's key has changed and every secret has to be " +
-                "entered again."
-        }
-    }
+    fun saveGeneralSecret(name: String, value: String, host: String): String? =
+        saveSecret(SecretScope.General, name, value, host)
 
     /**
      * Every project, for the scope selector.
@@ -1650,18 +1608,47 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun scopeProjects(): List<String> = projectNames.filterNot { Workspace.isSystem(it) }.sorted()
 
-    fun saveSecret(name: String, value: String, host: String, project: String? = null): String? {
+    /**
+     * **Where one scope keeps its value, read back before saying so.** Every writer goes through here,
+     * so the read-back rule is one rule and not one per scope.
+     *
+     * The read-back asks **the scope's own key**, not the precedence lookup: asking with precedence
+     * would let a wider value answer for a scope whose write silently failed, and the app would say
+     * "kept" about a row that was never written.
+     */
+    private fun keepInScope(
+        scope: SecretScope,
+        name: String,
+        value: String,
+        host: String,
+    ) {
+        credentials.setSecret(scope, name, value, host)
+    }
+
+    /** The value [scope] itself holds, ignoring any wider scope that would shadow it. */
+    private fun inScope(scope: SecretScope, name: String, host: String): String? = when (scope) {
+        SecretScope.Account -> credentials.secret(name, host)
+        SecretScope.General -> credentials.generalSecret(name, host)
+        is SecretScope.Project -> credentials.secret(scope.name, scope.name, name, host)
+        // **A branch's own row**, which the precedence lookup finds first anyway — but said explicitly
+        // so this function stays a statement about one scope rather than about the order between four.
+        is SecretScope.Branch -> credentials.secret(scope.project, scope.branch, name, host)
+    }
+
+    /** The branches of [project] that have a working tree, `main` first — the scope window's list. */
+    fun branchesOf(project: String): List<String> =
+        workspace?.let { Worktrees(it).branches(project) } ?: listOf(AgentSession.MAIN)
+
+    /** Keeps [name] where [scope] says, and reads back **that row** before answering "kept". */
+    fun saveSecret(scope: SecretScope, name: String, value: String, host: String): String? {
         val login = activeLogin
             ?: return "There is no account signed in on this phone, so there is nobody to keep a secret for."
         val problem = secretProblem(name, value, host)
         if (problem != null) return problem
         val trimmedHost = Secrets.hostOf(host).ifEmpty { host.trim().lowercase() }
-        credentials.setSecret(project, name.trim(), value, trimmedHost)
-        return if (credentials.secret(project, name.trim(), trimmedHost) != null) {
-            Trace.note(
-                "secret-kept",
-                "$name for $trimmedHost" + (project?.let { " (project $it)" } ?: " (all projects)"),
-            )
+        keepInScope(scope, name.trim(), value, trimmedHost)
+        return if (inScope(scope, name.trim(), trimmedHost) != null) {
+            Trace.note("secret-kept", "$name for $trimmedHost (${scopeLabel(scope)})")
             Trace.said("The secret $name is kept for $trimmedHost")
             secretSaved++
             null
@@ -1673,6 +1660,20 @@ class AppViewModel @JvmOverloads constructor(
                 "entered again."
         }
     }
+
+    /**
+     * Keeps a secret for [project], or for the account when it is null.
+     *
+     * **A shorthand for [saveSecret] with a scope**, kept because the project question is the one most
+     * callers have. @return null when the secret is kept, or the sentence to show when it is not.
+     */
+    fun saveSecret(name: String, value: String, host: String, project: String? = null): String? =
+        saveSecret(
+            project?.let { SecretScope.Project(it) } ?: SecretScope.Account,
+            name,
+            value,
+            host,
+        )
 
     /** Forgets a secret, so a value that is no longer wanted cannot be used by anything. */
     fun forgetSecret(name: String, scope: SecretScope) {
@@ -5484,12 +5485,20 @@ class AppViewModel @JvmOverloads constructor(
             // `AgentLog.open`, resurrecting a worktree whose branch no longer exists.
             AgentSessions(ws.accountDir).remove(project, removed)
             agentSessions = AgentSessions(ws.accountDir).read()
+            // **The branch's secrets go with it** — counted in the sentence below, because "Removed
+            // feature" while a token stays on the phone is a claim about this phone that is not true.
             // **If the person is standing in it, back to main.** Deleting the tree under an open
             // screen leaves every path resolving into a folder that is gone.
             if (activeBranch == removed) backToMain()
         }
         message = outcome.fold(
-            { "Removed $it." },
+            { branch ->
+                if (credentials.forgetBranchSecrets(project, branch) > 0) {
+                    "Removed $branch, and the secrets kept for it."
+                } else {
+                    "Removed $branch."
+                }
+            },
             { it.message ?: "The branch could not be removed." },
         )
         refreshBranches()

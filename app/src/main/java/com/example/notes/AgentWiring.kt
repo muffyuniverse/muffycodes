@@ -106,7 +106,9 @@ object AgentWiring {
             index = { project, branch, why -> IndexQueue.want(project, why, branch) },
             // **The same rule the screen's `ProjectGit` follows**, because the agent's push is the
             // same push: a project on another host authenticates with its own secret for that host.
-            vaultToken = { project, host -> credentials.secret(project, GitCredentials.SECRET, host) },
+            vaultToken = { project, branch, host ->
+                credentials.secret(project, branch, GitCredentials.SECRET, host)
+            },
             // The same fact for the agent's push: the account says which host its key is for.
             accountHost = { accounts.account(login)?.host ?: GITHUB_HOST },
             gitUser = { accounts.account(login)?.gitUser.orEmpty() },

@@ -63,10 +63,14 @@ class ProjectGit(
      *
      * A provider like the others: a `ProjectGit` in a test must not need a keystore to answer, and a
      * test that wants to see *that the vault was asked* passes a recorder. The app passes
-     * `Credentials::secret`, which answers narrowest-first (project, then account, then shared), so one
-     * lambda is the whole of "this project has its own key for this host".
+     * `Credentials::secret`, which answers narrowest-first (branch, project, account, shared), so one
+     * lambda is the whole of "this branch has its own key for this host".
+     *
+     * **The branch is asked, not the project alone.** A fine-grained token the host limits to one
+     * branch is a credential a branch holds (`PLAN-credentials` C1), and a push from `feature` that
+     * quietly used the project's token would be the wrong identity writing to the repository.
      */
-    private val vaultToken: (project: String, host: String) -> String? = { _, _ -> null },
+    private val vaultToken: (project: String, branch: String, host: String) -> String? = { _, _, _ -> null },
 
     /**
      * **The host this account's key belongs to** — what [GitCredentials.forRemote] compares a remote
@@ -119,7 +123,7 @@ class ProjectGit(
      */
     private fun credentialFor(project: String, remoteUrl: String?): GitCredentials.Answer =
         GitCredentials.forRemote(remoteUrl, tokenProvider(), accountHost()) { host ->
-            vaultToken(project, host)
+            vaultToken(project, branch, host)
         }
 
     /** Opens the project's repository, or null when it has none. */

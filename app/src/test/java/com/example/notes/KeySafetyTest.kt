@@ -620,7 +620,11 @@ class KeySafetyTest {
             "the window can see it: ${credentials.secretNames()}",
             credentials.secretNames().contains("acme-api"),
         )
-        assertEquals("and the scope is answerable", "acme", credentials.secretProject("acme-api"))
+        assertEquals(
+            "and the row says which scope it is",
+            SecretScope.Project("acme"),
+            credentials.secretRows().single { it.name == "acme-api" }.scope,
+        )
         assertNull(
             "but the account scope cannot read it",
             credentials.secret(null, "acme-api", "api.acme.test"),

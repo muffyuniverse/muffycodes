@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -205,63 +206,182 @@ class SecretsScreenTest {
         assertTrue(secretProblem("n", "v", "https://x/y")!!.contains("scheme"))
         assertNull("and a good one passes", secretProblem("n", "v", "api.github.com"))
     }
-    // ---- scope: which projects can read this value --------------------------
+    // ---- scope: where the value is kept, chosen by walking to it --------------------------
 
     /**
-     * **The cycle, and the wrap.** Tapping must reach every scope and come back, because a selector
-     * that gets stuck is one a person works around by deleting and re-adding the secret.
+     * **The root level: the account itself, then every project, each a way in.**
+     *
+     * The account line is first and is not a way in — it is the level, and the only row that can say
+     * "every project on this account". Without it the widest scope a person could reach would be a
+     * project, which is not what most secrets are.
      */
     @Test
-    fun `the scope selector cycles through all four scopes and back`() {
-        val projects = listOf("acme", "shop")
+    fun `the account level offers the account and every project`() {
+        val lines = scopeLines(ScopeHere.Root, listOf("shop", "acme")) { listOf("main") }
 
-        // account -> general -> acme -> shop -> account. Each step asserted, because a cycle that
-        // skips a scope is the failure a person would work around by deleting and re-adding the
-        // secret. **General is second**, so it is one tap from the default rather than four.
+        assertEquals("the account is first", "Every project on this account", lines.first().label)
+        assertEquals("and it chooses the account scope", SecretScope.Account, lines.first().chooses)
+        assertFalse("and it is not a folder to walk into", lines.first().walks)
         assertEquals(
-            "account -> general",
-            SecretScope.General,
-            nextScope(SecretScope.Account, projects),
+            "then every project, in order: ${lines.map { it.label }}",
+            listOf("acme/", "shop/"),
+            lines.drop(1).map { it.label },
         )
+        assertTrue(
+            "and a project is both a scope and a way in",
+            lines.drop(1).all { it.walks && it.chooses is SecretScope.Project },
+        )
+    }
+
+    /**
+     * **Inside a project: the project itself, then its branches** — the level that makes the branch
+     * scope reachable at all.
+     */
+    @Test
+    fun `inside a project the project comes first, then its branches`() {
+        val lines = scopeLines(ScopeHere.InProject("acme"), listOf("acme")) {
+            listOf("main", "feature")
+        }
+
         assertEquals(
-            "general -> the first project",
+            "the project's own scope is first",
             SecretScope.Project("acme"),
-            nextScope(SecretScope.General, projects),
+            lines.first().chooses,
+        )
+        assertFalse("and it is not a way in", lines.first().walks)
+        assertEquals(
+            "then the branches: ${lines.map { it.label }}",
+            listOf("main", "feature"),
+            lines.drop(1).map { it.label },
         )
         assertEquals(
-            "acme -> shop",
-            SecretScope.Project("shop"),
-            nextScope(SecretScope.Project("acme"), projects),
-        )
-        assertEquals(
-            "shop wraps back to account",
-            SecretScope.Account,
-            nextScope(SecretScope.Project("shop"), projects),
+            "each choosing its own branch",
+            listOf(SecretScope.Branch("acme", "main"), SecretScope.Branch("acme", "feature")),
+            lines.drop(1).map { it.chooses },
         )
     }
 
     /**
-     * **A project that vanished does not crash the dialog.** A project can be deleted from another
-     * screen while this dialog is open; the answer must be a valid scope rather than an exception or a
-     * scope that no longer exists.
+     * **A tap looks inside; a long press chooses.** The Move window's rule, and the two answers are
+     * tested here rather than in a dialog nobody can drive.
      */
     @Test
-    fun `a scope naming a project that no longer exists starts over`() {
-        assertEquals(SecretScope.Account, nextScope(SecretScope.Project("gone"), listOf("acme")))
-        assertEquals(SecretScope.Account, nextScope(SecretScope.Project("gone"), emptyList()))
+    fun `a tap walks into a project and a long press chooses it`() {
+        val project = scopeLines(ScopeHere.Root, listOf("acme")) { listOf("main") }.last()
+        val tap = scopeTap(project)
+
+        assertTrue("a tap on a project walks into it: $tap", tap is ScopeTap.Into)
+        assertEquals(
+            "and it is that project",
+            ScopeHere.InProject("acme"),
+            (tap as ScopeTap.Into).here,
+        )
+        assertEquals(
+            "while a long press chooses the project itself",
+            SecretScope.Project("acme"),
+            scopeLongPress(project),
+        )
     }
 
-    /** **All three labels**, because they are three different facts and a person must tell them apart. */
+    /**
+     * **A branch cannot be walked into, so a tap says what to do instead.**
+     *
+     * A row that looks pressable and does nothing is the failure this app keeps removing; the answer
+     * names the row, in the same words the Move window uses.
+     */
+    @Test
+    fun `a tap on a branch says to press and hold`() {
+        val branch = scopeLines(ScopeHere.InProject("acme"), listOf("acme")) { listOf("main") }.last()
+        val tap = scopeTap(branch)
+
+        assertTrue("a tap says something: $tap", tap is ScopeTap.Hint)
+        val said = (tap as ScopeTap.Hint).said
+        assertTrue("and it names the row: $said", said.contains("\"main\""))
+        assertTrue("and the gesture: $said", said.contains("Press and hold"))
+        assertEquals(
+            "while a long press chooses that very branch",
+            SecretScope.Branch("acme", "main"),
+            scopeLongPress(branch),
+        )
+    }
+
+    /** **The footer says what is chosen, or says nothing is** — the Save button depends on it. */
+    @Test
+    fun `the footer names the choice or says there is none`() {
+        assertEquals("Nothing chosen yet", scopeChosenSaid(null))
+        assertEquals("Keeping it for this account", scopeChosenSaid(SecretScope.Account))
+        assertEquals(
+            "Keeping it for only acme/feature",
+            scopeChosenSaid(SecretScope.Branch("acme", "feature")),
+        )
+    }
+
+    /** **All four labels**, because they are four different facts and a person must tell them apart. */
     @Test
     fun `each scope reads as its own fact`() {
         assertEquals("this account", scopeLabel(SecretScope.Account))
         assertEquals("all projects, every account", scopeLabel(SecretScope.General))
         assertEquals("only acme", scopeLabel(SecretScope.Project("acme")))
-        // **The store's own language is a nullable project**, so that form is labelled separately
-        // rather than overloaded: `scopeLabel(null)` would have been ambiguous between the two, and
-        // an ambiguity that compiles is one a reader has to resolve by hand.
-        assertEquals("all projects", projectScopeLabel(null))
-        assertEquals("only acme", projectScopeLabel("acme"))
+        assertEquals("only acme/feature", scopeLabel(SecretScope.Branch("acme", "feature")))
+    }
+
+    /**
+     * **A branch's value shadows the project's, and is invisible from a sibling branch** — the whole
+     * reason the scope exists, and the one thing a fake that merged its maps could not show.
+     */
+    @Test
+    fun `a branch secret answers only for its own branch`() {
+        scene.project("acme")
+        scene.viewModel.saveSecret("stripe", "acct", "api.stripe.com")
+        scene.viewModel.saveSecret(SecretScope.Project("acme"), "stripe", "proj", "api.stripe.com")
+        val kept = scene.viewModel.saveSecret(
+            SecretScope.Branch("acme", "feature"),
+            "stripe",
+            "branch",
+            "api.stripe.com",
+        )
+        assertEquals("the branch value was kept: $kept", null, kept)
+
+        assertEquals(
+            "on that branch it wins",
+            "branch",
+            scene.credentials.secret("acme", "feature", "stripe", "api.stripe.com"),
+        )
+        assertEquals(
+            "on main the project's answers",
+            "proj",
+            scene.credentials.secret("acme", "main", "stripe", "api.stripe.com"),
+        )
+        assertEquals(
+            "and with no branch named, so does the project's",
+            "proj",
+            scene.credentials.secret("acme", null, "stripe", "api.stripe.com"),
+        )
+    }
+
+    /**
+     * **A nearer scope bound to another host does not hide the wider one.**
+     *
+     * The project's value says nothing about `api.github.com`, so the account's still answers there —
+     * otherwise adding a key for one service would silently take away the account's key for every
+     * other, which is a refusal with no sentence explaining it.
+     */
+    @Test
+    fun `a nearer value for one host leaves the account's answer for another`() {
+        scene.project("acme")
+        scene.viewModel.saveSecret("git", "acct", "api.github.com")
+        scene.viewModel.saveSecret(SecretScope.Project("acme"), "git", "proj", "gitlab.com")
+
+        assertEquals(
+            "the project's own host still wins in the project",
+            "proj",
+            scene.credentials.secret("acme", "main", "git", "gitlab.com"),
+        )
+        assertEquals(
+            "and the account's answers for the host the project's value is not for",
+            "acct",
+            scene.credentials.secret("acme", "main", "git", "api.github.com"),
+        )
     }
 
     /**

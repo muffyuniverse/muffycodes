@@ -111,9 +111,11 @@ fun SecretsScreen(
                         // **The host is shown, because it is the half of the rule a person has to
                         // be able to check.** A secret whose host was mistyped looks identical in
                         // every other respect, and would refuse the request it was made for.
-                        // **The scope, beside the host.** "all projects" and a project's name are
-                        // the two answers, and which one it is decides who can read the value — so
-                        // it belongs on the row, not behind a tap.
+                        //
+                        // **The scope, beside the host.** Four answers now — this account, one
+                        // project, one branch of one project, every project on every account — and
+                        // which one it is decides who can read the value, so it belongs on the row
+                        // rather than behind a tap.
                         Text(
                             // **The row's own host**, because that is the value's own host. This
                             // used to ask for the account-scoped one by name, and a project secret
@@ -137,15 +139,21 @@ fun SecretsScreen(
     if (adding) {
         AddSecretDialog(
             projects = projects,
+            // **The branches of one project**, asked only when the person walks into it: reading every
+            // project's worktrees up front is a directory walk per project for a window that may never
+            // be opened.
+            branches = { project -> viewModel.branchesOf(project) },
             onDismiss = { adding = false },
             onSave = { name, value, host, scope ->
                 // **The scope decides which store method is called**, not a nullable argument: general
                 // is not "a project called null", and passing it as one would store a general secret
                 // under the account scope.
-                val problem = when (scope) {
-                    SecretScope.General -> viewModel.saveGeneralSecret(name, value, host)
-                    else -> viewModel.saveSecret(name, value, host, scope.projectArg)
-                }
+                // **One writer, told the scope.** The old shape branched here — general went to its
+                // own method and everything else through a nullable project — which is the shape that
+                // let "general" and "no project" be the same `null`. The store now takes the scope and
+                // decides, so a fourth scope could not be written to the wrong key by forgetting a
+                // branch in this window.
+                val problem = viewModel.saveSecret(scope, name, value, host)
                 said = problem
                 rows = viewModel.secretRows()
                 adding = false
@@ -194,8 +202,10 @@ fun SecretsScreen(
  */
 @Composable
 fun AddSecretDialog(
-    /** Every project, for the scope selector. Empty when there are none yet. */
+    /** Every project, for the scope window's root level. Empty when there are none yet. */
     projects: List<String> = emptyList(),
+    /** The branches of one project, `main` first. Asked per project, when the window walks into one. */
+    branches: (String) -> List<String> = { listOf(AgentSession.MAIN) },
     onDismiss: () -> Unit,
     onSave: (name: String, value: String, host: String, scope: SecretScope) -> Unit,
 ) {
@@ -205,6 +215,7 @@ fun AddSecretDialog(
     // **The account scope is the default**, because it is the narrowest that does not name a project:
     // a secret is presumed to belong to the person who typed it.
     var scope by remember { mutableStateOf<SecretScope>(SecretScope.Account) }
+    var choosing by remember { mutableStateOf(false) }
     val problem = secretProblem(name, value, host)
 
     AlertDialog(
@@ -250,19 +261,19 @@ fun AddSecretDialog(
                         Text("Where it may be used, like api.github.com. Nowhere else, ever.")
                     },
                 )
-                // **The scope, as a button rather than a dropdown.** A dropdown inside an
-                // AlertDialog is a second popup over the first, which is both fiddly to drive and
-                // awkward to read; a button that cycles through "all projects" and each project is
-                // one line, always visible, and says its current answer.
-                if (projects.isNotEmpty()) {
-                    TextButton(
-                        onClick = { scope = nextScope(scope, projects) },
-                        modifier = Modifier.padding(top = 4.dp),
-                    ) {
-                        Text(
-                            "Scope: " + scopeLabel(scope) + " (tap to change)",
-                        )
-                    }
+                // **The scope, chosen by walking to it** — the Move window's shape, because it is the
+                // same question ("where does this go") and the operator asked for the same answer:
+                // *"a window that allows to fall into account, then project and see what choices you
+                // have, and long press selects."*
+                //
+                // A cycling button came first, and it was wrong for a reason that is now visible: with
+                // four scopes it could only be read one at a time, and a branch could never be reached
+                // at all — "only acme/feature" is not a thing a cycle over names can express.
+                TextButton(
+                    onClick = { choosing = true },
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text("Scope: " + scopeLabel(scope) + " (tap to choose)")
                 }
                 if (problem != null) {
                     Text(
@@ -282,32 +293,18 @@ fun AddSecretDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
 
-/** How a scope reads on a row: the fact, not the null. */
-fun projectScopeLabel(project: String?): String =
-    project?.let { "only $it" } ?: "all projects"
-
-/**
- * How a [SecretScope] reads on a row and in the selector.
- *
- * **Each of the three is a different sentence**, because they are different facts and a person
- * deciding where a key should live has to be able to tell them apart at a glance.
- */
-fun scopeLabel(scope: SecretScope): String = when (scope) {
-    SecretScope.Account -> "this account"
-    SecretScope.General -> "all projects, every account"
-    is SecretScope.Project -> "only ${scope.name}"
-}
-
-/** The scope after [current] when the selector is tapped: account, general, then each project. */
-fun nextScope(current: SecretScope, projects: List<String>): SecretScope {
-    val order = listOf<SecretScope>(SecretScope.Account, SecretScope.General) +
-        projects.map { SecretScope.Project(it) }
-    // **A project deleted while the dialog was open** starts from the beginning rather than keeping a
-    // scope that no longer exists.
-    val at = order.indexOfFirst { it == current }
-    return order[((at + 1).takeIf { at >= 0 } ?: 0) % order.size]
+    if (choosing) {
+        ScopeDialog(
+            projects = projects,
+            branches = branches,
+            onDismiss = { choosing = false },
+            onPick = { picked ->
+                scope = picked
+                choosing = false
+            },
+        )
+    }
 }
 
 /**

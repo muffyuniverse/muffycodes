@@ -3566,32 +3566,11 @@ class AgentTools(
             }
             // **This project's secret first, then the account's.** A project that needs a
             // different key for the same service stores one, and nothing else changes.
-            val value = credentials.secret(project, authName, host)
-                ?: return refusal(
-                    if (credentials.secretNames().contains(authName) ||
-                        credentials.generalSecretNames().contains(authName) ||
-                        credentials.secretProject(authName) != null
-                    ) {
-                        // **The host is the reason, and it is named.** The secret exists and is simply not
-                        // for this host, which is a very different fact from "there is no such secret" —
-                        // and saying "401" instead would send the model to retry the same thing.
-                        // **The scope is named too**, because "stored for another host" and "stored
-                        // for another project" are different facts and only one of them is fixed by
-                        // editing a host. A person reading this needs to know which row to open.
-                        "The secret \"$authName\" is not for $host. It is stored for " +
-                            "${credentials.secretHost(authName).orEmpty().ifEmpty { "this phone only" }}" +
-                            scopeOf(credentials, authName) +
-                            ", and the app will not send it anywhere else. Add a secret for $host if " +
-                            "one is needed."
-                    } else {
-                        "There is no secret called \"$authName\" on this phone, in this project, or " +
-                            "for every project. The names it knows are: " +
-                            (credentials.secretNames() + credentials.generalSecretNames())
-                                .distinct()
-                                .joinToString(", ") { "\"$it\"" }
-                                .ifEmpty { "none" } + "."
-                    },
-                )
+            // **The branch is part of the question.** A secret kept for `feature` is for `feature`:
+            // an agent working in a branch's worktree must not spend a value the person stored for
+            // the project's other branches, which is what a lookup without the branch would do.
+            val value = credentials.secret(project, branch, authName, host)
+                ?: return refusal(secretRefusal(credentials, authName, host))
             // **A named secret is a bearer token**, which is what every API this is for accepts. A scheme
             // the caller needs beyond that can be asked for with `headers` on a non-secret header.
             given["Authorization"] = "Bearer $value"
@@ -3827,16 +3806,28 @@ class AgentTools(
      * secret than a key of the same text.
      */
     /**
-     * Which scope a stored secret lives in, as a phrase for a refusal.
+     * **Why a named secret was not sent**, in a sentence built from the rows.
      *
-     * **Named rather than implied**, because "stored for another host" and "stored for another project"
-     * are different facts and only one of them is fixed by editing a host — a person reading the refusal
-     * needs to know which row to open (§13c.4).
+     * A name is not unique across scopes, so the answer names **every** row with that name and what
+     * each one allows. One lookup by name could only say the wrong row's host — which is how the
+     * window printed "used by this phone only" for a value that is sent to a host — and the person
+     * reading this needs to know which row to open (§13c.4).
+     *
+     * A name with no rows at all is a different sentence, because it is a different mistake: nothing
+     * to open, and the list of names it does know is what lets the model correct itself.
      */
-    private fun scopeOf(credentials: Credentials, name: String): String = when {
-        credentials.secretProject(name) != null -> " (project \"${credentials.secretProject(name)}\")"
-        credentials.generalSecretNames().contains(name) -> " (all projects, every account)"
-        else -> ""
+    private fun secretRefusal(credentials: Credentials, name: String, host: String): String {
+        val rows = credentials.secretRows().filter { it.name == name }
+        if (rows.isNotEmpty()) {
+            val where = rows.joinToString("; ") { row ->
+                row.host.ifEmpty { "this phone only" } + " (" + scopeLabel(row.scope) + ")"
+            }
+            return "The secret \"$name\" is not for $host. It is stored for $where, and the app " +
+                "will not send it anywhere else. Add a secret for $host if one is needed."
+        }
+        return "There is no secret called \"$name\" on this phone, in this project, or for every " +
+            "project. The names it knows are: " +
+            credentials.secretNames().joinToString(", ") { "\"$it\"" }.ifEmpty { "none" } + "."
     }
 
     private fun sealKey(args: JSONObject, host: String): Result<String> {
@@ -3849,7 +3840,7 @@ class AgentTools(
                 ),
             )
         }
-        val stored = credentials?.secret(project, asked, host)
+        val stored = credentials?.secret(project, branch, asked, host)
         return Result.success(stored ?: asked)
     }
 

@@ -117,6 +117,15 @@ open class MemoryCredentials : Credentials {
                         projectHosts[it].orEmpty(),
                         SecretScope.Project(it.substringBefore('/')),
                     )
+                } +
+                branchSecrets.keys.map {
+                    val project = it.substringBefore('/')
+                    val rest = it.removePrefix("$project/")
+                    SecretRow(
+                        rest.substringAfter('/'),
+                        branchHosts[it].orEmpty(),
+                        SecretScope.Branch(project, rest.substringBefore('/')),
+                    )
                 }
             )
             .sortedWith(compareBy({ it.name }, { scopeOrder(it.scope) }))
@@ -135,6 +144,11 @@ open class MemoryCredentials : Credentials {
                 projectSecrets.remove("${scope.name}/$name")
                 projectHosts.remove("${scope.name}/$name")
             }
+            is SecretScope.Branch -> {
+                val key = "${scope.project}/${scope.branch}/$name"
+                branchSecrets.remove(key)
+                branchHosts.remove(key)
+            }
         }
     }
 
@@ -147,6 +161,16 @@ open class MemoryCredentials : Credentials {
      */
     private val projectSecrets = LinkedHashMap<String, String>()
     private val projectHosts = LinkedHashMap<String, String>()
+
+    /**
+     * Branch-scoped secrets, keyed `project/branch/name`.
+     *
+     * **A fourth map, not a prefix in the project one** — the real store keeps them under a different
+     * pref key, so a fake that folded them into the project's would pass a test where a branch value
+     * leaked to its sibling branch.
+     */
+    private val branchSecrets = LinkedHashMap<String, String>()
+    private val branchHosts = LinkedHashMap<String, String>()
 
     /** General secrets: readable from every project, whatever the account (§13c.4). */
     private val generalSecrets = LinkedHashMap<String, String>()
@@ -170,16 +194,44 @@ open class MemoryCredentials : Credentials {
     }
 
     /**
-     * **Project, then account, then general** — the real store's order, so a test cannot pass where the
-     * phone would answer differently.
+     * **Branch, then project, then account, then general** — the real store's order, so a test cannot
+     * pass where the phone would answer differently.
+     *
+     * **A nearer scope bound to another host falls through**, which is the real store's rule too: it
+     * says nothing about this host, so the wider value still answers.
      */
-    override fun secret(project: String?, name: String, host: String): String? {
+    override fun secret(project: String?, branch: String?, name: String, host: String): String? {
+        if (project != null && branch != null) {
+            val key = "$project/$branch/$name"
+            val allowed = branchHosts[key]
+            if (allowed != null && hostMatches(allowed, host)) return branchSecrets[key]
+        }
         if (project != null) {
             val key = "$project/$name"
             val allowed = projectHosts[key]
             if (allowed != null && hostMatches(allowed, host)) return projectSecrets[key]
         }
         return secret(name, host) ?: generalSecret(name, host)
+    }
+
+    override fun setBranchSecret(
+        project: String,
+        branch: String,
+        name: String,
+        value: String,
+        host: String,
+    ) {
+        branchSecrets["$project/$branch/$name"] = value
+        branchHosts["$project/$branch/$name"] = host
+    }
+
+    override fun forgetBranchSecrets(project: String, branch: String): Int {
+        val doomed = branchSecrets.keys.filter { it.startsWith("$project/$branch/") }
+        for (key in doomed) {
+            branchSecrets.remove(key)
+            branchHosts.remove(key)
+        }
+        return doomed.size
     }
 
     override fun setSecret(project: String?, name: String, value: String, host: String) {
@@ -197,11 +249,15 @@ open class MemoryCredentials : Credentials {
             projectSecrets.remove(key)
             projectHosts.remove(key)
         }
-        return doomed.size
+        // **The branch rows go with the project**, as they do in the real store: a credential for a
+        // project that no longer exists is a row nobody can read or revoke.
+        val branches = branchSecrets.keys.filter { it.startsWith("$project/") }
+        for (key in branches) {
+            branchSecrets.remove(key)
+            branchHosts.remove(key)
+        }
+        return doomed.size + branches.size
     }
-
-    override fun secretProject(name: String): String? =
-        projectSecrets.keys.firstOrNull { it.endsWith("/$name") }?.substringBeforeLast('/')
 
     /** The same rule the real store applies, so a test cannot pass where the phone would leak. */
     private fun hostMatches(allowed: String, asked: String): Boolean {

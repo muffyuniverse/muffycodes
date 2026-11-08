@@ -1167,6 +1167,292 @@ fun PlaceDialog(
 }
 
 /**
+ * **Where a secret is kept, chosen by walking to it** — the Move window's shape, applied to a scope.
+ *
+ * The operator's instruction: *"I want scope selection to be done in the same way as moving is, a
+ * window that allows to fall into account, then project and see what choices you have, and long press
+ * selects."* So the shape is `PlaceDialog`'s, and it is the same for the same reason: a flat list of
+ * every scope answered "where may this live" with a wall of names whose relation was invisible, and
+ * the answer a person has is a *place*, reached by walking to it.
+ *
+ * **The first row of every level is the level itself** — "every project on this account" at the root,
+ * "every branch of acme" inside acme. `PlaceDialog` has no such row because it never needs to choose
+ * its own root; a scope does, and a row is the only way to say it without a second mechanism.
+ *
+ * ## The rules are functions, and the window draws them
+ *
+ * No test in this repository drives a dialog: an `AlertDialog`'s enter animation never reports idle
+ * under Robolectric, so a test that waits on one hangs for sixty seconds and then exhausts the heap for
+ * every test after it in the shard. So what a level shows, what a tap does, what a long press chooses,
+ * and what the footer says are [scopeLoad], [scopeTap], [scopeLongPress] and [scopeChosenSaid] — four
+ * functions of plain values, testable without a screen. The window below binds them to a list.
+ */
+
+/** Where the scope window is looking: the account's root, or inside one project. */
+sealed interface ScopeHere {
+    /** The root: the account, and every project it holds. */
+    data object Root : ScopeHere
+
+    /** Inside [project], where every branch of it is a place. */
+    data class InProject(val project: String) : ScopeHere
+}
+
+/** One line the scope window draws. */
+data class ScopeLine(
+    /** The scope long-pressing this line chooses. Null for a line that is only a way in. */
+    val chooses: SecretScope?,
+    val label: String,
+    /** True when a tap walks into it. */
+    val walks: Boolean,
+    /** What the line says under its name, when it has something to say. */
+    val detail: String = "",
+)
+
+/**
+ * **What one level of the walk shows**: the level itself first, then what is inside it.
+ *
+ * [branches] is asked per project and answers `main` first — a branch that has no working tree is not
+ * a place a value can live, because `Worktrees.branches` is the list of trees, and a value scoped to a
+ * branch that does not exist would be a row nothing can ever read.
+ *
+ * **A project with no branches at all still shows the project line**, so a scope can be chosen before
+ * any branch exists — and the "nothing inside" sentence then says why, rather than leaving a person
+ * looking at an empty window wondering whether the app is broken.
+ */
+fun scopeLines(
+    here: ScopeHere,
+    projects: List<String>,
+    branches: (String) -> List<String>,
+): List<ScopeLine> = when (here) {
+    ScopeHere.Root -> listOf(
+        ScopeLine(
+            chooses = SecretScope.Account,
+            label = "Every project on this account",
+            walks = false,
+            detail = "a secret kept here answers for every project below",
+        ),
+    ) + projects.sorted().map { project ->
+        ScopeLine(
+            chooses = SecretScope.Project(project),
+            label = "$project/",
+            walks = true,
+            detail = "tap to see its branches · hold to keep it for the whole project",
+        )
+    }
+
+    is ScopeHere.InProject -> {
+        val found = branches(here.project)
+        listOf(
+            ScopeLine(
+                chooses = SecretScope.Project(here.project),
+                label = "Every branch of ${here.project}",
+                walks = false,
+                detail = if (found.size == 1) "this project has only main" else "${found.size} branches",
+            ),
+        ) + found.map { branch ->
+            ScopeLine(
+                chooses = SecretScope.Branch(here.project, branch),
+                label = branch,
+                walks = false,
+                detail = "only ${here.project}/$branch",
+            )
+        }
+    }
+}
+
+/**
+ * What a long press on [line] chooses, or the sentence to say when it chooses nothing.
+ *
+ * **Every line in the window is choosable**, unlike the Move window's folders: a scope has no insides
+ * that are not also scopes of their own. So this only ever has to answer with a scope, and the
+ * `null` branch exists for the day a line stops being choosable — it must say so rather than do
+ * nothing.
+ */
+fun scopeLongPress(line: ScopeLine): SecretScope? = line.chooses
+
+/**
+ * What a tap on [line] does: walk into it, or say what to do instead.
+ *
+ * **A tap that cannot walk is answered with the sentence rather than with silence** — the rule the
+ * folder browser already follows, because a row that looks pressable and does nothing is the failure
+ * this app keeps removing.
+ */
+fun scopeTap(line: ScopeLine): ScopeTap = when {
+    line.walks && line.chooses is SecretScope.Project -> ScopeTap.Into(ScopeHere.InProject(line.chooses.name))
+    line.walks -> ScopeTap.Into(ScopeHere.Root)
+    else -> ScopeTap.Hint(
+        "Press and hold \"${line.label.trimEnd('/')}\" to choose it.",
+    )
+}
+
+/** What a tap did, so the window is a rendering of this and not a second source of truth. */
+sealed interface ScopeTap {
+    /** Walk into [here]. */
+    data class Into(val here: ScopeHere) : ScopeTap
+
+    /** Say [said], and change nothing. */
+    data class Hint(val said: String) : ScopeTap
+}
+
+/**
+ * The line under the list, saying what is chosen.
+ *
+ * **"Nothing chosen yet" rather than an empty space**, because the Save button depends on this and a
+ * person has to be able to see why it will not press. It names the scope in the same words the row
+ * will afterwards ([scopeLabel]), so the choice and the row cannot read as two different things.
+ */
+fun scopeChosenSaid(chosen: SecretScope?): String =
+    chosen?.let { "Keeping it for " + scopeLabel(it) } ?: "Nothing chosen yet"
+
+/**
+ * The window itself. See the block above for why its rules are functions rather than tests here.
+ */
+@Composable
+fun ScopeDialog(
+    /** Every project the account holds, which is the root level's list. */
+    projects: List<String>,
+    /** The branches of one project, `main` first. */
+    branches: (String) -> List<String>,
+    onDismiss: () -> Unit,
+    onPick: (SecretScope) -> Unit,
+) {
+    var here by remember { mutableStateOf<ScopeHere>(ScopeHere.Root) }
+    var chosen by remember { mutableStateOf<SecretScope?>(null) }
+    var hint by remember { mutableStateOf<String?>(null) }
+
+    val lines = scopeLines(here, projects, branches)
+    val title = when (here) {
+        ScopeHere.Root -> "The account"
+        is ScopeHere.InProject -> here.project
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Where should it be kept?") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 440.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        enabled = here != ScopeHere.Root,
+                        onClick = {
+                            here = ScopeHere.Root
+                            hint = null
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up one level")
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            // **The same sentence the Move window uses**, because it is the same act:
+                            // tap to look, hold to choose.
+                            text = "Tap a project to look inside it; press and hold to choose it.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider()
+                if (lines.isEmpty()) {
+                    Text(
+                        "There is nothing here to choose yet. Make a project first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                } else {
+                    LazyColumn {
+                        items(lines) { line ->
+                            val picked = line.chooses != null && line.chooses == chosen
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (picked) MaterialTheme.colorScheme.secondaryContainer
+                                        else Color.Transparent,
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            when (val tap = scopeTap(line)) {
+                                                is ScopeTap.Into -> {
+                                                    here = tap.here
+                                                    hint = null
+                                                }
+                                                is ScopeTap.Hint -> hint = tap.said
+                                            }
+                                        },
+                                        onLongClick = {
+                                            val scope = scopeLongPress(line)
+                                            if (scope != null) {
+                                                chosen = scope
+                                                hint = null
+                                            } else {
+                                                hint = "\"${line.label}\" cannot be chosen."
+                                            }
+                                        },
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = line.label,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (line.detail.isNotEmpty()) {
+                                        Text(
+                                            text = line.detail,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                if (picked) {
+                                    Text(
+                                        "chosen",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+                val said = hint
+                if (said != null) {
+                    Text(
+                        said,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Text(
+                    text = scopeChosenSaid(chosen),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = chosen != null,
+                onClick = { chosen?.let(onPick) },
+            ) { Text("Keep it there") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
  * The bug button: one press, everywhere, from any screen.
  *
  * It is deliberately the smallest thing in each app bar and the same thing on every

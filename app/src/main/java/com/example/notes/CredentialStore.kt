@@ -31,13 +31,14 @@ sealed interface SecretScope {
     data class Project(val name: String) : SecretScope
 
     /**
-     * The `project` argument the store takes: null for account, a name for a project.
+     * **One branch of one project** — the narrowest scope there is.
      *
-     * **General is null too**, and that is not a loss: [CredentialStore] stores general under its own
-     * key prefix, so the store is told which method to call by the caller, not by this value.
+     * A branch is a working tree of its own (§13d), and the operator's reason for this scope is
+     * concrete: a fine-grained token the host limits to one branch is a credential a *branch* holds,
+     * and two branches of one project routinely need not be allowed the same powers. The project scope
+     * cannot express that: it is one value per name.
      */
-    val projectArg: String?
-        get() = (this as? Project)?.name
+    data class Branch(val project: String, val branch: String) : SecretScope
 }
 
 /**
@@ -144,6 +145,16 @@ interface Credentials {
      * **Project first, then account.** A project that needs a different key for the same service can
      * say so without renaming anything, and a key several projects share is written once.
      */
+    /**
+     * **Branch, then project, then account, then general — narrowest first.**
+     *
+     * [branch] is only meaningful inside [project]; a branch is a working tree of a project, so a
+     * branch with no project is not a place a value can live and the parameter is ignored.
+     */
+    fun secret(project: String?, branch: String?, name: String, host: String): String? =
+        secret(project, name, host)
+
+    /** **This project on `main`** — the shorthand for a caller that has no branch in hand. */
     fun secret(project: String?, name: String, host: String): String? = secret(name, host)
 
     /**
@@ -172,15 +183,40 @@ interface Credentials {
         setSecret(name, value, host)
 
     /**
+     * **The only writer that says which row it is writing.** Every other `setSecret` above is a
+     * shorthand for one scope, kept because the scope they mean is unambiguous.
+     *
+     * The screen holds a [SecretScope] — it was chosen from a list — so this is the form it calls, and
+     * a scope the store does not know is a compile error rather than a value written to the wrong key.
+     */
+    fun setSecret(scope: SecretScope, name: String, value: String, host: String) {
+        when (scope) {
+            SecretScope.General -> setGeneralSecret(name, value, host)
+            SecretScope.Account -> setSecret(name, value, host)
+            is SecretScope.Project -> setSecret(scope.name, name, value, host)
+            is SecretScope.Branch -> setBranchSecret(scope.project, scope.branch, name, value, host)
+        }
+    }
+
+    /**
+     * Keeps [value] for one branch of [project].
+     *
+     * A default that writes nothing, so a store which does not keep branch rows cannot silently write
+     * the value somewhere wider — which is the failure a nullable project argument already produced
+     * once, when "general" and "no project" were the same `null`.
+     */
+    fun setBranchSecret(project: String, branch: String, name: String, value: String, host: String) {}
+
+    /** Every branch of [project] a secret is stored for, so deleting a branch can take them too. */
+    fun forgetBranchSecrets(project: String, branch: String): Int = 0
+
+    /**
      * Forgets every secret scoped to [project], answering how many went.
      *
      * **Called when a project is deleted**, before its folder is. A secret whose project no longer
      * exists is a row nothing can ever read, and leaving it would be a leak nobody can see.
      */
     fun forgetProjectSecrets(project: String): Int = 0
-
-    /** The project a secret is scoped to, or null when it is account-wide. */
-    fun secretProject(name: String): String? = null
 
     /**
      * The names of this account's secrets, **never their values**, so a person (and the agent) can see what
@@ -229,6 +265,20 @@ fun scopeOrder(scope: SecretScope): Int = when (scope) {
     SecretScope.General -> 0
     SecretScope.Account -> 1
     is SecretScope.Project -> 2
+    is SecretScope.Branch -> 3
+}
+
+/**
+ * How a scope reads on a row, in a refusal, and in the window that removes it.
+ *
+ * **Each is its own sentence**, because they are different facts and a person deciding where a key
+ * should live — or reading why one was not sent — has to be able to tell them apart at a glance.
+ */
+fun scopeLabel(scope: SecretScope): String = when (scope) {
+    SecretScope.Account -> "this account"
+    SecretScope.General -> "all projects, every account"
+    is SecretScope.Project -> "only ${scope.name}"
+    is SecretScope.Branch -> "only ${scope.project}/${scope.branch}"
 }
 
 /** The three things a store can say about a stored key. */
@@ -450,25 +500,34 @@ class CredentialStore(context: Context) : Credentials {
     }
 
     /**
-     * **Project, then account, then general — narrowest first** (§13c.4).
+     * **Branch, then project, then account, then general — narrowest first** (§13c.4).
      *
-     * Each step is a deliberate shadow: a project that needs a different key for the same service says so
-     * by storing one; an account that needs a different key from the shared one does the same. **General
-     * is last** because it is the widest, and a narrower scope that exists must win or it would be
-     * impossible to override the shared key for one project.
+     * Each step is a deliberate shadow: a branch that needs a different key says so by storing one, a
+     * project that needs a different key from the account's does the same, and so on. **General is
+     * last** because it is the widest, and a narrower scope that exists must win or it would be
+     * impossible to override the shared key for one branch.
      *
-     * **General is consulted even with no account signed in**, which is the one place this differs from
-     * the other two scopes: it is not the account's secret to hide.
+     * **A narrower scope bound to a *different host* does not block the wider one.** It says nothing
+     * about this host, so the fallback is right — and it is what lets a project hold a key for
+     * `api.acme.test` while the account's key still answers for `api.github.com`. The sentence a
+     * refusal gives is built from [secretRows], which can say where the value really is.
+     *
+     * **General is consulted even with no account signed in**, which is the one place this differs
+     * from the other three: it is not the account's secret to hide.
      */
-    override fun secret(project: String?, name: String, host: String): String? {
+    override fun secret(project: String?, branch: String?, name: String, host: String): String? {
         val login = activeLogin
         if (login != null) {
+            if (project != null && branch != null) {
+                val scoped = prefs.getString(branchSecretKey(login, project, branch, name), null)
+                if (scoped != null) openedAt(scoped, host)?.let { return it }
+            }
             if (project != null) {
                 val scoped = prefs.getString(projectSecretKey(login, project, name), null)
-                if (scoped != null) return openedAt(scoped, host)
+                if (scoped != null) openedAt(scoped, host)?.let { return it }
             }
             val account = prefs.getString(secretKey(login, name), null)
-            if (account != null) return openedAt(account, host)
+            if (account != null) openedAt(account, host)?.let { return it }
         }
         return generalSecret(name, host)
     }
@@ -478,6 +537,40 @@ class CredentialStore(context: Context) : Credentials {
         val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
         val key = if (project == null) secretKey(login, name) else projectSecretKey(login, project, name)
         prefs.edit().putString(key, packed).apply()
+    }
+
+    override fun setBranchSecret(
+        project: String,
+        branch: String,
+        name: String,
+        value: String,
+        host: String,
+    ) {
+        val login = activeLogin ?: return
+        val packed = host.trim().lowercase() + HOST_SEPARATOR + encrypt(value)
+        prefs.edit().putString(branchSecretKey(login, project, branch, name), packed).apply()
+    }
+
+    /**
+     * **Deleting a branch takes its secrets with it**, for the reason [forgetProjectSecrets] gives: a
+     * row whose branch no longer exists is a row nothing can read, and a credential nobody can see is
+     * one nobody can revoke from here.
+     */
+    override fun forgetBranchSecrets(project: String, branch: String): Int {
+        val login = activeLogin ?: return 0
+        val prefix = branchSecretPrefix(login, project, branch)
+        val doomed = prefs.all.keys.filter { it.startsWith(prefix) }
+        if (doomed.isEmpty()) return 0
+        val branchPrefix = "secret_${login}_branch_"
+        val branchKeys = prefs.all.keys.filter { key ->
+            key.startsWith(branchPrefix) &&
+                decode(key.removePrefix(branchPrefix).substringBefore('/')) == project
+        }
+        val edit = prefs.edit()
+        for (key in doomed) edit.remove(key)
+        for (key in branchKeys) edit.remove(key)
+        edit.apply()
+        return doomed.size + branchKeys.size
     }
 
     /**
@@ -518,6 +611,9 @@ class CredentialStore(context: Context) : Credentials {
 
     override fun forgetProjectSecrets(project: String): Int {
         val login = activeLogin ?: return 0
+        // **The branch rows first**, because their prefix (`secret_<login>_branch_<p>/`) does not
+        // start with the project prefix and would otherwise survive the project's own deletion —
+        // a stored credential for a project that no longer exists.
         val prefix = projectSecretPrefix(login, project)
         val doomed = prefs.all.keys.filter { it.startsWith(prefix) }
         if (doomed.isEmpty()) return 0
@@ -528,31 +624,13 @@ class CredentialStore(context: Context) : Credentials {
     }
 
     /**
-     * The project a secret is scoped to, or null when it is account-wide.
+     * **No `secretProject(name)` any more, and its absence is the fix.**
      *
-     * **Read off the key**, because the key is the scope and a second copy could disagree with the one
-     * the lookup uses. The split is at the slash: a slash is escaped to `%2F` in both the project and
-     * the name, so it cannot occur inside either and is the only unambiguous boundary.
-     *
-     * **When two projects hold a secret of the same name**, this answers the first one found. That is a
-     * real ambiguity and it is stated rather than hidden: the window draws a row from a name, and a
-     * name is not unique across scopes. Two projects holding the same name is the case that exposes it,
-     * and the honest fix — if it ever matters — is to key the row by scope as well, not to guess here.
+     * It answered "the project a name is scoped to", which cannot be answered when two scopes hold
+     * one name — and it said so in its own doc, then answered the first match anyway. Every screen
+     * that asked it drew a row from a name and could not tell which value it was describing;
+     * [secretRows] replaced it, because a row carries its own scope.
      */
-    override fun secretProject(name: String): String? {
-        val login = activeLogin ?: return null
-        val marker = "secret_${login}_project_"
-        val encoded = java.net.URLEncoder.encode(name, "UTF-8")
-        val hit = prefs.all.keys.firstOrNull {
-            it.startsWith(marker) && it.substringAfterLast('/') == encoded
-        } ?: return null
-        val middle = hit.removePrefix(marker).substringBeforeLast('/')
-        return try {
-            java.net.URLDecoder.decode(middle, "UTF-8")
-        } catch (e: Exception) {
-            null
-        }
-    }
 
     /** One secret, unpacked: the host is checked, the value is decrypted. */
     private fun openedAt(packed: String, host: String): String? {
@@ -566,53 +644,22 @@ class CredentialStore(context: Context) : Credentials {
     }
 
     /**
-     * The names, sorted, read straight from the keys.
+     * **The distinct names this account can see**, derived from the rows.
      *
-     * **No decryption, so this answers on a locked phone** — which is the point of a listing: knowing that a
-     * secret exists is not the same as being able to use it, and a screen that showed nothing while the phone
-     * was locked would look like the secret had been lost.
+     * Derived rather than parsed a second time: the names come from the same walk that produces the
+     * rows, so a scope cannot be listed by one and unknown to the other — which is exactly what
+     * happened while this parsed keys itself and skipped the general scope, and again when the branch
+     * scope was added and `secret_dev_branch_acme/main/x` would have been listed as a secret called
+     * `project_x`-shaped nonsense.
+     *
+     * **No decryption**, so it answers on a locked phone: knowing that a secret exists is not the same
+     * as being able to use it, and a screen that showed nothing while the phone was locked would look
+     * like the secret had been lost.
+     *
+     * A name held in two scopes appears once here — this is the list of *names*, and a caller that
+     * needs to show or remove one value asks [secretRows].
      */
-    /**
-     * Every secret this account has, **including the project-scoped ones**, as the names a person
-     * should see.
-     *
-     * **This used to exclude project-scoped keys, and that made them invisible rather than tidy.** The
-     * exclusion was written to avoid listing `secret_dev_project_x` as a secret called `project_x` —
-     * which is right about the *name* and wrong about the *row*: a project secret was stored, was
-     * readable by the agent, and **could not be seen, edited or removed in the window**. A secret the
-     * screen cannot show is a secret nobody can audit, and the scope is exactly the fact a person needs
-     * to see.
-     *
-     * So the project marker is **parsed out rather than filtered out**: `secret_dev_project_<p>_<n>`
-     * becomes the name `n`, and [secretProject] answers `<p>` for it so the row can say which scope it
-     * is. A project name is decoded with the same `URLDecoder` as the secret's own name, because it is
-     * encoded the same way and a project called `acme shop` would otherwise never match its own row.
-     */
-    override fun secretNames(): List<String> {
-        val login = activeLogin ?: return emptyList()
-        val accountPrefix = "secret_${login}_"
-        val projectPrefix = "secret_${login}_project_"
-        return prefs.all.keys
-            .filter { it.startsWith(accountPrefix) }
-            .mapNotNull { key ->
-                try {
-                    if (key.startsWith(projectPrefix)) {
-                        // **Everything after the last slash is the name**, because a slash cannot occur
-                        // inside the encoded project or the encoded name.
-                        java.net.URLDecoder.decode(
-                            key.substringAfterLast('/'),
-                            "UTF-8",
-                        )
-                    } else {
-                        java.net.URLDecoder.decode(key.removePrefix(accountPrefix), "UTF-8")
-                    }
-                } catch (e: Exception) {
-                    null
-                }
-            }
-            .distinct()
-            .sorted()
-    }
+    override fun secretNames(): List<String> = secretRows().map { it.name }.distinct().sorted()
 
     /**
      * The host a stored secret is bound to, for a screen that shows where a name may be used.
@@ -652,9 +699,20 @@ class CredentialStore(context: Context) : Credentials {
                 continue
             }
             if (login == null) continue
+            val branchPrefix = "secret_${login}_branch_"
             val projectPrefix = "secret_${login}_project_"
             val accountPrefix = "secret_${login}_"
-            if (key.startsWith(projectPrefix)) {
+            if (key.startsWith(branchPrefix)) {
+                // **Three encoded parts, so three separators.** A branch may be `feature/x`, and a
+                // slash is escaped inside every part — which is what makes it the one character that
+                // is unambiguously a boundary (the same rule the project scope needed).
+                val parts = key.removePrefix(branchPrefix).split('/')
+                if (parts.size != 3) continue
+                val project = decode(parts[0]) ?: continue
+                val branch = decode(parts[1]) ?: continue
+                val name = decode(parts[2]) ?: continue
+                rows.add(SecretRow(name, host, SecretScope.Branch(project, branch)))
+            } else if (key.startsWith(projectPrefix)) {
                 val middle = key.removePrefix(projectPrefix)
                 val project = decode(middle.substringBeforeLast('/')) ?: continue
                 val name = decode(middle.substringAfterLast('/')) ?: continue
@@ -683,6 +741,12 @@ class CredentialStore(context: Context) : Credentials {
             is SecretScope.Project -> {
                 val login = activeLogin ?: return
                 prefs.edit().remove(projectSecretKey(login, scope.name, name)).apply()
+            }
+            is SecretScope.Branch -> {
+                val login = activeLogin ?: return
+                prefs.edit()
+                    .remove(branchSecretKey(login, scope.project, scope.branch, name))
+                    .apply()
             }
         }
     }
@@ -743,6 +807,20 @@ class CredentialStore(context: Context) : Credentials {
 
     private fun projectSecretPrefix(login: String, project: String): String =
         "secret_${login}_project_${java.net.URLEncoder.encode(project, "UTF-8")}/"
+
+    /**
+     * `secret_<login>_branch_<project>/<branch>/<name>` — the project scope with one more part.
+     *
+     * **Each part is percent-encoded and the separator is a slash**, so a branch called `feature/x`
+     * is one part rather than two, and no combination of names can produce another row's key.
+     */
+    private fun branchSecretPrefix(login: String, project: String, branch: String): String =
+        "secret_${login}_branch_" +
+            java.net.URLEncoder.encode(project, "UTF-8") + "/" +
+            java.net.URLEncoder.encode(branch, "UTF-8") + "/"
+
+    private fun branchSecretKey(login: String, project: String, branch: String, name: String): String =
+        branchSecretPrefix(login, project, branch) + java.net.URLEncoder.encode(name, "UTF-8")
 
     /**
      * Splits a stored secret into the host it is bound to and the ciphertext.

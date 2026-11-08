@@ -216,6 +216,62 @@ class BranchesScreenTest {
         assertEquals("main is still the only branch", listOf("main"), trees.branches("Shopping"))
     }
 
+    /**
+     * **A branch's secrets are removed with the branch, and the sentence says so.**
+     *
+     * A value kept for `acme/feature` belongs to a working tree; once that tree is gone, nothing can
+     * read the value — and a credential nobody can see is one nobody can revoke from here. Saying only
+     * "Removed feature" while the token stays on the phone would be a claim about this phone that is
+     * not true.
+     */
+    @Test
+    fun `removing a branch removes the secrets kept for it`() {
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
+        val kept = scene.viewModel.saveSecret(
+            SecretScope.Branch("Shopping", "feature"),
+            "acme-api",
+            "tok_branch",
+            "api.acme.test",
+        )
+        assertEquals("the branch secret was kept: $kept", null, kept)
+        assertTrue(
+            "and it is a row: ${scene.viewModel.secretRows()}",
+            scene.viewModel.secretRows().any { it.scope == SecretScope.Branch("Shopping", "feature") },
+        )
+
+        scene.viewModel.dropBranch("feature")
+        scene.await("the branch to go") { "feature" !in scene.viewModel.choosingBranches }
+
+        assertTrue(
+            "and its secret went with it: ${scene.viewModel.secretRows()}",
+            scene.viewModel.secretRows().none { it.name == "acme-api" },
+        )
+        assertTrue(
+            "which the sentence says: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("secrets"),
+        )
+    }
+
+    /**
+     * **The branch scope window offers the branches that really exist.**
+     *
+     * `Worktrees.branches` is the list of trees, so a value scoped to a branch with no working tree
+     * would be a row nothing can ever read — and the picker must therefore not offer one.
+     */
+    @Test
+    fun `the scope window offers a project's real branches`() {
+        scene.project("Shopping")
+        scene.viewModel.openBranches("Shopping")
+        scene.viewModel.newBranch("feature")
+        scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
+
+        val branches = scene.viewModel.branchesOf("Shopping")
+        assertEquals("main first, then the branch that has a tree", listOf("main", "feature"), branches)
+    }
+
     @Test
     fun `a new branch is made and appears in the list`() {
         // **The whole loop, through the door a person uses**: the view model makes it, re-reads the
