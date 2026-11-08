@@ -4237,8 +4237,14 @@ class AppViewModel @JvmOverloads constructor(
             finishTurn(project, "There is no project for this conversation yet")
             return
         }
-        val model = modelConfig.active
-        val door = doorFor(model, project)
+        // **The same resolution the runner uses, for this worktree.** A person's turn and the agent's
+        // own wake must be asked with the same model at the same address, or the conversation changes
+        // voice depending on who started it.
+        val asked = workspace?.let {
+            AgentWiring.wiredFor(it, credentials, project, branch)
+        } ?: Wired.of(modelConfig.active)
+        val model = asked.active
+        val door = doorFor(asked, project)
         // The two limits, with this pin's ceiling — read once per turn, because the pin does not
         // change mid-turn and a settings read per request would be the same number twice.
         //
@@ -4292,7 +4298,7 @@ class AppViewModel @JvmOverloads constructor(
                             hardAsked = settings.hardTokens.toLong(),
                             targetAsked = settings.targetTokens.toLong(),
                             ceiling = ContextBudget.ceiling(
-                                pin = modelConfig.active.provider,
+                                pin = model.provider,
                                 contextLength = modelInfo?.contextLength,
                                 maxOutput = modelInfo?.maxOutput,
                             ),
@@ -4601,7 +4607,9 @@ class AppViewModel @JvmOverloads constructor(
             rootDir = accountsRoot,
             credentials = credentials,
             settings = settings,
-            door = { active -> doorFor(active) },
+            // **The turn's own resolution, and the worktree it is for**: a branch with a model of its
+            // own is asked that one, and the request row is filed under the project it came from.
+            door = { asked, project -> doorFor(asked, project) },
             // **The same engine the service uses, or a second one.** The view model runs turns while
             // the app is on screen; the service runs them while it is not. Two runners are possible
             // at once, so this is its own instance rather than a shared one — a WebView is bound to
@@ -4683,20 +4691,22 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** The door for [model]: the test's when one is set, and the account's connection otherwise. */
-    private fun doorFor(model: ActiveModel, project: String = ""): Door = (chatDoor ?: { active ->
+    private fun doorFor(wired: Wired, project: String = ""): Door = (chatDoor ?: { asked ->
         OpenRouterDoor(
-            key = { activeLogin?.let { credentials.modelKey(it) } },
-            keyState = { activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
-            model = active.model,
-            provider = active.provider,
+            // **The key that belongs to the address**, which is the scope's when one answered — so a
+            // project with its own server is asked with the key stored beside that server's address.
+            key = { asked.key() },
+            keyState = { asked.keyState() },
+            model = asked.active.model,
+            provider = asked.active.provider,
             // **Recorded, never enforced.** Nothing is scoped by this - it is what lets the log
             // answer "which project costs me most", and a door built without one writes an empty
             // project rather than failing.
             project = project,
-            // **The account's connection**, which is what replaced the provider tags and their
+            // **The turn's own connection**, which is what replaced the provider tags and their
             // ladder: an address is the upstream, so a second machine is a second connection.
-            baseUrl = active.baseUrl,
-            effort = active.effort,
+            baseUrl = asked.active.baseUrl,
+            effort = asked.active.effort,
             // **The person's numbers, not the app's.** A slow network is a fact only they know, and
             // a timeout that is too short turns a long turn into a ladder of retries that never let
             // it finish. Three of them now: the ping still has one wait, because it is not streamed

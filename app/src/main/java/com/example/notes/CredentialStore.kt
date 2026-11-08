@@ -772,6 +772,10 @@ class CredentialStore(context: Context) : Credentials {
                 effort = json.optString("effort"),
                 contextLength = json.optInt("contextLength", 0).takeIf { it > 0 },
                 maxOutput = json.optInt("maxOutput", 0).takeIf { it > 0 },
+                // **A word for a sentence, not a routing instruction** (see [Choice]). Written only
+                // when somebody's window said one, which today is never — the account's own choice
+                // keeps its word in `model_conf.json` and a row's choice names its address instead.
+                provider = json.optString("provider"),
             )
         } catch (t: Throwable) {
             null
@@ -791,6 +795,7 @@ class CredentialStore(context: Context) : Credentials {
             if (choice.effort.isNotBlank()) put("effort", choice.effort)
             choice.contextLength?.let { put("contextLength", it) }
             choice.maxOutput?.let { put("maxOutput", it) }
+            if (choice.provider.isNotBlank()) put("provider", choice.provider)
         }
         prefs.edit().putString(key, json.toString()).apply()
     }

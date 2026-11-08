@@ -23,16 +23,23 @@ object AgentWiring {
         rootDir: File = app.filesDir,
         credentials: Credentials = CredentialStore(app),
         settings: SettingsStore = SettingsStore(app),
-        door: (ActiveModel) -> Door = { active ->
+        door: (Wired, String) -> Door = { wired, project ->
             OpenRouterDoor(
-                key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
-                // **The account's connection**, read per request: a person who moves to another
+                // **The key that belongs to the address the turn goes to**, which is the scoped
+                // connection's when one answered and the account's when none did. Read through the
+                // resolution rather than here, because "which key" and "which address" are one
+                // decision and two lambdas would let them disagree.
+                key = wired.key,
+                // **The turn's own address**, read per request: a person who moves to another
                 // compatible server expects the next poll to go there.
-                baseUrl = active.baseUrl,
-                keyState = { credentials.activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
-                model = active.model,
-                provider = active.provider,
-                effort = active.effort,
+                baseUrl = wired.active.baseUrl,
+                keyState = wired.keyState,
+                model = wired.active.model,
+                provider = wired.active.provider,
+                effort = wired.active.effort,
+                // **The worktree the turn belongs to**, so the request log answers "which project
+                // spent this" rather than filing every row under an empty name.
+                project = project,
                 // **The same connection timeout as a streamed turn**, because it answers the
                 // same question: nothing has come back yet. It used to have a number of its own
                 // that no screen could set, which made it in force and invisible at once.
@@ -139,7 +146,10 @@ object AgentWiring {
             ws = ws,
             git = git,
             settings = settings,
-            model = { ModelConfigFile.load(ws.accountDir).getOrNull()?.active ?: DEFAULT_MODEL },
+            // **Resolved per worktree, and per poll.** A branch may have a model of its own
+            // (`PLAN-credentials` §2.2), and a person who changes one while the service runs expects
+            // the next poll of *that* worktree to use it.
+            wired = { project, branch -> wiredFor(ws, credentials, project, branch) },
             door = door,
             notify = notify,
             changed = changed,
@@ -195,4 +205,32 @@ object AgentWiring {
      * edited, and the right answer is the model the app ships with rather than no request at all.
      */
     val DEFAULT_MODEL = ActiveModel(ModelConfigFile.DEFAULT_MODEL, "deepseek", "high")
+
+    /**
+     * **What a turn on [project] at [branch] is asked with**, from what is on this phone.
+     *
+     * The one place the account's own records and the scoped vault are put together: the account
+     * supplies the model and address it has chosen (or the shipped default when its file will not
+     * parse), the vault supplies a pair stored at branch or project scope when there is one, and
+     * [wiredFor] applies the rule that the two inherit differently.
+     *
+     * **The account's key is a function, not a read**, so a poll with nothing due decrypts nothing.
+     */
+    fun wiredFor(
+        ws: Workspace,
+        credentials: Credentials,
+        project: String?,
+        branch: String?,
+    ): Wired {
+        val login = credentials.activeLogin
+        return wiredFor(
+            project = project,
+            branch = branch,
+            account = ModelConfigFile.load(ws.accountDir).getOrNull()?.active ?: DEFAULT_MODEL,
+            connectionAt = { scope -> credentials.connection(scope, ConnKind.LLM) },
+            choiceAt = { scope -> credentials.choice(scope, ConnKind.LLM) },
+            accountKey = { login?.let { credentials.modelKey(it) } },
+            accountKeyState = { login?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
+        )
+    }
 }

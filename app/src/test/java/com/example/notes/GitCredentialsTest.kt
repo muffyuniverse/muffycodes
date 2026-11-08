@@ -120,9 +120,9 @@ class GitCredentialsTest {
     fun `another host with a secret of its own uses that secret`() {
         // **The whole point of the phase**: nothing in the app knows that `gitlab.com` exists. A person
         // stored a secret for that host and named it `git`, and the project picks it up.
-        val answer = forRemote("https://gitlab.com/someone/r.git", null) { host ->
+        val answer = forRemote("https://gitlab.com/someone/r.git", null, vault = { host ->
             if (host == "gitlab.com") "glpat-the-project-key" else null
-        }
+        })
 
         assertEquals(GitCredentials.Answer.Use("glpat-the-project-key"), answer)
     }
@@ -220,9 +220,9 @@ class GitCredentialsTest {
         // A person with two GitHub identities: the project's secret is the narrower scope and the account
         // token is the wider one, so the narrow one wins. This is the same rule the store already follows
         // (project, then account, then shared) applied to the credential.
-        val answer = forRemote("https://github.com/o/r.git", accountToken()) { host ->
+        val answer = forRemote("https://github.com/o/r.git", accountToken(), vault = { host ->
             if (host == "github.com") "ghp_the-project-key" else null
-        }
+        })
 
         assertEquals(GitCredentials.Answer.Use("ghp_the-project-key"), answer)
     }

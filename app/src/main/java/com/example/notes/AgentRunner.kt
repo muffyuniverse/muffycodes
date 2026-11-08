@@ -24,10 +24,18 @@ class AgentRunner(
     private val ws: Workspace,
     private val git: ProjectGit,
     private val settings: SettingsStore,
-    /** The model to ask, read at the moment of use: the person may change it between polls. */
-    private val model: () -> ActiveModel,
+    /**
+     * **What a turn on a worktree is asked with**, resolved at the moment of use and **for that
+     * worktree**: a person may change the model between polls, and a branch may have a model of its own.
+     *
+     * A function of the project and the branch rather than of nothing, because the model is chosen per
+     * project and per branch (`PLAN-credentials` §2.2) — a runner built with one model baked in would
+     * keep asking it on every worktree, which is the shape of the bug where `feature` reads main's
+     * files: the screen says one thing and the request says another.
+     */
+    private val wired: (project: String, branch: String) -> Wired,
     /** Where requests go. Swappable, so the runner can be driven without a socket. */
-    private val door: (ActiveModel) -> Door,
+    private val door: (Wired, project: String) -> Door,
     /** Told when a session needs a person, or when one stopped for a cause nobody chose. */
     private val notify: (AgentSession) -> Unit = {},
     /** Called with the sessions after anything changes, so a screen can redraw. */
@@ -365,7 +373,8 @@ class AgentRunner(
             if (waking == null) "agent-warm-due" else "agent-wake",
             "$project · ${session.label(now)}",
         )
-        val active = model()
+        val asked = wired(project, branch)
+        val active = asked.active
         // **The model's own window, read from the choice rather than guessed.** A poll builds the
         // same limits a turn does, and a ceiling the screen and the runner disagree about is a trim
         // nobody can explain.
@@ -375,7 +384,9 @@ class AgentRunner(
             targetAsked = settings.targetTokens.toLong(),
             ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
         )
-        val doorFor = door(active)
+        // **The project goes with it**, so a request row is filed under the worktree it was made for
+        // rather than under an empty name — which is the same defect as the model, one field across.
+        val doorFor = door(asked, project)
         worker.execute {
             val warmth = try {
                 // **The worktree's own diary.** Each branch has its own `agent/` inside its own tree,

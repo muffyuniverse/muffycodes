@@ -75,7 +75,26 @@ data class Choice(
     val effort: String = "",
     val contextLength: Int? = null,
     val maxOutput: Int? = null,
+    /**
+     * The word a sentence uses for where this model comes from, or blank for "name the address".
+     *
+     * **Not a routing instruction and not asked for in any window.** It used to be one — `provider.only`
+     * chose an upstream behind one fixed URL, and the context ceilings were keyed by the tag — and the
+     * address is the upstream now, so the tag has no work left except being readable in a sentence. A
+     * choice written by the account carries the word the account already had, so nothing a person has
+     * read changes; a choice written in a row's window carries none and [providerOf] names the address.
+     */
+    val provider: String = "",
 )
+
+/**
+ * **The word a sentence uses for the place a model came from.**
+ *
+ * The host, because the address *is* the upstream: `openrouter.ai`, `localhost`, `192.168.1.9`. There is
+ * deliberately no table from a host to a friendlier name, because a table is the vendor-shaped thing this
+ * design removed — a server a person runs on their own machine has no row in it and must not need one.
+ */
+fun providerOf(address: String): String = hostOfAddress(address).removePrefix("www.")
 
 /**
  * The host [address] names, whether it was written as a host or as a base URL.
@@ -130,6 +149,101 @@ fun connectionScope(
     branch: String?,
     has: (SecretScope) -> Boolean,
 ): SecretScope? = connectionScopes(project, branch).firstOrNull(has)
+
+/**
+ * **What a turn on a worktree is asked with**: the pair's address, the model, the effort — and the
+ * scope both came from, which is what says where the key is read.
+ *
+ * One object rather than three lambdas because the four values travel together by rule (see this file's
+ * header): a key is bound to an address and a model name is only meaningful at the address that
+ * assigned it. Handing them out separately is how a turn comes to ask one server's model with another
+ * server's key, which is the hole [choiceScopes] exists to close.
+ *
+ * The key is a **function**, because a poll that finds nothing due must not decrypt one to discover it
+ * has nothing to do — and a phone in a pocket is locked most of the time.
+ */
+data class Wired(
+    /** The scope the pair came from: where the key is read, and what the screen can say. */
+    val at: SecretScope,
+    val active: ActiveModel,
+    /** The key, or null when there is none to send. */
+    val key: () -> String?,
+    /** **Why** there is none, when there is none — a locked phone is not a key that was never set. */
+    val keyState: () -> KeyState,
+) {
+    companion object {
+        /**
+         * A wiring with no key behind it — what a test builds, and what the app builds for a scope whose
+         * connection holds no secret.
+         */
+        fun of(
+            active: ActiveModel,
+            at: SecretScope = SecretScope.Account,
+            key: () -> String? = { null },
+            keyState: () -> KeyState = { KeyState.NONE },
+        ): Wired = Wired(at, active, key, keyState)
+    }
+}
+
+/**
+ * **Resolves what a turn on [project] at [branch] is asked with**, narrowest first, with the choice
+ * capped at the scope that supplied the pair.
+ *
+ * [account] is the account's own answer — the model it has chosen and the address it has chosen, which
+ * is exactly `model_conf.json`'s `active`. It is deliberately not in the scoped vault: the account is
+ * where those two facts already live, and a second copy is what this design avoids everywhere. So
+ * [connectionAt] is asked **including** the account and answers null there, and a stored pair at branch
+ * or project scope answers instead — which is the whole of "the model is chosen per project and per
+ * branch".
+ *
+ * **[project] may be null for a turn that belongs to no worktree.** The chain then starts at the
+ * account, which is the honest answer rather than an invented branch scope.
+ *
+ * **The chat chain stops at the account.** A general entry is the app-wide embedding key; a chat request
+ * is made *as* somebody, so nothing wider may choose its model or answer its key.
+ */
+fun wiredFor(
+    project: String?,
+    branch: String?,
+    account: ActiveModel,
+    connectionAt: (SecretScope) -> Connection? = { null },
+    choiceAt: (SecretScope) -> Choice? = { null },
+    accountKey: () -> String? = { null },
+    accountKeyState: () -> KeyState = { KeyState.NONE },
+): Wired {
+    val chain = connectionScopes(project, branch).filter { it != SecretScope.General }
+    // **The account is always an answer**, because it is where the pair lives when nothing narrower has
+    // one — so the walk always ends rather than falling off the end into an empty scope.
+    val at = chain.firstOrNull { it == SecretScope.Account || connectionAt(it) != null }
+        ?: SecretScope.Account
+    val stored = if (at == SecretScope.Account) null else connectionAt(at)
+    val address = stored?.address?.trim()?.takeIf { it.isNotEmpty() } ?: account.baseUrl
+    val choice = choiceScopes(project, branch, at).firstNotNullOfOrNull(choiceAt)
+
+    return Wired(
+        at = at,
+        active = ActiveModel(
+            model = choice?.model ?: account.model,
+            // **The choice's own word, or the address's.** A choice written in a row's window names no
+            // provider — the window asks only what the protocol defines — so the host is the honest
+            // word for where the request goes, and the account's own choice keeps the word it had.
+            provider = choice?.provider?.takeIf { it.isNotBlank() }
+                ?: if (stored == null) account.provider else providerOf(address),
+            effort = choice?.effort ?: account.effort,
+            contextLength = choice?.contextLength ?: account.contextLength,
+            maxOutput = choice?.maxOutput ?: account.maxOutput,
+            baseUrl = address,
+        ),
+        key = if (stored == null) accountKey else ({ stored.secret.takeIf { it.isNotBlank() } }),
+        keyState = if (stored == null) {
+            accountKeyState
+        } else {
+            // **A secret the store already decrypted is readable by definition**, and a blank one is
+            // nothing stored rather than a phone that would not unlock.
+            ({ if (stored.secret.isBlank()) KeyState.NONE else KeyState.READABLE })
+        },
+    )
+}
 
 /**
  * Where the choice may be read from, given the scope that supplied the connection — **and no wider.**
