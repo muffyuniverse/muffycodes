@@ -279,6 +279,15 @@ class OpenRouterDoor(
     private val keyState: () -> KeyState =
         { if (key() != null) KeyState.READABLE else KeyState.NONE },
     /**
+     * **True when the server wants no key at all**, so the request carries no `Authorization` header.
+     *
+     * A model server on this phone or on a local network is a real connection — and it is what the
+     * request shape exists for (§2.6): Ollama answers at `/api/chat` with a body of its own. Told "no
+     * model key on this account yet", a person with exactly such a server would be sent to find a key
+     * that does not exist.
+     */
+    private val keyless: Boolean = false,
+    /**
      * Where each response's statistics go, or null when nobody is keeping them.
      *
      * **A parameter, and nullable, because the log is evidence and never a dependency.** A door
@@ -432,8 +441,16 @@ class OpenRouterDoor(
         Result.failure(e)
     }
 
-    /** The token, or the sentence explaining why there is none. */
-    private fun token(): String = key() ?: throw IllegalStateException(
+    /**
+     * The token, or the sentence explaining why there is none — **or null when the server wants none.**
+     *
+     * A model server on this phone or on a local network has no keys to hand out, and asking it for
+     * one is asking a question it cannot answer: the request would carry `Authorization: Bearer null`
+     * or fail before it was sent. Null here means the header is absent, which is what such a server
+     * reads as "no credential", and it is a different fact from a key that is not stored — that one
+     * still gets its sentence, because the person can act on it.
+     */
+    private fun token(): String? = if (keyless) null else key() ?: throw IllegalStateException(
         // **A locked phone is not a missing key.** The agent sends with the screen off, and the
         // store's own key is only usable while it is unlocked — so the ordinary case is a key
         // that exists and cannot be read right now. Said as "no key", it sent a person to type
@@ -610,20 +627,22 @@ class OpenRouterDoor(
      * way to check the claim was to read the source and believe it. `internal` so a test can ask
      * what would be sent without sending it.
      */
-    internal fun headers(token: String): List<Pair<String, String>> {
+    internal fun headers(token: String?): List<Pair<String, String>> {
         // **A header value is one line, and a token is whatever was pasted.** A key copied out of a
         // file with Windows endings, or off a page that wrapped it, carries a line break - and a
         // line break in a header value either throws inside `setRequestProperty` or, on a laxer
         // stack, ends the header and starts another. Refused here, before a socket is opened, so
         // the sentence a person reads does not depend on which stack they run.
-        require('\n' !in token && '\r' !in token) {
+        require(token == null || ('\n' !in token && '\r' !in token)) {
             "The model key has a line break in it, so it cannot be sent. Copy it again."
         }
-        return listOf(
-            "Authorization" to "Bearer $token",
-            "Content-Type" to "application/json",
-            "Accept" to "application/json",
-        )
+        return buildList {
+            // **No key is no header**, not an empty one: a server that wants no credential reads the
+            // absence, and a server that wants one refuses an empty bearer in words of its own.
+            if (token != null) add("Authorization" to "Bearer $token")
+            add("Content-Type" to "application/json")
+            add("Accept" to "application/json")
+        }
     }
 
     /**

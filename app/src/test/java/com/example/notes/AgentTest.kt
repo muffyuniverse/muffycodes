@@ -699,6 +699,29 @@ class AgentTest {
     }
 
     @Test
+    fun `a server that wants no key gets no Authorization header`() {
+        // **A model server on this phone is a real connection**, and it is what the request shape
+        // exists for: Ollama answers at its own path with a body of its own and asks for no key.
+        // Told "no model key yet", a person with exactly such a server would be sent to find a key
+        // that does not exist — so the header is **absent**, which is what such a server reads as
+        // "no credential", rather than empty, which some stacks refuse.
+        val door = OpenRouterDoor(
+            key = { null },
+            keyless = true,
+            model = "llama3",
+            provider = "localhost",
+            effort = "",
+            baseUrl = "http://127.0.0.1:11434/v1",
+        )
+
+        val headers = door.headers(null).toMap()
+
+        assertNull("no bearer header at all", headers["Authorization"])
+        assertEquals("and the two that are about the body stay", 2, headers.size)
+        assertEquals("application/json", headers["Content-Type"])
+    }
+
+    @Test
     fun `a key with a newline in it cannot break the header`() {
         // **A header value is one line.** A token with a line break in it - from a paste, or from a
         // file with Windows endings - would either throw inside `setRequestProperty` or, on a

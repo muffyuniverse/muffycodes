@@ -34,6 +34,7 @@ object AgentWiring {
                 // compatible server expects the next poll to go there.
                 baseUrl = wired.active.baseUrl,
                 keyState = wired.keyState,
+                keyless = wired.keyless,
                 model = wired.active.model,
                 provider = wired.active.provider,
                 effort = wired.active.effort,

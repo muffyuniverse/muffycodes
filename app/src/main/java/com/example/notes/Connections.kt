@@ -170,6 +170,16 @@ data class Wired(
     val key: () -> String?,
     /** **Why** there is none, when there is none — a locked phone is not a key that was never set. */
     val keyState: () -> KeyState,
+    /**
+     * **True when the server wants no key at all**, which is a model server on this phone or on a
+     * local network — the one case where "no key" is the whole credential rather than half of one.
+     *
+     * It is not the same fact as `key() == null`: an account whose key simply is not stored must be
+     * told to type it in, and a model server on the same phone must not be told anything. The two are
+     * one field apart because they are one character apart in a request — with this, the
+     * `Authorization` header is absent rather than empty.
+     */
+    val keyless: Boolean = false,
 ) {
     companion object {
         /**
@@ -181,7 +191,8 @@ data class Wired(
             at: SecretScope = SecretScope.Account,
             key: () -> String? = { null },
             keyState: () -> KeyState = { KeyState.NONE },
-        ): Wired = Wired(at, active, key, keyState)
+            keyless: Boolean = false,
+        ): Wired = Wired(at, active, key, keyState, keyless)
     }
 }
 
@@ -212,10 +223,21 @@ fun wiredFor(
     accountKeyState: () -> KeyState = { KeyState.NONE },
 ): Wired {
     val chain = connectionScopes(project, branch).filter { it != SecretScope.General }
-    // **The account is always an answer**, because it is where the pair lives when nothing narrower has
-    // one — so the walk always ends rather than falling off the end into an empty scope.
-    val at = chain.firstOrNull { it == SecretScope.Account || connectionAt(it) != null }
-        ?: SecretScope.Account
+    // **A scoped pair is used only when its row is complete**, and the account is the answer otherwise —
+    // so the walk always ends rather than falling off the end into an empty scope. "Complete" is an
+    // address and a model: the address is the credential for this kind (there is no other record of
+    // it), and a model name is only meaningful at the address that assigned it, so a project that
+    // names a server and no model cannot inherit the account's model — that name belongs to another
+    // server. Such a row is a half-made one, and the honest reading is that it is not in force yet.
+    //
+    // **A blank key is complete, though.** A model server on this phone wants no key at all, and that
+    // is a whole credential rather than half of one — see [Wired.keyless].
+    val at = chain.firstOrNull { scope ->
+        if (scope == SecretScope.Account) return@firstOrNull true
+        val pair = connectionAt(scope) ?: return@firstOrNull false
+        pair.address.isNotBlank() &&
+            choiceScopes(project, branch, scope).firstNotNullOfOrNull(choiceAt) != null
+    } ?: SecretScope.Account
     val stored = if (at == SecretScope.Account) null else connectionAt(at)
     val address = stored?.address?.trim()?.takeIf { it.isNotEmpty() } ?: account.baseUrl
     val choice = choiceScopes(project, branch, at).firstNotNullOfOrNull(choiceAt)
@@ -239,9 +261,10 @@ fun wiredFor(
             accountKeyState
         } else {
             // **A secret the store already decrypted is readable by definition**, and a blank one is
-            // nothing stored rather than a phone that would not unlock.
+            // nothing to read rather than a phone that would not unlock.
             ({ if (stored.secret.isBlank()) KeyState.NONE else KeyState.READABLE })
         },
+        keyless = stored != null && stored.secret.isBlank(),
     )
 }
 

@@ -244,4 +244,176 @@ class ConnectionsTest {
             keyScope("conn_general_embedding", null) == SecretScope.General,
         )
     }
+
+    // ---- what a turn is asked with -------------------------------------------------------
+
+    private val account = ActiveModel(
+        model = "deepseek/deepseek-v4.1-flash",
+        provider = "deepseek",
+        effort = "high",
+        contextLength = 163_840,
+        maxOutput = 65_536,
+    )
+
+    /** The resolution, with the account's key and a vault that answers what a test says. */
+    private fun asked(
+        project: String? = "acme",
+        branch: String? = "feature",
+        connections: Map<SecretScope, Connection> = emptyMap(),
+        choices: Map<SecretScope, Choice> = emptyMap(),
+        key: String? = "sk-the-account-key",
+    ): Wired = wiredFor(
+        project = project,
+        branch = branch,
+        account = account,
+        connectionAt = { connections[it] },
+        choiceAt = { choices[it] },
+        accountKey = { key },
+        accountKeyState = { if (key == null) KeyState.NONE else KeyState.READABLE },
+    )
+
+    @Test
+    fun `with nothing stored every worktree is asked as the account`() {
+        // **The regression suite for the whole feature.** Nothing in the vault means nothing has
+        // changed: the model, the address and the key are the account's own, and the scope says so
+        // rather than claiming a branch that was never written.
+        val wired = asked()
+
+        assertEquals(SecretScope.Account, wired.at)
+        assertEquals(account.model, wired.active.model)
+        assertEquals(account.baseUrl, wired.active.baseUrl)
+        assertEquals(account.effort, wired.active.effort)
+        assertEquals("sk-the-account-key", wired.key())
+        assertEquals(KeyState.READABLE, wired.keyState())
+        assertTrue("and it is not keyless", !wired.keyless)
+    }
+
+    @Test
+    fun `a project's pair and its own model are what that project asks with`() {
+        // The feature itself: a project pointed at another server, with the model *that* server
+        // named. Both come from the same scope, and the account's key is not sent anywhere.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection(
+                    address = "https://models.example.org/v1",
+                    secret = "sk-the-project-key",
+                ),
+            ),
+            choices = mapOf(SecretScope.Project("acme") to Choice("llama3.3:70b", "low")),
+        )
+
+        assertEquals(SecretScope.Project("acme"), wired.at)
+        assertEquals("llama3.3:70b", wired.active.model)
+        assertEquals("https://models.example.org/v1", wired.active.baseUrl)
+        assertEquals("low", wired.active.effort)
+        assertEquals("sk-the-project-key", wired.key())
+        assertEquals(
+            "and the word for the address is the host, because nobody named one",
+            "models.example.org",
+            wired.active.provider,
+        )
+    }
+
+    @Test
+    fun `a branch may choose another model and keep the project's address and key`() {
+        // **The half that inherits.** Changing only the model must not mean re-typing a key: the
+        // pair is atomic and the choice is not, and this is the case that made the split worth it.
+        val project = SecretScope.Project("acme")
+        val wired = asked(
+            connections = mapOf(
+                project to Connection("https://models.example.org/v1", "sk-the-project-key"),
+            ),
+            choices = mapOf(
+                project to Choice("llama3.3:70b", "low"),
+                SecretScope.Branch("acme", "feature") to Choice("qwen3:32b", "high"),
+            ),
+        )
+
+        assertEquals(SecretScope.Project("acme"), wired.at)
+        assertEquals("qwen3:32b", wired.active.model)
+        assertEquals("high", wired.active.effort)
+        assertEquals("https://models.example.org/v1", wired.active.baseUrl)
+        assertEquals("sk-the-project-key", wired.key())
+    }
+
+    @Test
+    fun `a scope that names an address and no model inherits nothing, because it cannot`() {
+        // **The cap, at the one place it can do harm.** A model id is a name the server assigns, and
+        // `deepseek/deepseek-v4.1-flash` is OpenRouter's name for its model — sending it to somebody
+        // else's server asks for something that is not there. A half-made row is therefore not in
+        // force: the account's whole answer is, which is the same answer as before the row existed.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection("https://models.example.org/v1", "sk-p"),
+            ),
+        )
+
+        assertEquals(SecretScope.Account, wired.at)
+        assertEquals(account.model, wired.active.model)
+        assertEquals(account.baseUrl, wired.active.baseUrl)
+        assertEquals("sk-the-account-key", wired.key())
+    }
+
+    @Test
+    fun `a pair with no key is a server that wants none`() {
+        // **Not the same fact as a key that is not stored.** A model server on this phone needs no
+        // key, and telling its owner to type one is telling them to look for something that does not
+        // exist. The request carries no Authorization header at all (see `Door.headers`).
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection("http://127.0.0.1:11434/v1", ""),
+            ),
+            choices = mapOf(SecretScope.Project("acme") to Choice("llama3")),
+        )
+
+        assertEquals("http://127.0.0.1:11434/v1", wired.active.baseUrl)
+        assertTrue("it is keyless", wired.keyless)
+        assertNull("and there is no key to send", wired.key())
+    }
+
+    @Test
+    fun `the general scope never answers a chat turn`() {
+        // **A general entry is the app-wide embedding key.** Chat is made *as* somebody, so even
+        // with a general pair and a general model — a combination the windows cannot make — the
+        // answer is the account's rather than the phone's.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.General to Connection("https://models.example.org/v1", "sk-general"),
+            ),
+            choices = mapOf(SecretScope.General to Choice("someone-elses-model")),
+        )
+
+        assertEquals(SecretScope.Account, wired.at)
+        assertEquals(account.model, wired.active.model)
+        assertEquals("sk-the-account-key", wired.key())
+    }
+
+    @Test
+    fun `a branch is asked about before a project, and the account last`() {
+        // Order, as one assertion: the narrower pair wins even when the wider one is complete.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Branch("acme", "feature") to Connection("https://b.example/v1", "sk-b"),
+                SecretScope.Project("acme") to Connection("https://p.example/v1", "sk-p"),
+            ),
+            choices = mapOf(
+                SecretScope.Branch("acme", "feature") to Choice("branch-model"),
+                SecretScope.Project("acme") to Choice("project-model"),
+            ),
+        )
+
+        assertEquals(SecretScope.Branch("acme", "feature"), wired.at)
+        assertEquals("branch-model", wired.active.model)
+        assertEquals("https://b.example/v1", wired.active.baseUrl)
+    }
+
+    @Test
+    fun `a turn with no project starts at the account`() {
+        // **A conversation before any worktree exists** — the chat box with no project chosen —
+        // must not invent a branch scope to look in, and must still be answered.
+        val wired = asked(project = null, branch = null)
+
+        assertEquals(SecretScope.Account, wired.at)
+        assertEquals(account.model, wired.active.model)
+    }
 }

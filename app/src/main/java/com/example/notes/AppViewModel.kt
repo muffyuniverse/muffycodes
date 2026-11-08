@@ -4048,7 +4048,7 @@ class AppViewModel @JvmOverloads constructor(
      * drivable by a script — and being able to say exactly what was sent is most of what makes a
      * test of a chat worth writing.
      */
-    var chatDoor: ((ActiveModel) -> Door)? = null
+    var chatDoor: ((Wired) -> Door)? = null
 
     /** Opens [project]'s conversation on [branch] and lands on its newest turn. */
     /**
@@ -4690,13 +4690,18 @@ class AppViewModel @JvmOverloads constructor(
         if (next != current) putSession(next)
     }
 
-    /** The door for [model]: the test's when one is set, and the account's connection otherwise. */
+    /**
+     * The door for [wired]: the test's when one is set, and **the connection the turn resolved to**
+     * otherwise — so a project with its own server is asked with the key stored beside that server's
+     * address, and a server on a local network is asked with no key at all.
+     */
     private fun doorFor(wired: Wired, project: String = ""): Door = (chatDoor ?: { asked ->
         OpenRouterDoor(
             // **The key that belongs to the address**, which is the scope's when one answered — so a
             // project with its own server is asked with the key stored beside that server's address.
             key = { asked.key() },
             keyState = { asked.keyState() },
+            keyless = asked.keyless,
             model = asked.active.model,
             provider = asked.active.provider,
             // **Recorded, never enforced.** Nothing is scoped by this - it is what lets the log
@@ -4770,7 +4775,7 @@ class AppViewModel @JvmOverloads constructor(
                 burstSpent = chatSpent ?: burstSpent
             }
         }
-    })(model)
+    })(asked)
 
     /**
      * Hands a freshly read conversation to the screen — **and bumps the generation only when it
