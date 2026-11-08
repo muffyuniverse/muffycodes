@@ -4024,7 +4024,7 @@ class AppViewModel @JvmOverloads constructor(
             if (checked is GitService.RemoteAnswer.Refused) {
                 main.post {
                     busy = false
-                    message = checked.said
+                    message = checked.why
                     onDone(false)
                 }
                 return@onWorker

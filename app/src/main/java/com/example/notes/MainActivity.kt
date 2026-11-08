@@ -840,7 +840,7 @@ private fun Dialogs(
             project = pending.project,
             // **The address it has now**, so the ordinary use — a repository that moved — starts from
             // what is true rather than from an empty field the person has to retype.
-            current = viewModel.git?.remoteUrl(pending.project),
+            current = viewModel.remoteUrlOf(pending.project),
             onDismiss = dismiss,
             onSet = { url ->
                 Trace.tap("confirm set address", pending.project)
@@ -859,7 +859,7 @@ private fun Dialogs(
 
         is Pending.KeepLocal -> KeepLocalDialog(
             project = pending.project,
-            address = viewModel.git?.remoteUrl(pending.project),
+            address = viewModel.remoteUrlOf(pending.project),
             onDismiss = dismiss,
             onKeepLocal = {
                 Trace.tap("confirm keep local", pending.project)

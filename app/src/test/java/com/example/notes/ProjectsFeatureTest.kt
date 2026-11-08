@@ -203,7 +203,7 @@ class ProjectsFeatureTest : FeatureTest() {
         assertEquals(
             "and the address is the one that was given",
             address,
-            scene.viewModel.git?.remoteUrl("Groceries"),
+            scene.viewModel.remoteUrlOf("Groceries"),
         )
     }
 
@@ -243,7 +243,7 @@ class ProjectsFeatureTest : FeatureTest() {
             "the folder kept its name",
             File(scene.workspace!!.accountDir, "Shopping").isDirectory,
         )
-        assertNull("and the project still has no address", scene.viewModel.git?.remoteUrl("Shopping"))
+        assertNull("and the project still has no address", scene.viewModel.remoteUrlOf("Shopping"))
     }
 
     @Test
@@ -273,7 +273,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.setAddress("Shopping", moved)
         scene.await("the address to be set") { !scene.viewModel.busy }
 
-        assertEquals("the address is the new one", moved, scene.viewModel.git?.remoteUrl("Shopping"))
+        assertEquals("the address is the new one", moved, scene.viewModel.remoteUrlOf("Shopping"))
         assertTrue(
             "the folder kept its name",
             File(scene.workspace!!.accountDir, "Shopping").isDirectory,
