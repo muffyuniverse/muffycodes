@@ -377,14 +377,14 @@ class SettingsScreenTest {
         // even if the row never redrew, which is the bug.
         scene.viewModel.signIn("someone", "a-key", "Someone", "someone@example.com")
         settings()
-        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertExists()
+        compose.onNodeWithText("No model key yet", substring = true).assertExists()
 
         // The key is written the way the dialog writes it, and the row must notice.
         scene.viewModel.saveModelKey("sk-or-v1-a-key-that-reads-back")
         compose.waitForIdle()
 
-        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertExists()
+        compose.onNodeWithText("No model key yet", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("A model key is kept", substring = true).assertExists()
     }
 
     @Test

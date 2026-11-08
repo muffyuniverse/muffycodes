@@ -565,7 +565,7 @@ class ModelSectionTest {
         scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
 
-        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("No model key yet", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -574,7 +574,7 @@ class ModelSectionTest {
         scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one")
         compose.setContent { Section() }
 
-        compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("A model key is kept", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 
@@ -615,16 +615,16 @@ class ModelSectionTest {
     fun `a key kept while the screen is up changes the row`() {
         // **The reported failure.** The row is drawn from a plain property, so Compose had no reason
         // to read it again after a dialog wrote — and a person who had just kept their key saw the
-        // screen still saying "No OpenRouter key yet", twice, and reported that the key was not
+        // screen still saying "No model key yet", twice, and reported that the key was not
         // passing through.
         scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
-        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("No model key yet", substring = true).assertIsDisplayed()
 
         compose.runOnIdle { scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one") }
         compose.waitForIdle()
 
-        compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("A model key is kept", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 }

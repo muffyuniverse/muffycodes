@@ -1229,7 +1229,7 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = when (keyState) {
-                    KeyState.READABLE -> "An OpenRouter key is kept on this phone for this account."
+                    KeyState.READABLE -> "A model key is kept on this phone for this account."
                     KeyState.LOCKED ->
                         "A key is kept for this account. This phone has to be unlocked before the " +
                             "model list or the agent can read it."

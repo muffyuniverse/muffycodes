@@ -48,7 +48,7 @@ class ModelKeyTest {
             }
 
             compose.onNodeWithText("A key is kept for this account", substring = true).assertIsDisplayed()
-            compose.onNodeWithText("No OpenRouter key yet", substring = true).assertDoesNotExist()
+            compose.onNodeWithText("No model key yet", substring = true).assertDoesNotExist()
         } finally {
             locked.close()
         }
