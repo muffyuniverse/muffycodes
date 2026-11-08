@@ -120,19 +120,23 @@ agent that wants a build dispatches it with `http` and a secret for that host.
 
 ## 6. The steps, in order
 
-| # | Step | Why here |
-|---|---|---|
-| **V1** | **The account is name + host + credential** (`PLAN-host-labels` §8, S1–S6) | everything below needs an account that is not GitHub's |
-| **V2** | **`Secrets.transportProblem`** (SSH refusal) + `GitService.clone` losing its own host guard and taking a decided token (U1–U3) | the last GitHub-shaped guard in the clone path |
-| **V3** | **Add a project by URL, checked with `ls-remote`** + `createLocalProject` reachable from the `+` (U4–U6) | this is the feature the operator asked for |
-| **V4** | **The picker leaves**: `listRepositories`, `pullRepository(repo)`, `AddProjectDialog`'s list | the list is the vendor feature; the URL replaces it |
-| **V5** | **A release is a tag**: `git {op:"tag"}`, `ReleaseDialog` keeps the field, no dispatch | replaces the biggest remaining GitHub feature |
-| **V4b** | **The two doors become one process** (§7): `acquire(): Result<String>` with a device implementation and a typed one; `addAccount(login, host, gitUser, token)` is the single save; `signInWithToken` and `signIn` collapse into it | a convenience on top of the shared process, not a second process |
-| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, `renameProject`'s host call | deletion, after V5 so nothing is lost that a tag now covers |
-| **V6b** | **The address is the verb** (§8.3): *Set the address* runs `ls-remote`, then renames the folder and every branch's tree to the URL's last segment when the name differs. `renameProject` becomes this and nothing else | renaming stops being an app operation and becomes a verified consequence of the address |
-| **V6c** | **Go local** (§8.2): `GitService.disconnect` + one project action + its sentence | the universal half of "remove on remote", and a state the app already models |
-| **V7** | **`GitHub.kt` and `githubFor` are gone — except `identity()`**, which moves into the device door because *a door knows its own host* (§7.1); the tests that pinned the deleted behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case", and the one call that survives has a home |
-| **V8** | **`deleteProject` becomes one choice**, with the sentence naming the host and saying nothing there was touched (§8.2) | the second choice stopped being an act on 2026-11-08, and is now a sentence on every host |
+**Progress, 2026-11-08:** V1, V2, V3, V4 and V5 are landed and CI-green; V6 is half done (the
+agent's `ci`/`runs`/`artifact` tools are gone, the CI/signing files and the view model's actions
+are not yet); V7 has not started. The `**state**` column below is the truth, not the plan.
+
+| # | Step | Why here | State |
+|---|---|---|---|
+| **V1** | **The account is name + host + credential** (`PLAN-host-labels` §8, S1–S6) | everything below needs an account that is not GitHub's | **landed** |
+| **V2** | **`Secrets.transportProblem`** (SSH refusal) + `GitService.clone` losing its own host guard and taking a decided token (U1–U3) | the last GitHub-shaped guard in the clone path | **landed** |
+| **V3** | **Add a project by URL, checked with `ls-remote`** + `createLocalProject` reachable from the `+` (U4–U6) | this is the feature the operator asked for | **landed** |
+| **V4** | **The picker leaves**: `listRepositories`, `pullRepository(repo)`, `AddProjectDialog`'s list | the list is the vendor feature; the URL replaces it | **landed** |
+| **V5** | **A release is a tag**: `git {op:"tag"}`, `ReleaseDialog` keeps the field, no dispatch | replaces the biggest remaining GitHub feature | **landed** |
+| **V4b** | **The two doors become one process** (§7): `acquire(): Result<String>` with a device implementation and a typed one; `addAccount(login, host, gitUser, token)` is the single save; `signInWithToken` and `signIn` collapse into it | a convenience on top of the shared process, not a second process | **landed** (as step 4 of V1) |
+| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, `renameProject`'s host call | deletion, after V5 so nothing is lost that a tag now covers | **half** — the tools have gone; the files have not |
+| **V6b** | **The address is the verb** (§8.3): *Set the address* runs `ls-remote`, then renames the folder and every branch's tree to the URL's last segment when the name differs. `renameProject` becomes this and nothing else | renaming stops being an app operation and becomes a verified consequence of the address | not started |
+| **V6c** | **Go local** (§8.2): `GitService.disconnect` + one project action + its sentence | the universal half of "remove on remote", and a state the app already models | not started |
+| **V7** | **`GitHub.kt` and `githubFor` are gone — except `identity()`**, which moves into the device door because *a door knows its own host* (§7.1); the tests that pinned the deleted behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case", and the one call that survives has a home | not started |
+| **V8** | **`deleteProject` becomes one choice**, with the sentence naming the host and saying nothing there was touched (§8.2) | the second choice stopped being an act on 2026-11-08, and is now a sentence on every host | not started |
 
 **V6 is the big one and it is last on purpose.** Every one of those features is currently reachable by a
 press, so deleting them first would take working buttons away while the replacement was unbuilt.

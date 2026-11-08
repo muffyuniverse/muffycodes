@@ -510,10 +510,10 @@ class AgentTools(
          * The commands that can leave the project folder different from how they found it.
          *
          * **`read`-only tools are absent on purpose**, and so are the ones that only reach the
-         * network (`ci`, `runs`, `downloads`) — a redraw after those would be a comparison that can
-         * never differ. What is here is what writes: the four that change files (`write`, `delete`,
-         * `move`, `restore`), the three that bring something in (`fetch`, `artifact`, `download`),
-         * the two that sync the whole tree (`pull`, `push`), and `archive`, which unpacks into it.
+         * network (`downloads`, `ci` when it existed) — a redraw after those would be a comparison that
+         * can never differ. What is here is what writes: the four that change files (`write`, `delete`,
+         * `move`, `restore`), the two that bring something in (`download`, `archive`), the two that
+         * sync the whole tree (`pull`, `push`), and `http`, which files its answer.
          *
          * **`upload` is not here.** It copies a file *out* to the phone's Downloads and changes
          * nothing in the project.
@@ -524,7 +524,7 @@ class AgentTools(
          */
         val CHANGES_DISK: Set<String> = setOf(
             "write", "delete", "move", "restore",
-            "artifact", "download", "archive",
+            "download", "archive",
             "pull", "push",
             // **`http` files its answer**, so a folder listing that did not move would be showing a
             // project that does not exist - the same bug `write` had.

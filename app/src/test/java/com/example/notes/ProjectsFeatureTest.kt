@@ -528,7 +528,16 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.project("Shopping")
         scene.open("Shopping")
+        // **A remote that exists.** A push to a path that is not there fails with the filesystem's own
+        // words, which is a fact about the fixture rather than about tags — so the bare repository is
+        // made first, exactly as a real remote is made by the host.
         val remote = File(scene.workspace!!.accountDir, "local-remote")
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(remote)
+            .setBare(true)
+            .setInitialBranch("main")
+            .call()
+            .close()
         scene.await("the project to be clean") { scene.viewModel.changesOf("Shopping") == 0 }
         val author = GitAuthor("Test", "test@example.com")
         GitService.initOrOpen(scene.workspace!!.projectDir("Shopping"), author).use {

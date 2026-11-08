@@ -2841,8 +2841,11 @@ class AgentTest {
         // **`http` is here because it files its answer**, and the folder listing has to move for the
         // same reason it has to after `write`: a listing that did not would be showing a project that
         // does not exist.
+        // **`artifact` used to be in this list**, and it left with the tool: a fetched artifact was
+        // written into the project, which is a change to the folder like any other. What replaced it
+        // is `http`, which files its answer too.
         val writes = setOf(
-            "write", "delete", "move", "restore", "artifact", "download", "archive",
+            "write", "delete", "move", "restore", "download", "archive",
             "pull", "push", "http",
         )
         assertEquals("every writing tool, and only those", writes, AgentTools.CHANGES_DISK)
