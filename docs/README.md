@@ -9,6 +9,7 @@ the code.
 
 | Read this | For | State |
 |---|---|---|
+| `AUDIT-2026-11-07-branches-and-the-system-folder.md` | What was actually wrong with branches and the system folder, the eleven defects, and what is still open | **The current audit.** |
 | `AUDIT-2026-10-29-consolidated.md` | Every report from the 2026-10-29 trace, re-checked against the code, plus what was superseded and why | **Current.** Supersedes the file below it. |
 | `AUDIT-2026-10-29.md` | The same reports as first written, at 18:27 | Historical. Its table is accurate; its "two limits" framing was replaced. Carries a banner saying so. |
 | `audit-agent-chat.md` | Every element of the agent chat, the test that covers it and the trace line it writes | Historical. Its "what is open" section is now "what became of each". |
