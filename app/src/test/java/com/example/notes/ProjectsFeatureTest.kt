@@ -270,7 +270,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
     @Test
     fun `deleting something already gone is not a failure`() {
-        // **The rule `isGone` exists for, and the only place it is still read.** A move that runs
+        // **The rule that lives in `delete()`.** A move that runs
         // twice — a person pressing again, a retry after a dropped connection — must land on "it is
         // not there" and stop, rather than reporting a failure for having already succeeded. It used
         // to be decided from the error text (`contains("404")`), which would also swallow a message

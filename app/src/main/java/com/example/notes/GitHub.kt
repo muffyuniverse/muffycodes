@@ -23,7 +23,10 @@ import java.net.URLEncoder
  * some other reason and would treat "the repository is gone" as a failure if it
  * were ever phrased without the number.
  *
- * [isGone] is that rule, said once, where the status is known.
+ * **[status] is there so a caller can decide that without reading the text**, and every caller that
+ * needs to does so at its own call site. There is deliberately no `isGone` helper: the one rule that
+ * needs it — a DELETE that finds nothing has succeeded — lives in [delete], where the request is made
+ * and the answer is still in hand.
  */
 data class GitHubResult<T>(
     val value: T? = null,
@@ -31,9 +34,6 @@ data class GitHubResult<T>(
     val status: Int = 0,
 ) {
     val isSuccess: Boolean get() = error == null && value != null
-
-    /** True when GitHub says the thing is not there any more. */
-    val isGone: Boolean get() = status == 404
 
     /** True when the request never reached a server at all. */
     val isOffline: Boolean get() = status == 0 && error != null
@@ -990,9 +990,10 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
      */
     private fun delete(token: String, path: String): GitHubResult<Unit> {
         val response = get("DELETE", path, token)
-        // **`isGone`, not `status == 404`.** It is the rule stated once, in the one place the status
-        // is known, so a caller cannot re-phrase it as `contains("404")` — which is what it used to be.
-        if (response.isGone) return GitHubResult(value = Unit)
+        // **404 is the state the caller wanted**, and it is read from the status rather than from the
+        // error text, which is what this used to be: a `contains("404")` that would also swallow a
+        // message mentioning 404 for some other reason.
+        if (response.status == 404) return GitHubResult(value = Unit)
         if (response.error != null) {
             return GitHubResult(error = response.error, status = response.status)
         }
