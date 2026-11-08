@@ -115,6 +115,10 @@ class MainActivity : ComponentActivity() {
 private sealed interface Pending {
     data object None : Pending
     data object SignIn : Pending
+    /** Which door: GitHub's, or another host's. Both end in the one save. */
+    data object ChooseAccountDoor : Pending
+    /** The door for every host this app has no API for. */
+    data object AddHostAccount : Pending
     data object ModelKey : Pending
     data object AddProject : Pending
     data object NewProject : Pending
@@ -521,7 +525,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             onEnter = { login -> viewModel.enterAccount(login) },
             // **The same sign-in the Settings block used**, so adding an account from the list and
             // from Settings were never two mechanisms.
-            onAdd = { tap("add account"); pending = Pending.SignIn },
+            onAdd = { tap("add account"); pending = Pending.ChooseAccountDoor },
             onRemove = { login -> tap("remove account", login); pending = Pending.RemoveAccount(login) },
             onSettings = { tap("settings"); showSettings = true },
         )
@@ -693,6 +697,36 @@ private fun Dialogs(
                     // parameter — which the compiler caught, and which is worth a comment so
                     // nobody "simplifies" it back.
                     viewModel.finishOpenRouterSignIn(code = code, onDone = answered)
+                },
+            )
+        }
+
+        Pending.ChooseAccountDoor -> AddAccountDialog(
+            onDismiss = dismiss,
+            onGitHub = {
+                tap("confirm add account", "github")
+                pending = Pending.SignIn
+            },
+            onAnotherHost = {
+                tap("confirm add account", "host")
+                pending = Pending.AddHostAccount
+            },
+        )
+
+        Pending.AddHostAccount -> {
+            // **The reason is read back from the view model**, the same way GitHub's door does it: a
+            // refusal keeps the window open with the sentence in it, and only a success dismisses.
+            var error by remember { mutableStateOf<String?>(null) }
+            AddHostAccountDialog(
+                onDismiss = dismiss,
+                error = error,
+                onAdd = { name, host, gitUser, key ->
+                    // **The key is never traced.** The name of the act is enough to place it, and a
+                    // trace is a file a person shares.
+                    tap("confirm add account", "host")
+                    viewModel.addHostAccount(name, host, gitUser, key) { ok ->
+                        if (ok) dismiss() else error = viewModel.message
+                    }
                 },
             )
         }

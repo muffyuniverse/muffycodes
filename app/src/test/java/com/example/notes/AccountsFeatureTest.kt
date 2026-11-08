@@ -119,6 +119,93 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `an account on another host is made by the same save, and keeps its host`() {
+        // **The door the plan exists for.** An account is a name, a host and a key; the host is what
+        // the key may be sent to, so it is stored on the account rather than inferred from whichever
+        // project happens to be open. Nothing here asks GitHub anything — there is no endpoint on
+        // `gitlab.com` for this app to ask.
+        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = false)
+        try {
+            var answered: Boolean? = null
+            phone.viewModel.addHostAccount(
+                name = "someone",
+                host = "GitLab.com",
+                gitUser = "oauth2",
+                key = "glpat-the-key",
+            ) { answered = it }
+            phone.await("the account to be made") { answered != null }
+
+            assertEquals("it was made", true, answered)
+            val made = phone.viewModel.account
+            assertEquals("with the name that was typed", "someone", made?.login)
+            assertEquals("and the host, folded", "gitlab.com", made?.host)
+            assertEquals("and the git username", "oauth2", made?.gitUser)
+            assertEquals("and it is the active account", "someone", phone.viewModel.activeLogin)
+            assertEquals("and the key went into the vault", "glpat-the-key", phone.credentials.token("someone"))
+        } finally {
+            phone.close()
+        }
+    }
+
+    @Test
+    fun `an account on another host has no GitHub at all`() {
+        // **The failure this prevents is a key sent to a host it was never made for.** An
+        // `HttpGitHub()` behind a `gitlab.com` account would call `api.github.com` with that account's
+        // key and answer every feature with a 401 that explains nothing. `null` is the honest answer:
+        // there is no GitHub for this account, exactly as there is none for a phone with nobody
+        // signed in — and every caller already handles that.
+        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = false)
+        try {
+            var answered: Boolean? = null
+            phone.viewModel.addHostAccount("someone", "gitlab.com", "", "glpat-the-key") { answered = it }
+            phone.await("the account to be made") { answered != null }
+
+            assertNull("there is no GitHub behind it", phone.viewModel.github)
+            // **And the GitHub-only actions say the right thing.** "Sign in to GitHub first" would
+            // send a person who *has* signed in to a door that cannot help them; the sentence has to
+            // name the host their account is actually on.
+            var listed: List<Repo>? = null
+            var said: String? = null
+            phone.viewModel.listRepositories { repos, problem ->
+                listed = repos
+                said = problem
+            }
+            phone.await("the refusal to arrive") { said != null }
+            assertTrue("nothing was listed", listed!!.isEmpty())
+            assertTrue("and it names the host: $said", said!!.contains("gitlab.com"))
+        } finally {
+            phone.close()
+        }
+    }
+
+    @Test
+    fun `a host that is an address says where the address belongs`() {
+        // A person will paste a clone URL: it is the thing on the clipboard on every host's page. The
+        // refusal has to name the host it found, or the correction is a guess.
+        scene.viewModel.addHostAccount("someone", "https://gitlab.com/team/r.git", "", "a-key")
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it names the host: $said", said.contains("gitlab.com"))
+        assertTrue("and where the address goes: $said", said.contains("project"))
+        assertNull("and nothing was made", scene.viewModel.accounts.account("someone"))
+    }
+
+    @Test
+    fun `a second account cannot take the first one's name`() {
+        // **A login is a folder name**, so two accounts cannot share one — and adopting an existing
+        // folder would hand this account somebody else's projects. Said before anything is written.
+        scene.viewModel.addHostAccount("test-account", "gitlab.com", "", "a-key")
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says the name is taken: $said", said.contains("already"))
+        assertEquals(
+            "and the existing account is untouched",
+            GITHUB_HOST,
+            scene.viewModel.accounts.account("test-account")?.host,
+        )
+    }
+
+    @Test
     fun `switching accounts shows the other account's tree`() {
         scene.signedIn()
         scene.folder("only_in_the_first")

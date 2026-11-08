@@ -518,6 +518,25 @@ class AppViewModel @JvmOverloads constructor(
     val signedIn: Boolean get() = account != null && !isProvisionalAccount
 
     /**
+     * **Why there is no GitHub behind this action** — in the words that fit the case.
+     *
+     * Two different situations reach every "no GitHub" branch, and answering both with "sign in to
+     * GitHub first" sends a person to a screen that cannot help them: an account on another host has
+     * *signed in*, and what it lacks is an API this app only has for one host. Naming the host is what
+     * makes the sentence actionable — the person either uses that host's own website, or reaches it
+     * with the agent's `http` and a secret bound to it.
+     */
+    private fun noGitHub(action: String): String {
+        val host = account?.host.orEmpty()
+        return if (host.isNotBlank() && host != GITHUB_HOST) {
+            "${action.replaceFirstChar { it.uppercase() }} is GitHub's API, and this account is on " +
+                "$host. Nothing was sent."
+        } else {
+            "Sign in to GitHub first: $action"
+        }
+    }
+
+    /**
      * The active account's tree, or null when nobody is signed in.
      *
      * **One instance per account, cached, and the caching is a correctness requirement now.** It used to
@@ -577,6 +596,10 @@ class AppViewModel @JvmOverloads constructor(
         vaultToken = { project, host ->
             credentials.secret(project, GitCredentials.SECRET, host)
         },
+        // **The host the key belongs to is a fact about the account, not about this app.** Without
+        // it, "the account's own host" would be GitHub for every account, which is the assumption
+        // making the app GitHub-shaped in the first place.
+        accountHost = { activeLogin?.let { accounts.account(it)?.host } ?: GITHUB_HOST },
     )
 
     /**
@@ -3534,12 +3557,12 @@ class AppViewModel @JvmOverloads constructor(
         // no answer at all — and the row only exists because the app found something wrong, so a
         // press that reports nothing reads as "it is still wrong, then".
         val api = githubFor(login) ?: run {
-            message = "Sign in to GitHub first: the signing key is sent to GitHub"
+            message = noGitHub("sending the signing key")
             return
         }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first: the signing key is sent with your key"
+            message = noGitHub("sending the signing key, which needs an account key")
             return
         }
         val ref = RepoRef.of(git?.remoteUrl(project).orEmpty()) ?: return
@@ -3599,12 +3622,12 @@ class AppViewModel @JvmOverloads constructor(
         // **Refused in words.** This was a silent `?: return`, so a press with no account behind it did
         // nothing at all — the one shape this app treats as a defect wherever it appears.
         val api = githubFor(login) ?: run {
-            message = "Sign in to GitHub first: an artifact is fetched from GitHub"
+            message = noGitHub("fetching an artifact")
             return
         }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first: an artifact is fetched with your key"
+            message = noGitHub("fetching an artifact, which needs an account key")
             return
         }
         val ref = RepoRef.of(remoteUrlOf(project).orEmpty())
@@ -3673,12 +3696,12 @@ class AppViewModel @JvmOverloads constructor(
         // with no message is a press that does nothing at all — the failure shape this app treats as a
         // defect everywhere else.
         val api = githubFor(login) ?: run {
-            message = "Sign in to GitHub first: a release is dispatched to GitHub"
+            message = noGitHub("dispatching a release")
             return
         }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first: a release is dispatched with your key"
+            message = noGitHub("dispatching a release, which needs an account key")
             return
         }
         val project = path.firstOrNull() ?: return
@@ -3823,7 +3846,7 @@ class AppViewModel @JvmOverloads constructor(
         val api = githubFor(login)
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (login.isNullOrBlank() || api == null) {
-            message = "Sign in to GitHub first"
+            message = noGitHub("creating a repository")
             onDone(false)
             return
         }
@@ -4066,7 +4089,7 @@ class AppViewModel @JvmOverloads constructor(
         val login = activeLogin
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (api == null || login == null) {
-            message = "Sign in to GitHub first: a local project becomes synced by getting a repository"
+            message = noGitHub("making a local project synced by giving it a repository")
             onDone(false)
             return
         }
@@ -4160,7 +4183,7 @@ class AppViewModel @JvmOverloads constructor(
         val api = github
         val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         if (api == null) {
-            onDone(emptyList(), "Sign in to GitHub first")
+            onDone(emptyList(), noGitHub("listing repositories"))
             return
         }
         onWorker {
@@ -5371,8 +5394,27 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    /** Signs an account in, or adds it when it is new, and makes it active. */
-    fun signIn(login: String, token: String, commitName: String, commitEmail: String) {
+    /**
+     * **The one save every door uses.**
+     *
+     * A door may differ in exactly one thing — how a credential is acquired. GitHub's door runs the
+     * device flow and asks `GET /user` for the name and the commit identity, so it fills every field
+     * itself; the other door asks a person for a name, a host, a key and optionally a git username.
+     * Both then arrive here, and everything after this point is the same act.
+     *
+     * **Splitting it into two functions is what made the app GitHub-shaped**, because the second
+     * function would then have to re-decide what signing in means: whether the provisional account is
+     * adopted, whether the branch screen is forgotten, whether onboarding is finished. Those are not
+     * per-door questions.
+     */
+    fun addAccount(
+        login: String,
+        host: String,
+        gitUser: String,
+        token: String,
+        commitName: String,
+        commitEmail: String,
+    ) {
         // **Adopt BEFORE saving, and the order is load-bearing.** `accounts.save` creates the
         // account's folder, and `adoptProvisional` refuses when that folder already exists - so
         // saving first would leave the provisional content behind for ever, on the one occasion
@@ -5383,12 +5425,19 @@ class AppViewModel @JvmOverloads constructor(
         // project and the request history go with them because they were all inside the same
         // folder. Nothing is copied, so a failure leaves everything on the provisional side.
         val adopted = accounts.adoptProvisional(login)
+        // **The key is stored at account scope**, not project scope, because a clone happens before a
+        // project exists: a project-scoped secret could never be present the moment it is first needed.
+        // The store's narrowest-first lookup still lets a project override it later.
         credentials.setToken(login, token)
         accounts.save(
             Account(
                 login = login,
                 commitName = commitName.ifBlank { login },
-                commitEmail = commitEmail.ifBlank { noreplyEmail(login) },
+                // **A commit address belongs to the host that issued it**, so nobody but GitHub gets
+                // GitHub's `users.noreply` form: on another host that address would belong to a stranger.
+                commitEmail = commitEmail.ifBlank { noreplyEmail(login, host = host) },
+                host = host,
+                gitUser = gitUser,
             )
         )
         credentials.activeLogin = login
@@ -5408,6 +5457,80 @@ class AppViewModel @JvmOverloads constructor(
         // **The first half of the way out.** A key may already be on this phone from before the
         // sign-in, or the person may connect the model next; either order finishes onboarding.
         closeOnboardingIfConnected()
+    }
+
+    /**
+     * **The other door: an account on any host, with a key a person made there.**
+     *
+     * Everything a door is allowed to differ in is here — the host is typed rather than implied, and so
+     * is the git username — and nothing else is: the save is [addAccount], the same one GitHub's door
+     * uses.
+     *
+     * **Nothing is validated against the host, and the dialog says so.** GitHub's door can ask
+     * `GET /user` who a key belongs to; no other host has an equivalent in git, and there is no git
+     * command that answers "is this key valid" without a repository to ask about. Pretending to check
+     * would be worse than saying the key is tried the first time it is used, and the refusal then
+     * arrives from the first clone as a sentence naming the account, the host, and which of
+     * unauthorised / not-found / unreachable it was.
+     */
+    fun addHostAccount(
+        name: String,
+        host: String,
+        gitUser: String,
+        key: String,
+        onDone: (Boolean) -> Unit = {},
+    ) {
+        val login = name.trim()
+        Workspace.nameProblem(login)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        Secrets.hostProblem(host)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        if (key.isBlank()) {
+            message = "A key is needed: this host will refuse to push without one"
+            onDone(false)
+            return
+        }
+        // **A login is a folder name**, and two accounts cannot share one. The same rule the sign-in
+        // follows, said before anything is written rather than after: adopting an existing folder would
+        // hand this account somebody else's projects.
+        if (accounts.account(login) != null) {
+            message = "This phone already has an account called \"$login\""
+            onDone(false)
+            return
+        }
+        Trace.note("host-account", "added · ${host.trim().lowercase()}")
+        addAccount(
+            login = login,
+            host = host.trim().lowercase(),
+            gitUser = gitUser.trim(),
+            token = key,
+            commitName = login,
+            commitEmail = "",
+        )
+        onDone(true)
+    }
+
+    /**
+     * GitHub's door onto [addAccount]: the host is the door's own, and there is no git username.
+     *
+     * Kept as a name because it is what the device flow and the token field both call, and because a
+     * caller that says "sign in to GitHub" should not have to pass `github.com` to say it.
+     */
+    fun signIn(login: String, token: String, commitName: String, commitEmail: String) {
+        addAccount(
+            login = login,
+            host = GITHUB_HOST,
+            gitUser = "",
+            token = token,
+            commitName = commitName,
+            commitEmail = commitEmail,
+        )
     }
 
     /**
@@ -6096,11 +6219,15 @@ class AppViewModel @JvmOverloads constructor(
         fun githubFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): GitHub? {
             if (accounts.isProvisional(login)) return null
             val stored = accounts.account(login) ?: return null
-            return if (stored.dev && testAccountsAllowed) {
-                DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
-            } else {
-                HttpGitHub()
+            if (stored.dev && testAccountsAllowed) {
+                return DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
             }
+            // **An account on another host has no GitHub at all.** `HttpGitHub()` pointed at
+            // `api.github.com` on behalf of a `gitlab.com` account would send that account's key to a
+            // host it was never made for — refused by design — and answer every caller with a 401 that
+            // explains nothing. `null` is the honest answer, and every caller already handles it: it is
+            // the same `null` a phone with nobody signed in gets.
+            return if (Secrets.isHost("https://${stored.host}/", GITHUB_HOST)) HttpGitHub() else null
         }
         private const val SEARCH_LIMIT = 4000
 

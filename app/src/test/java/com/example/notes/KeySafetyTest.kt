@@ -351,6 +351,37 @@ class KeySafetyTest {
         assertEquals("scp shape", "github.com", Secrets.hostOf("git@github.com:o/r.git"))
     }
 
+    @Test
+    fun `an address this app cannot speak to is refused before any key is considered`() {
+        // **The trap this closes.** `hostOf("git@github.com:o/r.git")` answers `github.com` quite
+        // happily, so a pasted scp address looked usable right up to the moment a key was attached to it
+        // and JGit failed with a null-shaped error naming nothing — this app packages no SSH transport.
+        // Every host's own page shows the scp form first, so this is the address a person will paste.
+        for (address in listOf(
+            "git@github.com:o/r.git",
+            "git@gitlab.com:team/repo",
+            "ssh://git@github.com/o/r.git",
+            "git+ssh://git@example.org/o/r.git",
+        )) {
+            val why = Secrets.transportProblem(address)
+            assertTrue("$address is refused", why != null && why.contains("HTTPS"))
+            assertTrue(
+                "and the sentence names the host it can reach: $why",
+                why!!.contains(Secrets.hostOf(address)),
+            )
+        }
+        // **The positive control, because a guard that refuses everything is not a guard.** Every shape
+        // the app really sends is accepted, including a local path — which has no host and needs none.
+        for (address in listOf(
+            "https://github.com/o/r.git",
+            "http://192.168.1.9:3000/team/r.git",
+            "/tmp/bare-repo",
+            "file:///tmp/bare-repo",
+        )) {
+            assertNull("$address is accepted", Secrets.transportProblem(address))
+        }
+    }
+
 
     // ---- a secret belongs to a host ----------------------------------------
 

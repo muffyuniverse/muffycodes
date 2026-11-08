@@ -86,6 +86,10 @@ VOCABULARY = {
     # publishing a release from inside the app (§13b.7): the strip's button, then the window's press
     "publish release", "confirm publish release",
     # the account
+    # **One confirm for both doors.** `add account` opens the choice; the choice is which door. The
+    # account that is made is the same kind of thing either way, so the log has one name for the save
+    # and the door is the arg — a second name would make "how was this account added" a filter over
+    # two words instead of one.
     "add account", "confirm add account", "remove account", "use test account",
     # entering and leaving an account's folder — the main menu is the list of them (§13c.2)
     "enter account", "leave account",

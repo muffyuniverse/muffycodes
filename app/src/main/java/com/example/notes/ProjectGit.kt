@@ -67,6 +67,16 @@ class ProjectGit(
      * lambda is the whole of "this project has its own key for this host".
      */
     private val vaultToken: (project: String, host: String) -> String? = { _, _ -> null },
+
+    /**
+     * **The host this account's key belongs to** — what [GitCredentials.forRemote] compares a remote
+     * against before offering the account's token.
+     *
+     * A provider, like the four above, and for the same reason: this class must not read the account
+     * store, and a test that wants "an account on gitlab.com" passes it in. `github.com` is the
+     * default because a `ProjectGit` with no account behind it is a test.
+     */
+    private val accountHost: () -> String = { GITHUB_HOST },
 ) {
 
     /**
@@ -78,7 +88,9 @@ class ProjectGit(
      */
     fun onBranch(branch: String): ProjectGit =
         if (branch == this.branch) this
-        else ProjectGit(workspace, tokenProvider, authorProvider, index, branch, vaultToken)
+        else ProjectGit(
+            workspace, tokenProvider, authorProvider, index, branch, vaultToken, accountHost,
+        )
 
     /**
      * The working tree of a project on **this view's branch** — the project's own folder on `main`, the
@@ -97,7 +109,9 @@ class ProjectGit(
      * most. The decision itself is [GitCredentials], which has no Android in it and is tested alone.
      */
     private fun credentialFor(project: String, remoteUrl: String?): GitCredentials.Answer =
-        GitCredentials.forRemote(remoteUrl, tokenProvider()) { host -> vaultToken(project, host) }
+        GitCredentials.forRemote(remoteUrl, tokenProvider(), accountHost()) { host ->
+            vaultToken(project, host)
+        }
 
     /** Opens the project's repository, or null when it has none. */
     fun open(project: String): Repository? {

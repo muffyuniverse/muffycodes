@@ -83,6 +83,7 @@ class ProjectGitTest {
         val answer = GitCredentials.forRemote(
             remoteUrl = "https://gitlab.com/someone/shopping.git",
             accountToken = "ghp_the-account-key",
+            accountHost = GITHUB_HOST,
             vault = { host -> if (host == "gitlab.com") "glpat-the-project-key" else null },
         )
 

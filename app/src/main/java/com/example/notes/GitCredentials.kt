@@ -20,11 +20,12 @@ package com.example.notes
  *    one thing this app has always refused. What is new is that the refusal is now a **sentence**
  *    instead of a null that let the server answer 401 about a key that was never offered.
  *
- * ## Why the account's host is a fact rather than a table
+ * ## Why the account's host is data rather than a table
  *
- * The app signs in to one kind of host (see [DeviceFlow]), so "the account's own host" is [isAccountHost].
- * Everything else is data: a name the project chooses, and a secret bound to a hostname. A second host
- * family would be a second sign-in door, not a second branch in this file.
+ * An account is made against one host, and that hostname is stored on the account — so "the account's
+ * own host" is [isAccountHost] with a value, never a constant. Everything else is data too: a name the
+ * project chooses, and a secret bound to a hostname, so supporting a host is an act in the vault rather
+ * than a branch in this file.
  */
 object GitCredentials {
 
@@ -51,12 +52,24 @@ object GitCredentials {
     }
 
     /**
-     * True when [remoteUrl] names the host this phone's account signed in to.
+     * True when [remoteUrl] names the host the account's key belongs to.
      *
-     * The one place the app's own identity provider is named — see the file's comment. A project on any
-     * other host is answered by [SECRET] from the vault and never by this.
+     * **The host is an argument, not a constant.** It used to read `Secrets.isGitHubHost`, which made
+     * "the account's host" mean "GitHub" — so a key made for `gitlab.com` would have been offered to
+     * `github.com`, and the reverse. An account is tied to one host (`Account.host`), and this is
+     * where that fact is compared with the address the project actually has.
      */
-    fun isAccountHost(remoteUrl: String): Boolean = Secrets.isGitHubHost(remoteUrl)
+    fun isAccountHost(accountHost: String, remoteUrl: String): Boolean =
+        accountHost.isNotBlank() && Secrets.isHost(remoteUrl, accountHost)
+
+    /** The seam the sentence needs when [remoteUrl] is nobody's host. */
+    private fun withheld(host: String, accountHost: String): String = if (accountHost.isBlank()) {
+        "Nothing was sent: no host is recorded for this account, so it has no key it may offer."
+    } else {
+        "Nothing was sent: $host is not the host this account signed in to, and no secret " +
+            "called `$SECRET` is stored for it. Add one on Settings → Secrets, bound to $host, " +
+            "and this project will use it."
+    }
 
     /**
      * What to send to [remoteUrl].
@@ -68,6 +81,7 @@ object GitCredentials {
     fun forRemote(
         remoteUrl: String?,
         accountToken: String?,
+        accountHost: String,
         vault: (host: String) -> String?,
     ): Answer {
         val url = remoteUrl?.trim().orEmpty()
@@ -80,7 +94,7 @@ object GitCredentials {
         // is one question rather than three.
         vault(host)?.takeIf { it.isNotBlank() }?.let { return Answer.Use(it) }
 
-        if (isAccountHost(url)) {
+        if (isAccountHost(accountHost, url)) {
             // **The account's own host, and no token**: not a portability problem but a sign-in one,
             // and the two are answered differently or the person fixes the wrong thing.
             return if (!accountToken.isNullOrBlank()) {
@@ -93,10 +107,6 @@ object GitCredentials {
             }
         }
 
-        return Answer.Say(
-            "Nothing was sent: $host is not the host this account signed in to, and no secret " +
-                "called `$SECRET` is stored for it. Add one on Settings → Secrets, bound to $host, " +
-                "and this project will use it.",
-        )
+        return Answer.Say(withheld(host, accountHost))
     }
 }

@@ -643,6 +643,153 @@ fun NewProjectDialog(
     )
 }
 
+/**
+ * **Two ways in, and only one of them is GitHub's.**
+ *
+ * The operator's decision: the device flow stays, as *"a separate door option... a convenience on top of
+ * the shared process"*. So this is a choice between two doors that end in the same save, and it says what
+ * each one is for rather than making a person guess which is the "real" one.
+ */
+@Composable
+fun AddAccountDialog(
+    onDismiss: () -> Unit,
+    onGitHub: () -> Unit,
+    onAnotherHost: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add an account") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "An account is a name, the host its key belongs to, and the key.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(
+                    onClick = onGitHub,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Sign in with GitHub", style = MaterialTheme.typography.titleMedium)
+                }
+                Text(
+                    "The name and the address are filled in for you, because GitHub says who a key " +
+                        "belongs to.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                HorizontalDivider()
+                Button(
+                    onClick = onAnotherHost,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Another host", style = MaterialTheme.typography.titleMedium)
+                }
+                Text(
+                    "Any host that speaks git: you say the host, and paste a key you made there.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * **The door for every host this app has no API for** — which is all of them but one.
+ *
+ * Four fields, and the sentence that keeps the dialog honest: nothing here can check a key. GitHub's
+ * door asks `GET /user` who a key belongs to; there is no git command that answers "is this key valid"
+ * without a repository to ask about, and no other host has an endpoint worth special-casing. So a bad
+ * key is refused by the *first clone*, as a sentence naming the account, the host and which of
+ * unauthorised / not-found / unreachable it was — rather than by a red line in a dialog that only
+ * pretended to check.
+ */
+@Composable
+fun AddHostAccountDialog(
+    onDismiss: () -> Unit,
+    onAdd: (name: String, host: String, gitUser: String, key: String) -> Unit,
+    error: String? = null,
+) {
+    var name by remember { mutableStateOf("") }
+    var host by remember { mutableStateOf("gitlab.com") }
+    var gitUser by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Another host") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Account name") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "The folder this account's projects live in.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = { host = it },
+                    label = { Text("Host") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "Just the name, like ${GITHUB_HOST} — a project's address goes on the project.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+                OutlinedTextField(
+                    value = gitUser,
+                    onValueChange = { gitUser = it },
+                    label = { Text("Git username (optional)") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "Leave it empty unless the host wants one: GitLab wants `oauth2`.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("Key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Text(
+                    "The key is tried the first time it is used. Nothing here can ask the host whether " +
+                        "it is right; the first clone says so, and names what was refused.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (error != null) {
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(name, host, gitUser, key) },
+                enabled = name.isNotBlank() && host.isNotBlank() && key.isNotBlank(),
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 fun SignInDialog(
     onDismiss: () -> Unit,

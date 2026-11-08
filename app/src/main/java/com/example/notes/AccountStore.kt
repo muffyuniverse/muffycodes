@@ -3,9 +3,9 @@ package com.example.notes
 import org.json.JSONObject
 import java.io.File
 
-/** One GitHub account stored on this phone. */
+/** One account stored on this phone: a name, the host it is tied to, and a key. */
 data class Account(
-    /** The GitHub login, which also names the account's folder. */
+    /** The login, which also names the account's folder. */
     val login: String,
     /** The name written into commits made while this account is active. */
     val commitName: String,
@@ -17,25 +17,53 @@ data class Account(
      * never make one, and no account stored by a release build ever has this set.
      */
     val dev: Boolean = false,
+    /**
+     * **The host this account's key belongs to** — part of its identity, not a detail of a remote.
+     *
+     * A credential may only be sent to the host it was made for, so an account has to say which host
+     * that is; that is what `GitCredentials.forRemote` reads instead of assuming GitHub. The default is
+     * not a compatibility shim: every account that existed before this field was made by GitHub's door,
+     * so `github.com` is a statement of fact about those files.
+     */
+    val host: String = GITHUB_HOST,
+    /**
+     * The username sent with this account's key, when the host needs one.
+     *
+     * **Data, because there is no universal answer.** GitHub and Gitea take the token as the username,
+     * GitLab documents `oauth2:<token>`, Bitbucket uses `x-token-auth` or a person's own name. Blank
+     * means the token is the username, which is the commonest shape; a URL that names a user
+     * (`https://x-token-auth@host/…`) still wins over this, because the person wrote it on that project.
+     */
+    val gitUser: String = "",
 ) {
     fun author(): GitAuthor = GitAuthor(
         name = commitName.ifBlank { login },
-        email = commitEmail.ifBlank { noreplyEmail(login) },
+        // **The account's own host**, so a commit made through `gitlab.com` never claims a GitHub
+        // `users.noreply` address that belongs to somebody else.
+        email = commitEmail.ifBlank { noreplyEmail(login, host = host) },
     )
 }
 
 /**
- * The address a commit by [login] gets when GitHub gives us none.
+ * The address a commit by [login] gets when the host gave us none.
  *
- * **GitHub's own form**, and one rule rather than three: the account screen, the sign-in wrote it,
- * and a fetched identity. It carries the numeric id when one is known, because that is what GitHub
- * itself puts in a commit's address and what makes the address belong to the account rather than to
- * whoever took the login later.
+ * **GitHub's own form, and only for GitHub.** The `users.noreply.github.com` domain belongs to one
+ * host; writing it into a commit made through a `gitlab.com` account would attribute the work to a
+ * stranger who happens to hold that domain's login — and the address is permanent once a commit exists,
+ * so it is decided here rather than left to be noticed later.
+ *
+ * It carries the numeric id when one is known, because that is what GitHub itself puts in a commit's
+ * address and what makes the address belong to the account rather than to whoever took the login later.
+ * Any other host answers the login at the host's own domain, which is a convention rather than a
+ * promise — and a local project, which has no host at all, is left to [fallbackEmail].
  */
-internal fun noreplyEmail(login: String, id: Long = 0L): String = if (id > 0) {
-    "$id+$login@users.noreply.github.com"
-} else {
-    "$login@users.noreply.github.com"
+internal fun noreplyEmail(login: String, id: Long = 0L, host: String = GITHUB_HOST): String {
+    if (!Secrets.isHost("https://$host/", GITHUB_HOST) && host.isNotBlank()) {
+        // Not GitHub's domain, so not GitHub's address form. `user@host` is what every mail-shaped
+        // identity on another host looks like, and it is the honest thing to write.
+        return "$login@$host"
+    }
+    return if (id > 0) "$id+$login@users.noreply.github.com" else "$login@users.noreply.github.com"
 }
 
 /**
@@ -162,6 +190,11 @@ class AccountStore(private val filesDir: File) {
             commitName = text(json, "commitName"),
             commitEmail = text(json, "commitEmail"),
             dev = json.optBoolean("dev"),
+            // **`ifBlank` rather than a null check.** A file written before the field existed has no
+            // `host` key at all, and the account it describes was made by GitHub's door - so the
+            // default is what that file means, and it is read rather than migrated.
+            host = text(json, "host").ifBlank { GITHUB_HOST },
+            gitUser = text(json, "gitUser"),
         )
     } catch (e: Exception) {
         Account(login = dir.name, commitName = "", commitEmail = "")
@@ -181,6 +214,8 @@ class AccountStore(private val filesDir: File) {
             put("login", account.login)
             put("commitName", account.commitName)
             put("commitEmail", account.commitEmail)
+            put("host", account.host)
+            if (account.gitUser.isNotBlank()) put("gitUser", account.gitUser)
             if (account.dev) put("dev", true)
         }
         File(stateDir(account.login), DETAILS).writeText(json.toString())

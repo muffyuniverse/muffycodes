@@ -179,6 +179,34 @@ class AccountStoreTest {
     }
 
     @Test
+    fun `an account keeps the host it was made against`() {
+        // **The field that makes an account more than a GitHub login.** A key may only be sent to the
+        // host it was made for, so the host is part of the account's identity rather than a detail of
+        // whichever project happens to be open.
+        store.save(Account("someone", "S", "s@example.com", host = "gitlab.com", gitUser = "oauth2"))
+
+        val read = store.account("someone")
+
+        assertEquals("gitlab.com", read?.host)
+        assertEquals("and the username, when the host needs one", "oauth2", read?.gitUser)
+    }
+
+    @Test
+    fun `an account written before there were hosts is a GitHub account`() {
+        // **A default, not a migration.** Every account that existed before this field was made by
+        // GitHub's door, so a file with no `host` key describes a GitHub account — reading it as
+        // "unknown" would refuse the key that signed it in.
+        store.save(Account("muffyuniverse", "M", "m@example.com"))
+        val details = File(store.stateDir("muffyuniverse"), "account.json")
+        details.writeText("""{"login":"muffyuniverse","commitName":"M","commitEmail":"m@example.com"}""")
+
+        val read = store.account("muffyuniverse")
+
+        assertEquals(GITHUB_HOST, read?.host)
+        assertEquals("and no git username was ever asked for", "", read?.gitUser)
+    }
+
+    @Test
     fun `the commit identity falls back to the login`() {
         val account = Account("muffyuniverse", "", "")
         assertEquals("muffyuniverse", account.author().name)

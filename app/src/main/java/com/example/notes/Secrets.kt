@@ -10,6 +10,15 @@ package com.example.notes
  * address or a message in the first place**, and anything that could still
  * carry one is scrubbed before it is shown or stored.
  */
+/**
+ * The host this app was written for, and the one every account that existed before hosts were
+ * recorded belongs to.
+ *
+ * **A named constant, because "the account's host is GitHub's" is now a comparison rather than an
+ * assumption**, and a string literal in six places is a rule with six spellings.
+ */
+const val GITHUB_HOST = "github.com"
+
 object Secrets {
 
     /**
@@ -127,13 +136,44 @@ object Secrets {
     }
 
     /**
-     * True when [url] points at GitHub — the only host a key is ever given to.
-     * Checked before the key is attached to a request or a clone, so that a
-     * repository that quietly points somewhere else cannot collect it.
+     * True when [url] points at GitHub.
+     *
+     * **This is now a question about GitHub's API, not about where a key may go.** A key goes to
+     * whatever host its account is tied to, which `GitCredentials.isAccountHost` answers; this stays
+     * for the places that really are calling `api.github.com` and will not work anywhere else.
      */
-    fun isGitHubHost(url: String): Boolean {
+    fun isGitHubHost(url: String): Boolean = isHost(url, GITHUB_HOST)
+
+    /** True when [url] points at [host] — the same host or one of its subdomains. */
+    fun isHost(url: String, host: String): Boolean {
         val authority = hostOf(url)
-        return authority == "github.com" || authority.endsWith(".github.com")
+        if (host.isBlank() || authority.isEmpty()) return false
+        return authority == host || authority.endsWith(".$host")
+    }
+
+    /**
+     * Why this app cannot speak to [url], or null when it can.
+     *
+     * **Asked before a credential is chosen, not after.** This app packages no SSH transport
+     * (`org.eclipse.jgit.ssh.*` is not a dependency), so a `git@host:path` address fails deep inside
+     * JGit with a null-shaped error that names nothing. Worse, `hostOf("git@github.com:o/r.git")`
+     * answers `github.com` quite happily — so the address would *look* usable right up to the
+     * moment a key was attached to it.
+     *
+     * The scp form is the one that matters: it is what every host's own page shows first, so a person
+     * pasting a clone address will paste that one.
+     */
+    fun transportProblem(url: String): String? {
+        val address = url.trim()
+        if (address.isEmpty()) return "There is no address."
+        if (SCP_FORM.matches(address) || address.startsWith("ssh://", ignoreCase = true) ||
+            address.startsWith("git+ssh://", ignoreCase = true)
+        ) {
+            val host = hostOf(address).ifBlank { "the server" }
+            return "This app sends over HTTPS only, so it cannot use an SSH address. " +
+                "Use https://$host/<owner>/<repository>.git instead."
+        }
+        return null
     }
 
     /**
@@ -167,6 +207,45 @@ object Secrets {
     }
 
     /**
+     * Why [text] is not a hostname, or null when it is one.
+     *
+     * **A person will paste a URL into this field**, because every host's page offers a clone address
+     * and that is the thing on the clipboard. Refusing it with the host it *does* contain is the
+     * actionable answer: the address belongs on a project, and the host belongs here.
+     */
+    fun hostProblem(text: String): String? {
+        val host = text.trim()
+        if (host.isEmpty()) return "A host is needed: the name the key is for, like ${GITHUB_HOST}"
+        if (host.any { it.isWhitespace() }) return "A host has no spaces in it"
+        if (host.contains("://") || host.contains('/') || host.startsWith("git@")) {
+            val found = hostOf(host)
+            return if (found.isNotEmpty() && found != host) {
+                "The host is `$found`. The whole address goes on a project, not here."
+            } else {
+                "That is an address, not a host. A host is just the name, like ${GITHUB_HOST}"
+            }
+        }
+        // **No scheme, no path, no port, no credentials** — all of which [hostOf] would strip, and a
+        // field that silently accepts `gitlab.com:8443` while storing `gitlab.com` is a field that
+        // changes what was typed.
+        if (host != hostOf("https://$host/")) {
+            return "A host is a name only, like ${GITHUB_HOST} — no port, and no user"
+        }
+        if (!HOSTNAME.matches(host)) return "`$host` is not a hostname"
+        return null
+    }
+
+    /**
+     * A hostname: labels of letters, digits and hyphens, at least one dot.
+     *
+     * **A dot is required, and that is deliberate.** `localhost` is a real host and a real thing to
+     * type, but it is also what a half-finished sentence looks like, and this field decides which
+     * server a key may be sent to — so an entry with no dot is far more likely to be a mistake than a
+     * local server. A self-hosted install on a name without a dot is reached by putting one in DNS.
+     */
+    private val HOSTNAME = Regex("""^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$""")
+
+    /**
      * `scheme://userinfo@` — two groups, because the part that must not survive is also the part a
      * token may belong to.
      */
@@ -182,6 +261,16 @@ object Secrets {
     private val TOKEN_SHAPE = Regex(
         """(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-or-v1-[A-Za-z0-9]{16,})"""
     )
+
+    /**
+     * The scp-shaped address: `git@host:path`.
+     *
+     * **`user@host:path` and nothing else.** A `https://host/path` address also contains an `@` in
+     * some forms and a `:` in others, so the three parts are pinned: no scheme, a user, an `@`, a
+     * host without a slash, a colon, and a path. Without the "no scheme" part, `https://a@b:c` would
+     * match, and that is a URL this app can send a key to.
+     */
+    private val SCP_FORM = Regex("""^[^/@:\s]+@[^/:\s]+:[^\s]+$""")
 }
 
 /**

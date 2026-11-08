@@ -18,9 +18,24 @@ class GitCredentialsTest {
 
     private fun accountToken() = "ghp_the-account-key"
 
+    /**
+     * The decision, with GitHub's host unless a test says otherwise.
+     *
+     * **Every test below is about the same question — what does this remote get — so only the ones that
+     * are *about* the host mention it.** The default is what the app had before an account could be made
+     * against another host, which makes the tests that do not mention it the regression suite for it.
+     */
+    private fun forRemote(
+        remoteUrl: String?,
+        accountToken: String?,
+        accountHost: String = GITHUB_HOST,
+        vault: (host: String) -> String? = { null },
+    ): GitCredentials.Answer =
+        GitCredentials.forRemote(remoteUrl, accountToken, accountHost, vault)
+
     @Test
     fun `the account's own host, with a key, uses it`() {
-        val answer = GitCredentials.forRemote("https://github.com/o/r.git", accountToken()) { null }
+        val answer = forRemote("https://github.com/o/r.git", accountToken())
 
         assertEquals(GitCredentials.Answer.Use(accountToken()), answer)
     }
@@ -31,7 +46,7 @@ class GitCredentialsTest {
         // this phone signed in to is a sign-in problem; no token for somebody else's host is a secret to
         // add. Collapsing them sends the person to the wrong screen, which is the failure shape this app
         // treats as a defect everywhere else.
-        val answer = GitCredentials.forRemote("https://github.com/o/r.git", null) { null }
+        val answer = forRemote("https://github.com/o/r.git", null)
 
         assertTrue("it is a sentence: $answer", answer is GitCredentials.Answer.Say)
         assertTrue(
@@ -41,10 +56,70 @@ class GitCredentialsTest {
     }
 
     @Test
+    fun `an account on another host does not offer its key to GitHub`() {
+        // **The falsifying test for `Account.host`.** Before the host was data this answered `Use`: the
+        // decision read "is this address GitHub's", which was true, and the account's own host — the whole
+        // point of the account — was never consulted. A person with a GitLab key who adds a GitHub project
+        // would then have had their GitLab token sent to GitHub, and GitHub's 401 would have been the only
+        // explanation.
+        val answer = forRemote(
+            "https://github.com/o/r.git",
+            "glpat-the-gitlab-key",
+            accountHost = "gitlab.com",
+        )
+
+        assertTrue("nothing is sent: $answer", answer is GitCredentials.Answer.Say)
+        val why = (answer as GitCredentials.Answer.Say).why
+        assertTrue("it names the host it will not send to: $why", why.contains("github.com"))
+        assertFalse("and never the key", why.contains("glpat-the-gitlab-key"))
+    }
+
+    @Test
+    fun `an account on another host offers its key to that host`() {
+        // The other half, and the one that makes the app worth using on another host: the same account,
+        // the same key, and an address that *is* its own host — no vault secret needed, because the
+        // account is the credential for the host it was made against.
+        val answer = forRemote(
+            "https://gitlab.com/someone/r.git",
+            "glpat-the-gitlab-key",
+            accountHost = "gitlab.com",
+        )
+
+        assertEquals(GitCredentials.Answer.Use("glpat-the-gitlab-key"), answer)
+    }
+
+    @Test
+    fun `a subdomain of the account's host is the account's host`() {
+        // Enterprise installs answer on `github.example.com` and `gitlab.example.org`, and a hostname is
+        // written into the account by hand — so the comparison is the same one `isGitHubHost` always did,
+        // with the host as an argument rather than a constant.
+        assertEquals(
+            GitCredentials.Answer.Use(accountToken()),
+            forRemote("https://github.example.com/o/r.git", accountToken(), "example.com"),
+        )
+        assertTrue(
+            "and a suffix that is not a subdomain is not the host",
+            forRemote("https://notexample.com/o/r.git", accountToken(), "example.com")
+                is GitCredentials.Answer.Say,
+        )
+    }
+
+    @Test
+    fun `an account with no host recorded offers its key nowhere`() {
+        // Not reachable through the app — `Account.host` defaults to GitHub's — but the decision must not
+        // treat "unknown" as "anywhere", which is what an empty string would do if it were compared as a
+        // prefix. This is the shape of the mistake, refused.
+        assertTrue(
+            forRemote("https://github.com/o/r.git", accountToken(), accountHost = "")
+                is GitCredentials.Answer.Say,
+        )
+    }
+
+    @Test
     fun `another host with a secret of its own uses that secret`() {
         // **The whole point of the phase**: nothing in the app knows that `gitlab.com` exists. A person
         // stored a secret for that host and named it `git`, and the project picks it up.
-        val answer = GitCredentials.forRemote("https://gitlab.com/someone/r.git", null) { host ->
+        val answer = forRemote("https://gitlab.com/someone/r.git", null) { host ->
             if (host == "gitlab.com") "glpat-the-project-key" else null
         }
 
@@ -53,10 +128,7 @@ class GitCredentialsTest {
 
     @Test
     fun `another host with no secret says which host and which secret`() {
-        val answer = GitCredentials.forRemote(
-            "https://git.example.org/team/r.git",
-            accountToken(),
-        ) { null }
+        val answer = forRemote("https://git.example.org/team/r.git", accountToken())
 
         assertTrue("it is a sentence: $answer", answer is GitCredentials.Answer.Say)
         val why = (answer as GitCredentials.Answer.Say).why
@@ -70,7 +142,7 @@ class GitCredentialsTest {
         // not quietly lose: the key on this phone is the account's, and a repository that points at
         // another server does not get it. Here it is asserted as the *decision*, so the answer cannot be
         // `Use` however the caller is written.
-        val answer = GitCredentials.forRemote("https://evil.example/o/r.git", accountToken()) { null }
+        val answer = forRemote("https://evil.example/o/r.git", accountToken())
 
         assertTrue("nothing is sent: $answer", answer !is GitCredentials.Answer.Use)
         assertFalse(
@@ -84,7 +156,7 @@ class GitCredentialsTest {
         // A person with two GitHub identities: the project's secret is the narrower scope and the account
         // token is the wider one, so the narrow one wins. This is the same rule the store already follows
         // (project, then account, then shared) applied to the credential.
-        val answer = GitCredentials.forRemote("https://github.com/o/r.git", accountToken()) { host ->
+        val answer = forRemote("https://github.com/o/r.git", accountToken()) { host ->
             if (host == "github.com") "ghp_the-project-key" else null
         }
 
@@ -97,17 +169,17 @@ class GitCredentialsTest {
         // suite talks to a "remote". Refusing it would break the one case that is obviously safe.
         assertEquals(
             GitCredentials.Answer.None,
-            GitCredentials.forRemote("/tmp/some/repo", accountToken()) { null },
+            forRemote("/tmp/some/repo", accountToken()),
         )
         assertEquals(
             "and an address that is not there is the same answer",
             GitCredentials.Answer.None,
-            GitCredentials.forRemote(null, accountToken()) { null },
+            forRemote(null, accountToken()),
         )
         assertEquals(
             "and an empty one",
             GitCredentials.Answer.None,
-            GitCredentials.forRemote("  ", accountToken()) { null },
+            forRemote("  ", accountToken()),
         )
     }
 
