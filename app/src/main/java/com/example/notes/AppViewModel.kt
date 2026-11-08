@@ -3524,10 +3524,16 @@ class AppViewModel @JvmOverloads constructor(
     fun fixSigning(project: String) {
         val ws = workspace ?: return
         val login = activeLogin
-        val api = githubFor(login) ?: return
+        // **Both refusals say something.** The account check returned silently, which is a press with
+        // no answer at all — and the row only exists because the app found something wrong, so a
+        // press that reports nothing reads as "it is still wrong, then".
+        val api = githubFor(login) ?: run {
+            message = "Sign in to GitHub first: the signing key is sent to GitHub"
+            return
+        }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first"
+            message = "Sign in to GitHub first: the signing key is sent with your key"
             return
         }
         val ref = RepoRef.of(git?.remoteUrl(project).orEmpty()) ?: return
@@ -3584,10 +3590,15 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun exportArtifact(project: String) {
         val login = activeLogin
-        val api = githubFor(login) ?: return
+        // **Refused in words.** This was a silent `?: return`, so a press with no account behind it did
+        // nothing at all — the one shape this app treats as a defect wherever it appears.
+        val api = githubFor(login) ?: run {
+            message = "Sign in to GitHub first: an artifact is fetched from GitHub"
+            return
+        }
         val token = login?.let { credentials.token(it) }.orEmpty()
         if (token.isBlank()) {
-            message = "Sign in to GitHub first"
+            message = "Sign in to GitHub first: an artifact is fetched with your key"
             return
         }
         val ref = RepoRef.of(remoteUrlOf(project).orEmpty())
@@ -3613,7 +3624,10 @@ class AppViewModel @JvmOverloads constructor(
                     // **Through the same file the tool writes to**, so a person's export and the
                     // agent's are the same bytes from the same place.
                     val ws = workspace!!
-                    val dir = File(File(ws.projectDir(project), AgentLog.DIR), "ci/artifacts")
+                    // **The tree on screen** (§13d), because that is where the agent's own `artifact`
+                    // files its results — and one folder for both is what makes a person's export and
+                    // an agent's the same bytes from the same place.
+                    val dir = File(File(ws.treeOf(project), AgentLog.DIR), "ci/artifacts")
                     // **The artifact's own name, made safe rather than re-styled** — see
                     // `AgentTools.safeArtifactName` for why the project naming rule is wrong here.
                     val file = File(dir, Release.artifactName(first.name) + ".zip")
