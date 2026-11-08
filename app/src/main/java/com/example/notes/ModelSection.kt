@@ -1272,18 +1272,20 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
 @Composable
 fun SecretRow(viewModel: AppViewModel, onOpenSecrets: () -> Unit) {
     val changed = viewModel.secretSaved
-    val names = remember(changed) { viewModel.secretNames() }
+    // **Rows, not names**: a name held in two scopes is two values a person set up, and the count
+    // beside the button has to match the list behind it.
+    val count = remember(changed) { viewModel.secretRows().size }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = when (names.size) {
+                text = when (count) {
                     0 -> "No secrets on this phone, so an article or a tool that names one has " +
                         "nothing to use."
                     1 -> "One secret is kept on this phone, for the host it was added for."
-                    else -> "${names.size} secrets are kept on this phone, each for its own host."
+                    else -> "$count secrets are kept on this phone, each for its own host."
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (names.isEmpty()) {
+                color = if (count == 0) {
                     MaterialTheme.colorScheme.error
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant

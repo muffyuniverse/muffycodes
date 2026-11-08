@@ -41,10 +41,14 @@ import androidx.compose.ui.unit.dp
  * to a host and refuses any other, so the host is part of what the secret *is* rather than a setting
  * beside it. Asking for it here is the only way that rule is true of every secret.
  *
- * **One vault, three scopes.** The app's own keys (the GitHub token, the model key) live in a
- * separate namespace that `auth:` cannot name at all. Everything here is either **all projects** or
- * **one project**, and the row says which — because "why can this project see that token" is a
- * question a person has to be able to answer by looking.
+ * **One vault, three scopes.** The app's own credentials (the git token, the model key) live in a
+ * separate namespace that `auth:` cannot name at all. Everything here is **this account**, **one
+ * project**, or **all projects on every account**, and every row says which — because "why can this
+ * project see that token" is a question a person has to be able to answer by looking.
+ *
+ * **A row is `(scope, name)`, never a name.** A name can be held in two scopes at once, and a list of
+ * names could not say which value its Remove would delete — it deleted the account's whatever the
+ * person was looking at, or nothing at all, and said nothing either way.
  */
 @Composable
 fun SecretsScreen(
@@ -52,9 +56,11 @@ fun SecretsScreen(
     onBack: () -> Unit,
 ) {
     // Read once per visit and after every change, because the list is the thing being edited.
-    var names by remember { mutableStateOf(viewModel.secretNames()) }
+    // **Rows, not names**: a name is not unique across scopes, so only a row can say which value the
+    // Remove beside it will delete and which host it is bound to.
+    var rows by remember { mutableStateOf(viewModel.secretRows()) }
     var adding by remember { mutableStateOf(false) }
-    var removing by remember { mutableStateOf<String?>(null) }
+    var removing by remember { mutableStateOf<SecretRow?>(null) }
     // **A refusal is shown, not dropped.** `saveSecret` returns the sentence to show and this screen
     // used to discard it — so a secret the phone refused to keep looked exactly like one it kept,
     // and the person found out when a request failed. A failure has to say what happened.
@@ -86,7 +92,7 @@ fun SecretsScreen(
                 modifier = Modifier.padding(bottom = 8.dp),
             )
         }
-        if (names.isEmpty()) {
+        if (rows.isEmpty()) {
             Text(
                 "No secrets on this phone yet. The agent's `http` tool and an MCP article both " +
                     "name one of these rather than holding a token of their own.",
@@ -98,10 +104,10 @@ fun SecretsScreen(
             modifier = Modifier.verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            for (name in names) {
+            for (row in rows) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        Text(row.name, style = MaterialTheme.typography.bodyMedium)
                         // **The host is shown, because it is the half of the rule a person has to
                         // be able to check.** A secret whose host was mistyped looks identical in
                         // every other respect, and would refuse the request it was made for.
@@ -109,13 +115,17 @@ fun SecretsScreen(
                         // the two answers, and which one it is decides who can read the value — so
                         // it belongs on the row, not behind a tap.
                         Text(
-                            viewModel.secretHost(name).orEmpty().ifEmpty { "used by this phone only" } +
-                                " · " + scopeLabel(viewModel.scopeOf(name)),
+                            // **The row's own host**, because that is the value's own host. This
+                            // used to ask for the account-scoped one by name, and a project secret
+                            // bound to a host printed "used by this phone only" — the one sentence
+                            // the screen exists to make impossible.
+                            row.host.ifEmpty { "used by this phone only" } +
+                                " · " + scopeLabel(row.scope),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(onClick = { removing = name }) { Text("Remove") }
+                    TextButton(onClick = { removing = row }) { Text("Remove") }
                 }
             }
         }
@@ -137,26 +147,28 @@ fun SecretsScreen(
                     else -> viewModel.saveSecret(name, value, host, scope.projectArg)
                 }
                 said = problem
-                names = viewModel.secretNames()
+                rows = viewModel.secretRows()
                 adding = false
             },
         )
     }
-    removing?.let { name ->
+    removing?.let { row ->
         AlertDialog(
             onDismissRequest = { removing = null },
-            title = { Text("Remove $name?") },
+            title = { Text("Remove ${row.name}?") },
             text = {
                 Text(
-                    "The value is deleted from this phone. Anything that names it will stop " +
-                        "working until a new one is added.",
+                    // **Which row, in the window**, because the same name can be held twice and the
+                    // title alone would leave a person guessing which one the button means.
+                    scopeLabel(row.scope) + ". The value is deleted from this phone. Anything that " +
+                        "names it will stop working until a new one is added.",
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.forgetSecret(name)
-                        names = viewModel.secretNames()
+                        viewModel.forgetSecret(row.name, row.scope)
+                        rows = viewModel.secretRows()
                         removing = null
                     },
                 ) {
@@ -270,37 +282,6 @@ fun AddSecretDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
-
-/**
- * **Which of the four scopes a secret lives in** (§13c.4).
- *
- * This is a type rather than a `String?` because **three scopes cannot be told apart by null**: the
- * old signature used null for "all projects" (the account), and adding general would have needed a
- * second sentinel — a magic project name, or an empty string — which is exactly the kind of
- * indistinguishable-in-code mistake the vault's host rule exists to prevent.
- *
- * **The account scope is still the default**, because it is the narrowest scope that does not name a
- * project: a secret is presumed to belong to the person who typed it.
- */
-sealed interface SecretScope {
-    /** Every project on **this account**. The default. */
-    data object Account : SecretScope
-
-    /** Every project, **whatever the account** — the shared service key. */
-    data object General : SecretScope
-
-    /** One project only. */
-    data class Project(val name: String) : SecretScope
-
-    /**
-     * The `project` argument the store takes: null for account, a name for a project.
-     *
-     * **General is null too**, and that is not a loss: [CredentialStore] stores general under its own
-     * key prefix, so the store is told which method to call by the caller, not by this value.
-     */
-    val projectArg: String?
-        get() = (this as? Project)?.name
 }
 
 /** How a scope reads on a row: the fact, not the null. */

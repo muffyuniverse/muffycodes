@@ -9,6 +9,53 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
+ * **Which of the vault's scopes a value lives in** (§13c.4, extended by `PLAN-credentials`).
+ *
+ * This is a type rather than a `String?` because **three scopes cannot be told apart by null**: the old
+ * signature used null for "all projects" (the account), and adding general would have needed a second
+ * sentinel — a magic project name, or an empty string — which is exactly the kind of
+ * indistinguishable-in-code mistake the vault's host rule exists to prevent.
+ *
+ * It lives beside the store rather than beside the screen because **the store is what answers a row's
+ * scope**, and a screen that computed it from three separate lookups could disagree with the value it
+ * was about to delete.
+ */
+sealed interface SecretScope {
+    /** Every project on **this account**. The default. */
+    data object Account : SecretScope
+
+    /** Every project, **whatever the account** — the shared service key. */
+    data object General : SecretScope
+
+    /** One project only. */
+    data class Project(val name: String) : SecretScope
+
+    /**
+     * The `project` argument the store takes: null for account, a name for a project.
+     *
+     * **General is null too**, and that is not a loss: [CredentialStore] stores general under its own
+     * key prefix, so the store is told which method to call by the caller, not by this value.
+     */
+    val projectArg: String?
+        get() = (this as? Project)?.name
+}
+
+/**
+ * **One row of the vault, addressed by what it is rather than by what it is called.**
+ *
+ * A name is not unique across scopes — one project can hold `stripe` while the account holds another
+ * — so a row that carried only a name could not say which value Remove would delete, and the window
+ * deleted the account's whatever the person was looking at. The scope and the host are read from the
+ * same key the value came from, so they cannot drift from the thing they describe.
+ */
+data class SecretRow(
+    val name: String,
+    /** The host it may be used at, or empty when it is not sent anywhere. */
+    val host: String,
+    val scope: SecretScope,
+)
+
+/**
  * The keys of the stored accounts, as the rest of the app sees them.
  *
  * It is an interface so a test can put an account on a phone without a keystore:
@@ -143,11 +190,45 @@ interface Credentials {
      */
     fun secretNames(): List<String> = emptyList()
 
-    /** Forgets [name], so a value that is no longer wanted cannot be used by anything. */
-    fun forgetSecret(name: String) {}
+    /**
+     * **Every row, with the scope and host each value really has.**
+     *
+     * The window draws these rather than names, because a name alone could not say which of two values
+     * with that name a person is looking at — or which one Remove would delete. The general scope is
+     * included: it used to be filtered out of [secretNames], so a general secret could be created and
+     * then never seen, rotated or removed.
+     *
+     * Empty rather than throwing, like the rest: a store that keeps no named secrets keeps no rows.
+     */
+    fun secretRows(): List<SecretRow> = emptyList()
+
+    /**
+     * Forgets [name] **in [scope]**, so a name held twice loses only the row that was pressed.
+     *
+     * There is no name-only form on purpose: that is the call that removed the account's value while
+     * the person was looking at a project's, and reported nothing.
+     */
+    fun forgetSecret(name: String, scope: SecretScope) {}
 
     /** The host [name] may be used at, or null when there is no such secret. Never the value. */
     fun secretHost(name: String): String? = null
+}
+
+/**
+ * The order two rows with one name are drawn in: the widest first.
+ *
+ * **Widest first, because that is the one a person is usually surprised by.** "This account" and "all
+ * projects, every account" are the rows that can be forgotten only by looking, while a project's is
+ * the one somebody added on purpose.
+ *
+ * A function here rather than in the screen or the store, so the real vault and the fake order rows
+ * the same way — a test that asserted the order of two same-named rows would otherwise be asserting
+ * the fake's opinion.
+ */
+fun scopeOrder(scope: SecretScope): Int = when (scope) {
+    SecretScope.General -> 0
+    SecretScope.Account -> 1
+    is SecretScope.Project -> 2
 }
 
 /** The three things a store can say about a stored key. */
@@ -533,16 +614,84 @@ class CredentialStore(context: Context) : Credentials {
             .sorted()
     }
 
-    /** The host a stored secret is bound to, for a screen that shows where a name may be used. */
+    /**
+     * The host a stored secret is bound to, for a screen that shows where a name may be used.
+     *
+     * **The account-scoped row only**, because a name is not unique across scopes and this cannot say
+     * which one was meant. A screen draws [secretRows], which carries a host per row.
+     */
     override fun secretHost(name: String): String? {
         val login = activeLogin ?: return null
         val stored = prefs.getString(secretKey(login, name), null) ?: return null
         return splitHost(stored)?.first
     }
 
-    override fun forgetSecret(name: String) {
-        val login = activeLogin ?: return
-        prefs.edit().remove(secretKey(login, name)).apply()
+    /**
+     * **The rows, read from the keys themselves.**
+     *
+     * The key prefix *is* the scope and the first line of the value *is* the host, so a row cannot
+     * disagree with the value it describes — which is the defect this replaced: the window asked
+     * `secretHost(name)`, which only ever read the account's key, and printed "used by this phone
+     * only" for a project secret that is sent to a host.
+     *
+     * **No decryption**, so this answers on a locked phone, for the same reason the name list does:
+     * knowing that a value exists is not the same as being able to use it.
+     */
+    override fun secretRows(): List<SecretRow> {
+        val login = activeLogin
+        val rows = ArrayList<SecretRow>()
+        for ((key, value) in prefs.all) {
+            val packed = value as? String ?: continue
+            val host = splitHost(packed)?.first.orEmpty()
+            // **General first, and it is not the account's.** The check is here rather than as an
+            // exclusion in the account branch because general rows are listed **with no account signed
+            // in** — they are the one scope that is not somebody's to hide.
+            if (key.startsWith(GENERAL_PREFIX)) {
+                val name = decode(key.removePrefix(GENERAL_PREFIX)) ?: continue
+                rows.add(SecretRow(name, host, SecretScope.General))
+                continue
+            }
+            if (login == null) continue
+            val projectPrefix = "secret_${login}_project_"
+            val accountPrefix = "secret_${login}_"
+            if (key.startsWith(projectPrefix)) {
+                val middle = key.removePrefix(projectPrefix)
+                val project = decode(middle.substringBeforeLast('/')) ?: continue
+                val name = decode(middle.substringAfterLast('/')) ?: continue
+                rows.add(SecretRow(name, host, SecretScope.Project(project)))
+            } else if (key.startsWith(accountPrefix)) {
+                val name = decode(key.removePrefix(accountPrefix)) ?: continue
+                rows.add(SecretRow(name, host, SecretScope.Account))
+            }
+        }
+        // **By name, then by scope**, so two rows with one name sit together and the wider one reads
+        // first — the order a person scanning for "which one is this" needs.
+        return rows.sortedWith(compareBy({ it.name }, { scopeOrder(it.scope) }))
+    }
+
+    /**
+     * Forgets one row. **The scope decides the key**, so pressing Remove on a project's `stripe`
+     * cannot delete the account's.
+     */
+    override fun forgetSecret(name: String, scope: SecretScope) {
+        when (scope) {
+            SecretScope.General -> prefs.edit().remove(generalSecretKey(name)).apply()
+            SecretScope.Account -> {
+                val login = activeLogin ?: return
+                prefs.edit().remove(secretKey(login, name)).apply()
+            }
+            is SecretScope.Project -> {
+                val login = activeLogin ?: return
+                prefs.edit().remove(projectSecretKey(login, scope.name, name)).apply()
+            }
+        }
+    }
+
+    /** One part of a prefs key, decoded, or null when it was not written by this app. */
+    private fun decode(encoded: String): String? = try {
+        java.net.URLDecoder.decode(encoded, "UTF-8")
+    } catch (e: Exception) {
+        null
     }
 
     /** True when [login] has a token stored. */

@@ -164,7 +164,7 @@ class SecretsScreenTest {
         scene.viewModel.saveSecret("github", "ghp_the_real_token", "api.github.com")
         assertEquals("it is there first", listOf("github"), scene.viewModel.secretNames())
 
-        scene.viewModel.forgetSecret("github")
+        scene.viewModel.forgetSecret("github", SecretScope.Account)
 
         assertEquals("the name is gone", emptyList<String>(), scene.viewModel.secretNames())
         assertNull("and so is the value", scene.credentials.secret("github", "api.github.com"))
@@ -286,6 +286,97 @@ class SecretsScreenTest {
 
         compose.onNodeWithText("acme-api").assertIsDisplayed()
         compose.onNodeWithText("only acme", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * **A general secret is a row like any other, and the window used to hide it.**
+     *
+     * The store listed only keys under `secret_<login>_`, so `secret_general_*` never appeared: the
+     * agent could *use* a general secret, the person could create one, and then it was invisible —
+     * impossible to see, rotate or remove. Measured, not suspected: the fake in `Scenario` merged the
+     * three scopes into its name list, so the suite could not see the difference between the fake and
+     * the phone.
+     */
+    @Test
+    fun `a general secret is listed with its own host, and can be removed`() {
+        scene.project("acme")
+        val problem = scene.viewModel.saveGeneralSecret("shared", "k_1", "api.shared.test")
+        assertEquals("the secret was kept: $problem", null, problem)
+        assertTrue(
+            "and it is a row: ${scene.viewModel.secretRows()}",
+            scene.viewModel.secretRows().any { it.name == "shared" },
+        )
+        screen()
+
+        compose.onNodeWithText("shared").assertIsDisplayed()
+        compose.onNodeWithText("api.shared.test", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("all projects, every account", substring = true).assertIsDisplayed()
+
+        val row = scene.viewModel.secretRows().first { it.name == "shared" }
+        assertEquals("the row knows its scope", SecretScope.General, row.scope)
+        scene.viewModel.forgetSecret(row.name, row.scope)
+        assertTrue(
+            "and Remove removes it, which it could not before: ${scene.viewModel.secretRows()}",
+            scene.viewModel.secretRows().none { it.name == "shared" },
+        )
+    }
+
+    /**
+     * **A project's row names the host the value is really bound to.**
+     *
+     * It said "used by this phone only" for every project secret, because the screen asked
+     * `secretHost(name)`, which only ever read the account's key — a sentence saying a value goes
+     * nowhere, on the screen whose whole purpose is to say where values may go.
+     */
+    @Test
+    fun `a project secret's row names its own host`() {
+        scene.project("acme")
+        val problem = scene.viewModel.saveSecret("acme-api", "tok_1", "api.acme.test", "acme")
+        assertEquals("the secret was kept: $problem", null, problem)
+        screen()
+
+        compose.onNodeWithText("api.acme.test", substring = true).assertIsDisplayed()
+        assertTrue(
+            "and nothing claims it stays on the phone: ${scene.viewModel.secretRows()}",
+            compose.onAllNodesWithText("used by this phone only", substring = true)
+                .fetchSemanticsNodes().isEmpty(),
+        )
+    }
+
+    /**
+     * **A name held in two scopes is two rows, and Remove takes the one it is beside.**
+     *
+     * The window used to call `forgetSecret(name)`, which always removed the *account's* value — so
+     * pressing Remove on a project's secret deleted a different secret, or nothing at all, and said
+     * nothing either way.
+     */
+    @Test
+    fun `removing a project's secret leaves the account's one of the same name`() {
+        scene.project("acme")
+        scene.viewModel.saveSecret("stripe", "acct_key", "api.stripe.com")
+        scene.viewModel.saveSecret("stripe", "proj_key", "api.stripe.com", "acme")
+        assertEquals(
+            "both rows exist: ${scene.viewModel.secretRows()}",
+            2,
+            scene.viewModel.secretRows().count { it.name == "stripe" },
+        )
+
+        val project = scene.viewModel.secretRows().first { it.scope is SecretScope.Project }
+        scene.viewModel.forgetSecret(project.name, project.scope)
+
+        val left = scene.viewModel.secretRows().filter { it.name == "stripe" }
+        assertEquals("one row is left: $left", 1, left.size)
+        assertEquals("and it is the account's", SecretScope.Account, left.single().scope)
+        assertEquals(
+            "whose value still opens",
+            "acct_key",
+            scene.credentials.secret("stripe", "api.stripe.com"),
+        )
+        assertEquals(
+            "and the project's value is gone",
+            null,
+            scene.credentials.secret("acme", "stripe", "api.stripe.com"),
+        )
     }
 
     /**

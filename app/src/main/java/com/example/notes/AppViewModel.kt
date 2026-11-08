@@ -1584,6 +1584,9 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun secretNames(): List<String> = credentials.secretNames()
 
+    /** Every secret as a row: its name, the host it is bound to, and the scope it lives in. */
+    fun secretRows(): List<SecretRow> = credentials.secretRows()
+
     /** The host a secret may be used at, or null when there is no such secret. */
     fun secretHost(name: String): String? = credentials.secretHost(name)
 
@@ -1613,12 +1616,6 @@ class AppViewModel @JvmOverloads constructor(
      * narrowest scope that holds it. Project first, then general, then the account: the same order
      * `secret()` resolves in, so the row cannot claim a scope the lookup would not use.
      */
-    fun scopeOf(name: String): SecretScope = when {
-        credentials.secretProject(name) != null -> SecretScope.Project(credentials.secretProject(name)!!)
-        credentials.generalSecretNames().contains(name) -> SecretScope.General
-        else -> SecretScope.Account
-    }
-
     /**
      * Keeps a **general** secret, and reads it back before saying so.
      *
@@ -1678,9 +1675,9 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** Forgets a secret, so a value that is no longer wanted cannot be used by anything. */
-    fun forgetSecret(name: String) {
-        credentials.forgetSecret(name)
-        Trace.note("secret-forgotten", name)
+    fun forgetSecret(name: String, scope: SecretScope) {
+        credentials.forgetSecret(name, scope)
+        Trace.note("secret-forgotten", "$name (${scopeLabel(scope)})")
         secretSaved++
     }
 

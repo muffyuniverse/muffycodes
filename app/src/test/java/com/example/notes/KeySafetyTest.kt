@@ -480,7 +480,7 @@ class KeySafetyTest {
 
         assertEquals(listOf("github", "linear"), credentials.secretNames())
 
-        credentials.forgetSecret("github")
+        credentials.forgetSecret("github", SecretScope.Account)
         assertEquals("forgetting removes the name", listOf("linear"), credentials.secretNames())
         assertNull(
             "and the value with it",

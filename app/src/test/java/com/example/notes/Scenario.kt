@@ -102,9 +102,40 @@ open class MemoryCredentials : Credentials {
      */
     override fun secretHost(name: String): String? = secretHosts[name]
 
-    override fun forgetSecret(name: String) {
-        secrets.remove(name)
-        secretHosts.remove(name)
+    /**
+     * **Every row, with the scope and host each map really holds** — the three maps are separate here
+     * exactly as the three key prefixes are separate in the real store, so a fake that merged them
+     * would pass a test the phone fails.
+     */
+    override fun secretRows(): List<SecretRow> =
+        (
+            generalSecrets.keys.map { SecretRow(it, generalHosts[it].orEmpty(), SecretScope.General) } +
+                secrets.keys.map { SecretRow(it, secretHosts[it].orEmpty(), SecretScope.Account) } +
+                projectSecrets.keys.map {
+                    SecretRow(
+                        it.substringAfter('/'),
+                        projectHosts[it].orEmpty(),
+                        SecretScope.Project(it.substringBefore('/')),
+                    )
+                }
+            )
+            .sortedWith(compareBy({ it.name }, { scopeOrder(it.scope) }))
+
+    override fun forgetSecret(name: String, scope: SecretScope) {
+        when (scope) {
+            SecretScope.General -> {
+                generalSecrets.remove(name)
+                generalHosts.remove(name)
+            }
+            SecretScope.Account -> {
+                secrets.remove(name)
+                secretHosts.remove(name)
+            }
+            is SecretScope.Project -> {
+                projectSecrets.remove("${scope.name}/$name")
+                projectHosts.remove("${scope.name}/$name")
+            }
+        }
     }
 
     /**
