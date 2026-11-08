@@ -355,3 +355,30 @@ must know who it just signed in.
 
 **What is lost and cannot be replaced:** the app can no longer create a repository on a host, delete one, or
 say what a host built from your tag. Each is a sentence naming the host and what to do there.
+
+## 10. What it measured, after the fact
+
+The estimate above was 3,466 lines. **Measured over the twelve commits from `87ea0e7` to `a22618c`:
+5,615 lines deleted, 869 added, across 34 files** — the difference is the tests that measured the
+deleted behaviour going with it, which the estimate did not count.
+
+Three things the build found that the plan did not predict, recorded because each was a wrong belief:
+
+| belief | what was true |
+|---|---|
+| `TokenScopes` was CI's | its two scopes are about **pushing files** — `workflow` is a git concern — so it stayed |
+| `DiskGitHub` was the test fake to keep | keeping it meant keeping the interface; **`DiskWho`** answers the one question left, and the fixtures make bare repositories by hand, exactly as a host's page does |
+| a dialog can be tested by composing it | **a text field's caret never stops blinking under Robolectric**, so a test that composed one hung, then exhausted the heap for every test after it in the shard. The sentence became a function (`addressNameSaid`) and the rule is tested without a window |
+
+And two failures that were the app's, not the test's — both found by CI and both now guarded:
+
+- **a redraw remade a deleted account's folder.** `refresh()` called `ensure()` unconditionally, so
+  the repaint that follows `removeAccount` recreated the tree — and `AccountStore.exists` is a folder
+  check, so the guard on a queued save found the door open again.
+- **a freshly cloned project arrived with the app's own folders unsent.** `addProjectFromUrl` wrote
+  the folder markers and did not commit them, so a person's first look at a project they had just
+  added was "3 to send" of the app's own bookkeeping.
+
+**The order the plan insisted on was right.** Doing V6 after V5 meant every deleted feature was
+already replaced by a working one; nothing was ever removed while its replacement was unbuilt, and
+each commit on its own was a smaller, green step.
