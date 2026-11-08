@@ -5658,7 +5658,14 @@ class AppViewModel @JvmOverloads constructor(
         // branch does not exist, holding the system link and whatever was checked out.
         val removed = outcome.getOrNull()
         if (removed != null) {
-            Worktrees(workspace ?: return).remove(project, removed)
+            val ws = workspace ?: return
+            Worktrees(ws).remove(project, removed)
+            // **The session goes with it.** A session whose tree is gone is one the tick would remove
+            // on its next pass anyway — but between now and then the screen still offers a
+            // conversation, and a `put` in that window would recreate the folder through
+            // `AgentLog.open`, resurrecting a worktree whose branch no longer exists.
+            AgentSessions(ws.accountDir).remove(project, removed)
+            agentSessions = AgentSessions(ws.accountDir).read()
             // **If the person is standing in it, back to main.** Deleting the tree under an open
             // screen leaves every path resolving into a folder that is gone.
             if (activeBranch == removed) backToMain()
