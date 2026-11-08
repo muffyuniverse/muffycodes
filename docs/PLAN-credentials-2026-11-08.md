@@ -91,10 +91,23 @@ Two kinds, one entry per kind per scope:
 | **git** | token, git user (the name a commit is made as), the host the token is for | `ProjectGit` when it pushes, pulls, `ls-remote`s |
 | **llm** | key, provider base URL | `Door`, `Embedder`, `Scanner`, `ModelCatalogue` |
 
-Scopes: **branch → project → account.** No general scope, deliberately: a credential is an *identity*, and
-the phone has no identity of its own — every request is made as somebody. (The provisional account is still
-an account.) General belongs to Vault A, where a shared service key is a fact about the app rather than
-about a person.
+Scopes: **branch → project → account**, plus **general** — and general exists for exactly one thing, which
+the operator's correction made visible: **embedding and rerank are app-wide**. They are the ones a key
+belongs to the phone rather than to a person, because there is one vector space per app and an index built
+by one identity must be readable by the next (see §3.4). The chat model never uses the general scope: every
+chat request is made *as* somebody.
+
+**A scope's entry is a connection and a choice, and the two inherit differently.** The address and the key
+travel together and are atomic; the model id and the effort inherit independently:
+
+| field | inherits on its own? | why |
+|---|---|---|
+| **address + key** | **no** — a scope has its own pair or inherits the whole pair | a key is bound to one host. A project with its own address and an inherited key would send that key to a host it was never stored for — the one hole this vault exists to close |
+| **model id, effort, window, reply** | **yes**, field by field | a model id is portable (it is the person's business whether that server serves it), so changing only the model must not mean re-typing the key — which would put a second copy of a secret on the phone |
+
+So a window opens showing what the scope *would* use, the person changes any field, and **leaving a field
+alone writes nothing for it** — that is what "save as inherited" means, and it is why the window has no
+"inherit" switch: the absence of a local value *is* the inheritance.
 
 **Not nameable by `auth:`** unless the checkmark below is ticked. That is the security property the current
 namespace already has, kept.
@@ -185,16 +198,33 @@ reason the GitHub device flow was kept: it is a door onto a registration process
 so a branch-level embedding choice would silently invalidate an index built by another branch. The chat
 model may differ per branch; the vectors may not.
 
-### 3.5 Model selection moves to the branch — with the account as the default
+### 3.5 The chat model is chosen at the scope that runs it — and Settings holds none
 
-- `model_conf.json` at the account root keeps the **default** — what a new branch inherits, and what the
-  service polls with when a branch says nothing. It also keeps the embedding/rerank choices.
-- A branch's override (connection, model, effort) lives in the branch's own app state, `.muffy/` beside
-  `agents.json` — gitignored, never sent, a name rather than a value.
-- The runner already reads the model **per request** (`AgentWiring.kt:132`), so this is a seam, not a
-  redesign.
-- Settings keeps one row — *Default model* — plus the connections it can pick from. Add/remove belong to
-  the window the row opens, which is the shape the model picker already has.
+**Settings is the app's own settings, not any account's.** It keeps the embedding and rerank model (with
+their own key and endpoint, exactly as a scoped chat connection has) and nothing about chat.
+
+The chat model is chosen **per account, per project, per branch** — in the window that adds the thing, and
+in the ⋮ settings window of the row afterwards. Each window opens on the values it inherits and lets the
+person change any of them (§2.2's table says which fields inherit independently).
+
+**Why the account is not the same as general.** An account is an identity; a project is one repository; a
+branch is one working tree. Chat *is* per identity — the log says who spent the tokens — so the account is
+the widest place a chat choice can live, and a new account asks for one. That is also why the service polls
+correctly with no "default model" anywhere: it polls as an account, so it asks that account.
+
+**Consequences, stated rather than discovered later:**
+
+- `model_conf.json` keeps only `embedding` and `rerank`. Its `active` block, and with it `ModelChoice`, the
+  `models` list, `providers`, `providersOf` and `ModelSection`'s chat rows, **go**: C2 stopped sending
+  provider tags, so the list only ever fed a pin that no longer exists.
+- **`ContextBudget.CEILINGS` loses its key.** It is a table of measured ceilings indexed by *provider tag*,
+  and there are no tags left to index. The numbers move to where they already half lived — stored with the
+  choice (`contextLength`, `maxOutput`) and filled from the endpoint read when a picker is used — and a
+  choice nobody measured falls through the existing ladder to the floor. Deleting the table without saying
+  where its numbers went would be losing a measurement, so the measured values move into the endpoint read's
+  defaults rather than into a table nothing indexes.
+- The runner already reads the model **per request** (`AgentWiring.kt:132`), and a session is already keyed
+  `project/branch`, so this is a seam rather than a redesign.
 
 ---
 
@@ -227,10 +257,10 @@ and a column nobody reads is not a compatibility problem).
 | **C0** | One row per `(scope, name)`: `secretRows()`, rows carry their own host and scope, general secrets listed, Remove acts on the row's scope. Fixes the three defects in §1.1. | **this run** |
 | **C1** | `VaultScope` gains `Branch`; the store, the picker and `ProjectGit` learn it. `GitCredentials` asks by branch. | not started |
 | **C2** | Generic model layer: base URL from the connection, drop `provider.only`/`allow_fallbacks`/`reasoning.exclude`, add `stream_options.include_usage`, catalogue optional. `model_conf.json` gains `baseUrl`. | not started |
-| **C3** | Vault B: `conn_<scope>_<kind>` with the account entry seeded from today's `token_`/`model_key_`; the ⋮ windows on account/project/branch rows; `ProjectGit` and the runner read it narrowest-first. | not started |
+| **C3** | Vault B: `conn_<scope>_<kind>` (kind `git` \| `llm`, scope branch/project/account/general), the account entry seeded from today's `token_`/`model_key_`; the ⋮ windows on account/project/branch rows; `ProjectGit` and the runner read it narrowest-first. Per §2.2 the address+key are atomic and model/effort inherit field by field. | not started |
 | **C4** | The two checkmarks, off by default; `auth:` resolves a Vault B entry only when ticked and only for its host; the agent's tool description lists what it may name. | not started |
 | **C5** | Cost removal (§4). | not started |
-| **C6** | Settings shrinks to *Default model*; add/remove move into the connection window. | not started |
+| **C6** | Settings holds **no chat model at all**: it keeps embedding and rerank (key + endpoint + model + dimension). `model_conf.json` drops `active` and the `models` list; `ModelSection`'s chat rows, `ModelChoice`, `providers`/`providersOf` and the tag-keyed `ContextBudget.CEILINGS` go with them (§3.5). | not started |
 
 **Why C0 first.** It is the only step that fixes sentences the app is currently saying falsely, it is
 small, and every later step addresses a row by scope — so the addressing has to be right before a fourth
