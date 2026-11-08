@@ -54,7 +54,7 @@ class ProbeTest {
 
         assertTrue("it says it did not work: $said", "did not answer" in said)
         assertTrue("and repeats what the server said: $said", "reasoning_effort" in said)
-        assertTrue("including the status: $said", "400" in said)
+        assertTrue("including the status, which says where to look: $said", "(400)" in said)
     }
 
     @Test

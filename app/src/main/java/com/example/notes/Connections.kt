@@ -161,14 +161,20 @@ fun namedConnection(
     kind: ConnKind,
     project: String?,
     branch: String?,
-    at: (SecretScope) -> Connection?,
+    /**
+     * The row at a scope **for this kind**, or null.
+     *
+     * **The kind is a parameter of the question rather than a field of the row**, because a row's kind
+     * is in its key and nowhere else — so a lookup that took only a scope would answer the *llm* row
+     * for `auth: git`, and `namedConnection` would have returned a model key for a push. The caller is
+     * the one that knows how to ask; this function is the one that decides whether the answer counts.
+     */
+    at: (SecretScope, ConnKind) -> Connection?,
 ): Connection? {
     val scope = connectionScope(project, branch) { one ->
-        at(one)?.let {
-            it.nameable && hostCovers(hostOfAddress(it.address), host) && kindFor(name) == kind
-        } == true
+        at(one, kind)?.let { it.nameable && hostCovers(hostOfAddress(it.address), host) } == true
     } ?: return null
-    return at(scope)
+    return at(scope, kind)
 }
 
 /**
@@ -290,6 +296,10 @@ fun wiredFor(
     accountKeyState: () -> KeyState = { KeyState.NONE },
 ): Wired {
     val chain = connectionScopes(project, branch).filter { it != SecretScope.General }
+    // **The account is asked like any other scope**, and its records are the floor rather than a
+    // scope of their own: a row there is a person saying "not the account's own pair", and a pair at
+    // branch or project scope says "not either of those". That is one rule with three stopping
+    // points, where a special case for the account would have been a second rule to keep in step.
     // **A scoped pair is used only when its row is complete**, and the account is the answer otherwise —
     // so the walk always ends rather than falling off the end into an empty scope. "Complete" is an
     // address and a model: the address is the credential for this kind (there is no other record of
@@ -300,12 +310,13 @@ fun wiredFor(
     // **A blank key is complete, though.** A model server on this phone wants no key at all, and that
     // is a whole credential rather than half of one — see [Wired.keyless].
     val at = chain.firstOrNull { scope ->
-        if (scope == SecretScope.Account) return@firstOrNull true
         val pair = connectionAt(scope) ?: return@firstOrNull false
         pair.address.isNotBlank() &&
             choiceScopes(project, branch, scope).firstNotNullOfOrNull(choiceAt) != null
     } ?: SecretScope.Account
-    val stored = if (at == SecretScope.Account) null else connectionAt(at)
+    // **No row at the account means the account's own records are the pair**, which is where they
+    // live today: `model_key_` and the address in `model_conf.json`.
+    val stored = connectionAt(at)
     val address = stored?.address?.trim()?.takeIf { it.isNotEmpty() } ?: account.baseUrl
     val choice = choiceScopes(project, branch, at).firstNotNullOfOrNull(choiceAt)
 

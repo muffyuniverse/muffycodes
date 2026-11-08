@@ -186,8 +186,13 @@ open class MemoryCredentials : Credentials {
     private val connections = LinkedHashMap<String, Connection>()
     private val choices = LinkedHashMap<String, Choice>()
 
+    /**
+     * **Every scope keys a row, the account included** — a row there is a person saying "not the
+     * account's own records", which is a thing the phone can now store. A fake that refused it would
+     * have hidden exactly the case the store was changed for.
+     */
     private fun connKey(scope: SecretScope, kind: ConnKind): String? = when (scope) {
-        SecretScope.Account -> null
+        SecretScope.Account -> "account/${kind.name}"
         SecretScope.General -> "general/${kind.name}"
         is SecretScope.Project -> "project_${scope.name}/${kind.name}"
         is SecretScope.Branch -> "branch_${scope.project}/${scope.branch}/${kind.name}"
@@ -210,7 +215,7 @@ open class MemoryCredentials : Credentials {
     override fun spendable(name: String, host: String, project: String?, branch: String?): String? {
         val kind = kindFor(name) ?: return null
         if (host.isBlank()) return null
-        return namedConnection(name, host, kind, project, branch) { connection(it, kind) }
+        return namedConnection(name, host, kind, project, branch) { at, of -> connection(at, of) }
             ?.secret
             ?.takeIf { it.isNotBlank() }
     }

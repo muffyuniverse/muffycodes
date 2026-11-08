@@ -108,7 +108,9 @@ class ConnectionDraftTest {
             address = "https://models.example.org/v1",
             model = "m",
             shapeUrl = "chat/completions",
-            shapeBody = """{"model": "{{model}}",}""",
+            // **Not JSON at all**, rather than a trailing comma: Android's parser tolerates that one,
+            // which is exactly the sort of acceptance a test must not rely on.
+            shapeBody = """{"model": """,
         ).problemSaid()
 
         assertTrue("it refuses: $said", said != null)
@@ -138,7 +140,7 @@ class ConnectionDraftTest {
             model = "llama3",
             shapeKind = ShapeKind.CHAT,
             shapeUrl = "api/chat",
-            shapeBody = """{"model":"{{model}}","messages":{{messages}},"stream":{{stream}}}""",
+            shapeBody = """{"model":"{{model}}","messages":"{{messages}}"}""",
         )
 
         val shape = draft.connection()?.shapeFor(ShapeKind.CHAT)

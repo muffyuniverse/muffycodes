@@ -300,7 +300,7 @@ interface Credentials {
     fun spendable(name: String, host: String, project: String?, branch: String?): String? {
         val kind = kindFor(name) ?: return null
         if (host.isBlank()) return null
-        return namedConnection(name, host, kind, project, branch) { connection(it, kind) }
+        return namedConnection(name, host, kind, project, branch) { at, of -> connection(at, of) }
             ?.secret
             ?.takeIf { it.isNotBlank() }
     }
@@ -1113,7 +1113,13 @@ class CredentialStore(context: Context) : Credentials {
      * in the account's own records — one record each, which is the point of the vault.
      */
     private fun connPrefix(login: String?, scope: SecretScope): String? = when (scope) {
-        SecretScope.Account -> null
+        // **The account may hold one, and what that means is worth saying.** Its *floor* is the
+        // account's own records — the sign-in token or the model key, and the address in
+        // `model_conf.json` — so a row here is a person saying "not those". Storing it is the same act
+        // as at any other scope, which is why this is not a special case in the reader either: the
+        // chain asks for a row at each scope in turn and the account's records are what answers when
+        // this scope has none.
+        SecretScope.Account -> login?.let { "conn_${it}_account_" }
         SecretScope.General -> "conn_general_"
         // **No login, no row.** Every scope but general belongs to an identity, and a key written
         // with the word "null" in it would be a row nobody could ever read again.

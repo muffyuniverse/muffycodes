@@ -380,7 +380,9 @@ class ConnectionsTest {
         // chat's, and a server that speaks all three would have been told how to answer one.
         val ollama = Shape(
             url = "/api/chat",
-            body = JSONObject("""{"model":"{{model}}","messages":{{messages}},"stream":{{stream}}}"""),
+            // **A template, not a document**: a placeholder is a whole value, so the field that
+            // carries one holds the quoted placeholder and the app puts an object there.
+            body = JSONObject("""{"model":"{{model}}","messages":"{{messages}}"}"""),
             kind = ShapeKind.CHAT,
         )
         val connection = Connection(
@@ -457,7 +459,7 @@ class ConnectionsTest {
         kind = kindFor(name) ?: ConnKind.LLM,
         project = project,
         branch = branch,
-        at = { connections[it] },
+        at = { scope, _ -> connections[scope] },
     )
 
     @Test
@@ -531,5 +533,42 @@ class ConnectionsTest {
             named("git", "gitlab.com", grant + (branch to grant.getValue(branch).copy(nameable = false)))
                 ?.secret,
         )
+    }
+
+    @Test
+    fun `the account may hold a row, and its records are the floor rather than a scope`() {
+        // **One rule with three stopping points.** The account is asked like any other scope; a row
+        // there is a person saying "not the account's own pair", and its own records — the model key
+        // and the address in `model_conf.json` — are what answers when there is none. A special case
+        // for the account would have been a second rule to keep in step with this one.
+        val stored = mapOf(
+            SecretScope.Account to Connection("https://elsewhere.example/v1", "sk-other"),
+        )
+        val chosen = mapOf(SecretScope.Account to Choice("their-model"))
+
+        val wired = asked(connections = stored, choices = chosen)
+
+        assertEquals(SecretScope.Account, wired.at)
+        assertEquals("the account's own row wins over its records", "their-model", wired.active.model)
+        assertEquals("https://elsewhere.example/v1", wired.active.baseUrl)
+        // **The key is the row's, not the account's**, which is what "a pair travels together" means
+        // in a place a person can see it.
+        assertEquals("sk-other", wired.key())
+    }
+
+    @Test
+    fun `a row the account cannot use falls back to its records`() {
+        // The same completeness rule at the widest scope: a row naming a server and no model is not in
+        // force, so the account's own model and address answer — which is the answer as if the row had
+        // never been made.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Account to Connection("https://elsewhere.example/v1", "sk-other"),
+            ),
+        )
+
+        assertEquals(account.model, wired.active.model)
+        assertEquals(account.baseUrl, wired.active.baseUrl)
+        assertEquals("sk-the-account-key", wired.key())
     }
 }

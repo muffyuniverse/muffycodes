@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.After
@@ -66,6 +67,8 @@ class BranchesScreenTest {
         var entered: String? = null
         var added = 0
         var removed: String? = null
+        var model: String? = null
+        var git: String? = null
         var backed = 0
     }
 
@@ -83,6 +86,8 @@ class BranchesScreenTest {
                     onEnter = { taps.entered = it },
                     onAdd = { taps.added++ },
                     onRemove = { taps.removed = it },
+                    onModel = { taps.model = it },
+                    onGit = { taps.git = it },
                     onBack = { taps.backed++ },
                 )
             }
@@ -100,15 +105,22 @@ class BranchesScreenTest {
 
     @Test
     fun `main does not offer Remove, because it is what a project is made of`() {
-        // **A button that always refuses is worse than no button.** `deleteBranch` refuses `main`, so
-        // drawing Remove beside it would offer an act that cannot happen.
+        // **A menu item that always refuses is worse than no item.** `deleteBranch` refuses `main`, so
+        // drawing Remove in its menu would offer an act that cannot happen — and a branch's menu is
+        // where removal lives now that the row also carries its two credentials.
         val t = Taps()
         branches(taps = t)
 
-        // One Remove and one only: the row that is not main. `onNodeWithText` throws when several
-        // match, so this passing at all is half the assertion.
-        compose.onNodeWithText("Remove").assertIsDisplayed().performClick()
+        // **main's menu has the two credentials and nothing else.**
+        compose.onAllNodesWithContentDescription("More")[0].performClick()
+        compose.onNodeWithText("Model connection…").assertIsDisplayed()
+        compose.onNodeWithText("Remove…").assertDoesNotExist()
+        compose.onNodeWithText("Model connection…").performClick()
+        assertEquals("the row that was opened is main", "main", t.model)
 
+        // And the other row's menu offers Remove, naming the branch it would remove.
+        compose.onAllNodesWithContentDescription("More")[1].performClick()
+        compose.onNodeWithText("Remove…").assertIsDisplayed().performClick()
         assertEquals("the only removable branch was named", "feature", t.removed)
     }
 

@@ -50,6 +50,12 @@ object Probe {
         "The server answered, so it is reachable, the key was accepted and it serves " +
             "${request.model}. The shape fits."
     } catch (e: Throwable) {
-        "The server did not answer as this connection expects: ${Secrets.explain(e, "It refused")}"
+        // **The status is named when the door carried one**, because `Refused` keeps only the
+        // server's sentence in its message: 401 (the key), 404 (the path the shape names) and 400 (a
+        // field the server will not take) send a person to three different places, and the number is
+        // the fastest way to tell them apart.
+        val code = (e as? Refused)?.code?.let { " ($it)" }.orEmpty()
+        "The server did not answer as this connection expects$code: " +
+            Secrets.explain(e, "It refused")
     }
 }
