@@ -545,7 +545,9 @@ class ProjectsFeatureTest : FeatureTest() {
             assertTrue("the tag exists", ref != null)
             // **The tag object's own message**, which is what makes it annotated rather than a bare
             // pointer: a note that did not become part of the tag would be a field that does nothing.
-            val message = repo.objectDatabase.open(ref!!.`object`).shortMessage
+            // **`AnyObjectId`, which a tag's object id already is** — `Ref.objectId` answers one, and
+            // `ObjectLoader.shortMessage` is the tag's own annotation.
+            val message = repo.objectDatabase.open(ref!!.objectId).shortMessage
             assertEquals("and carries what the person wrote", "the first one", message)
         }
     }
