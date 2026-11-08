@@ -218,14 +218,17 @@ class ModelCatalogueTest {
         // **The operator's correction, as a test.** I had concluded there were no embedding models
         // because I only looked at `/api/v1/models`. There are three catalogues, the payloads are the
         // same shape, and so the generalization is a URL rather than a parser.
-        assertEquals("chat", "/api/v1/models", CatalogueKind.CHAT.path)
-        assertEquals("embedding", "/api/v1/embeddings/models", CatalogueKind.EMBEDDING.path)
+        // **Below the connection's base URL, not beside it.** The base already ends in `/v1` — that
+        // is what an OpenAI-compatible address looks like — so a path carrying `/api/v1` too asked a
+        // server of one's own at `https://x/v1/api/v1/models`, which is a 404 nobody could explain.
+        assertEquals("chat", "/models", CatalogueKind.CHAT.path)
+        assertEquals("embedding", "/embeddings/models", CatalogueKind.EMBEDDING.path)
         // **A query parameter for rerank**, because rerank models are chat models filtered by what
         // they can output — which is why the "path" argument has to be a whole path with its query
         // rather than a segment the class appends.
         assertTrue(
             "rerank is filtered, not a folder: ${CatalogueKind.RERANK.path}",
-            CatalogueKind.RERANK.path.startsWith("/api/v1/models?output_modalities="),
+            CatalogueKind.RERANK.path.startsWith("/models?output_modalities="),
         )
     }
 
