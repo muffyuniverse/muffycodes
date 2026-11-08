@@ -187,20 +187,158 @@ class ScriptedDoor(vararg script: Reply) : Door {
     val pings = mutableListOf<Request>()
 
     override fun turn(request: Request): Result<Reply> {
+        asked.add(request)
+        val next = replies.removeFirstOrNull()
+            ?: return Result.failure(IllegalStateException("the script ran out of replies"))
+        return Result.success(next)
+    }
+
+    override fun ping(request: Request): Result<Unit> {
+        pings.add(request)
+        return Result.success(Unit)
+    }
+}
+
+/**
+ * The real door: one pinned endpoint, no fallback, no autorouting.
+ *
+ * `provider.only` names one **tag**, never a provider's base slug — a base slug matches every
+ * endpoint that provider runs, so writing one would quietly turn the pin back into autorouting
+ * inside that provider. `allow_fallbacks` is false for the same reason: this app's answer to a
+ * provider that is down is to stop and say so, not to spend the operator's money on a different
+ * model than the one they chose.
+ *
+ * `tool_choice` is `auto` and never a forced function. Measured: the pinned endpoints report
+ * `supports_tool_choice: {auto: true, function: false}`, so the forced form would be refused by
+ * at least one of them — and this app must behave the same whichever one is active.
+ *
+ * **Reasoning is not excluded, and it is sent back.** It used to be excluded outright: the tokens
+ * were generated, billed, and then thrown away unseen, which is the worst of both. Streaming fixed
+ * the first half — reasoning arrives *first*, while the model is thinking and before it has written
+ * anything, which makes "diligent" observable: a connection that has died is silent, a model working
+ * hard is not. That is the distinction the idle timeout has to make.
+ *
+ * **The second half is a reversal, and the operator made it.** This class used to say, in as many
+ * words, that nothing the model thought is ever sent back to it as something it said — the reasoning
+ * went to the footer and no further. That is tidy and it is wrong: a thinking-mode model answers the
+ * *next* request with `400 The reasoning_content in the thinking mode must be passed back to the
+ * API`. The provider's contract is that the reasoning is part of the assistant turn, so it is stored
+ * with the turn and replayed with it.
+ *
+ * **Kept apart from [Streamed.said] still**, and that part survives: the two are different things
+ * everywhere they are read. The bubble shows what was said, the footer counts what was thought, and
+ * the request puts each in its own field — the model never reads its own reasoning as prose it wrote.
+ */
+class OpenRouterDoor(
+    private val key: () -> String?,
+    private val model: String,
+    /**
+     * **Which upstream answered, for the log and the footer** — not a routing instruction.
+     *
+     * It used to be a pin sent as `provider.only`, with a ladder over the model's endpoint tags.
+     * Both are gone: the address below *is* the upstream, so a second one is a second connection
+     * rather than a second tag. What remains is the name a person recognises, written into the
+     * request log so "who answered" can still be compared.
+     */
+    private val provider: String,
+    /**
+     * **The connection this door speaks to** — the base URL, `/chat/completions` appended.
+     *
+     * Defaulted to OpenRouter's, so every existing caller and test keeps working; the wiring passes
+     * the account's (`ActiveModel.baseUrl`), which is what makes any OpenAI-compatible endpoint usable.
+     */
+    private val baseUrl: String = OPENROUTER_BASE,
+    private val effort: String,
+    /**
+     * The project these requests belong to, so the log can say who spent the money.
+     *
+     * **Empty by default**, which keeps every existing caller and test working and is the honest
+     * answer for a door built without one - a keepalive, or a test. It is not a permission: nothing
+     * is scoped by this, it is only recorded.
+     */
+    private val project: String = "",
+    private val timeoutMs: Int = 120_000,
+    /**
+     * How long after sending, until **anything at all** comes back, and how long a gap inside an
+     * answer may last.
+     *
+     * **One number, on the operator's instruction**: "lets merge connection and stalling timeouts
+     * into a single response timeout that tracks time between request and first response packet" -
+     * and, asked what bounds a mid-answer death, "one number that also restarts per packet". So it
+     * is an idle timeout in the strict sense: the first packet is bounded by it, and every gap after
+     * that is bounded by it too, which is what makes a model that is thinking safe and a connection
+     * that died caught.
+     */
+    private val responseMs: Int = 120_000,
+    /**
+     * What the store can say about the key, for the sentence when there is no token.
+     *
+     * Defaulted from [key] so the two cannot disagree in a test that only supplies a key, and
+     * supplied for real by the wiring, which asks the store once per request.
+     */
+    private val keyState: () -> KeyState =
+        { if (key() != null) KeyState.READABLE else KeyState.NONE },
+    /**
+     * Where each response's statistics go, or null when nobody is keeping them.
+     *
+     * **A parameter, and nullable, because the log is evidence and never a dependency.** A door
+     * built by a test has no account folder to write into and must still work; a door built by the
+     * wiring has one, and every answer it receives — including the ones a ping throws away — is
+     * written down. Called from the thread that already has the numbers, so nothing is copied and
+     * no second pass over the reply is needed.
+     */
+    private val onStats: ((RequestLog.Stats) -> Unit)? = null,
+) : Door {
+
+    /**
+     * How a person is told what is happening **while it is happening.**
+     *
+     * Null by default, which is the same answer as "nobody is watching": a turn run for the
+     * background, or by a test, has no screen to draw a footer on, and a listener that was required
+     * would make every caller write an empty one.
+     *
+     * Called from the reading thread, once per chunk, **with the stream itself** — so a listener
+     * that wants the running character count reads it rather than being handed a number that would
+     * then be a second copy of the same fact.
+     */
+    var listener: ((Streamed, Long) -> Unit)? = null
+
+    /**
+     * **Called once per finished reply**, with the words it produced.
+     *
+     * Separate from [listener] because the two have different clocks, and the operator named both:
+     * "only footer token numbers should be updated on every chunk" and "one full reply seems like
+     * the best point to update dispayed text".
+     *
+     * A reply is the unit the record uses - it becomes a page - so this is the boundary at which
+     * the screen and the record agree about what has been said.
+     */
+    var onReply: ((String) -> Unit)? = null
+
+    /**
+     * The turn, **read as it arrives.**
+     *
+     * The request asks for `stream: true` and the body is a sequence of events rather than one
+     * JSON document. Everything the answer is made of is joined by [Streamed], so the reply this
+     * returns is the same shape a non-streamed one would have been — the difference is that it was
+     * assembled instead of parsed, and that the listener saw it happen.
+     */
+    override fun turn(request: Request): Result<Reply> {
         // **One connection, one attempt, and no ladder.**
         //
-        // There used to be a fallback here: `provider.only` pinned an upstream and this walked the
-        // model's provider list, trying the next on an endpoint failure. That ladder was OpenRouter's
-        // idea of a *second machine behind one address*, and it cannot survive this app's rule — the
-        // address is now the connection (`PLAN-credentials` C2), so a different machine is a different
-        // base URL, which is a different connection the person chose.
+        // There used to be a fallback here: a provider tag was pinned and this walked the model's
+        // list, trying the next on an endpoint failure. That ladder was a *second machine behind one
+        // address*, and it cannot survive this app's rule — the address is now the connection
+        // (`PLAN-credentials` C2), so a different machine is a different base URL, which is a
+        // different connection the person chose.
         //
         // **What is not lost:** reconnection. That is the session's ladder (`AgentSession`), which
         // knows how long an outage has gone on and whether retrying has earned anything; it always
-        // worked on the same connection and still does. The claim my own note to the operator got
-        // wrong is worth recording: "the app has no fallback" was false — it had this one.
-        val began = System.currentTimeMillis()
-        return turnFrom(request, began)
+        // worked on the same connection and still does.
+        //
+        // The failure path still writes a row, so the start time is taken here rather than inside
+        // `turnFrom` — a stall is recorded where it happened.
+        return turnFrom(request, System.currentTimeMillis())
     }
 
     private fun turnFrom(request: Request, began: Long): Result<Reply> = try {
@@ -319,16 +457,16 @@ class ScriptedDoor(vararg script: Reply) : Door {
      * Two rules live in these lines and nowhere else, and both are protocol rather than vendor:
      *
      * - **`stream_options.include_usage`** is how a *streamed* answer reports its tokens. `usage` is
-     *   part of the protocol, but on a stream it arrives only when asked for: one extra final chunk
-     *   with `choices: []` carrying the whole request's totals. The app worked without it because
-     *   OpenRouter sends usage unbidden; against a strict compatible endpoint every token column
-     *   would stay empty, which is a silence rather than an error.
+     *   part of the protocol, but on a stream most servers send it only when asked: one extra final
+     *   chunk with `choices: []` carrying the whole request's totals. The app worked without this
+     *   line because OpenRouter sends usage unbidden — against a strict compatible endpoint every
+     *   token column would quietly stay empty, which is a silence rather than an error.
      * - **`reasoning_effort`** is OpenAI's own spelling, and it is what a model that reasons reads.
      *
-     * What is **not** here any more, and why: `provider.only` and `allow_fallbacks` were OpenRouter's
-     * routing — the address is now the connection, so there is no upstream to pin. `reasoning.exclude`
-     * was its switch for throwing reasoning away, and the app wants the reasoning streamed, because it
-     * is the liveness signal that tells a diligent model from a dead connection.
+     * What is **not** here any more: `provider.only` and `allow_fallbacks` were OpenRouter's routing,
+     * and the address is now the connection, so there is no upstream to pin. `reasoning.exclude` was
+     * its switch for throwing reasoning away, and the app wants the reasoning streamed, because it is
+     * the liveness signal that tells a diligent model from a dead connection.
      */
     internal fun body(request: Request, maxTokens: Int? = null): JSONObject {
         val body = JSONObject()
@@ -648,8 +786,8 @@ class ScriptedDoor(vararg script: Reply) : Door {
         const val PING_TOKENS = 1
 
         /** The one endpoint this app talks to. A constant because two functions now open it. */
-        // **No ENDPOINT here any more.** The address is the connection's ([baseUrl]), because a
-        // second host is a second connection rather than a second constant.
+        // **No ENDPOINT here any more.** The address is the connection's ([baseUrl]): a second host
+        // is a second connection rather than a second constant.
 
         /**
          * A socket that will not open is a network that is not there, and no amount of waiting
