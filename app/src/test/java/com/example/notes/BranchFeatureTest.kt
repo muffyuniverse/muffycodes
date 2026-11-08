@@ -99,6 +99,8 @@ class BranchFeatureTest : FeatureTest() {
         // and not a special case elsewhere. `backToMain` is private on purpose: the account switches
         // call it for their own reasons, and a screen that could set the branch directly would be a
         // second door into the redirection.
+        // **Through the screen, in the order a person does it**: the project's rows, then `main`.
+        scene.viewModel.openBranches(project)
         scene.viewModel.enterBranch("main")
         scene.await("main's files to open") { scene.viewModel.activeBranch == "main" }
 
