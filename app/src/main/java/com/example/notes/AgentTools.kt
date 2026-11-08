@@ -270,14 +270,6 @@ class AgentTools(
      */
     private data class Seen(val path: String, val picture: Look.Seen)
 
-    /**
-     * What a workflow file can reach, and whether a person has sealed it.
-     *
-     * **It holds nothing and stores nothing.** The approval is the person's lock, which
-     * `Workspace` already keeps account-relative and already enforces on the agent's writes — so
-     * there is no second store here and nothing to keep in step with the lock file.
-     */
-    private val workflows: Workflows get() = Workflows()
 
     /**
      * The part of it that lives on GitHub — **which is the project's folder itself.**

@@ -1,5 +1,7 @@
 package com.example.notes
 
+import org.eclipse.jgit.revwalk.RevTag
+import org.eclipse.jgit.revwalk.RevWalk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -545,10 +547,12 @@ class ProjectsFeatureTest : FeatureTest() {
             assertTrue("the tag exists", ref != null)
             // **The tag object's own message**, which is what makes it annotated rather than a bare
             // pointer: a note that did not become part of the tag would be a field that does nothing.
-            // **`AnyObjectId`, which a tag's object id already is** — `Ref.objectId` answers one, and
-            // `ObjectLoader.shortMessage` is the tag's own annotation.
-            val message = repo.objectDatabase.open(ref!!.objectId).shortMessage
-            assertEquals("and carries what the person wrote", "the first one", message)
+            // **The tag object, walked rather than opened raw.** `ObjectLoader` has no message in this
+            // JGit; a `RevTag` is the parsed form, and its message is the annotation.
+            RevWalk(repo).use { walk ->
+                val tag = walk.parseTag(ref!!.objectId) as RevTag
+                assertEquals("and carries what the person wrote", "the first one", tag.fullMessage.trim())
+            }
         }
     }
 
