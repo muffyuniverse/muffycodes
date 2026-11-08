@@ -146,6 +146,40 @@ class BranchFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the strip counts the branch's unsent work, not main's`() {
+        // **"up to date" is the claim this app must never get wrong.** The strip is drawn from the
+        // project's count, which is main's — so on a branch with a file waiting to be sent it said the
+        // project was up to date, and the person had no way to learn otherwise from that screen.
+        val project = projectWithABranch()
+        scene.viewModel.enterBranch("feature")
+        scene.await("the branch's files to open") { scene.viewModel.path == listOf(project) }
+        val branchFile = File(scene.workspace!!.treeOf(project), "milk.txt")
+        scene.openEditor(branchFile)
+        scene.saveEditor("three litres\n")
+        scene.await("the branch's count to move") { scene.viewModel.changesHere > 0 }
+        // **The premise, asserted**: main really does have nothing waiting, so a passing test cannot
+        // be one where both trees happened to be dirty.
+        assertEquals("main is clean", 0, scene.viewModel.changesOf(project))
+    }
+
+    @Test
+    fun `the changes window lists the branch's files`() {
+        // The same defect as the strip, one door further in: the window read main's unsent paths, so on
+        // a branch it was empty — and the files it would have named do not exist in the folder the
+        // person is looking at.
+        val project = projectWithABranch()
+        scene.viewModel.enterBranch("feature")
+        scene.await("the branch's files to open") { scene.viewModel.path == listOf(project) }
+        val branchFile = File(scene.workspace!!.treeOf(project), "notes.txt")
+        branchFile.writeText("waiting\n")
+
+        scene.viewModel.openChanges(project)
+        scene.await("the window to fill", 20_000) {
+            scene.viewModel.changes?.any { it.path == "notes.txt" } == true
+        }
+    }
+
+    @Test
     fun `a branch's file is named the project's path, so every rule about it still applies`() {
         // **The reading everything else rests on.** A worktree path read literally names `.muffy`, a
         // folder with no project — so project rules, locks and the agent's own scope would all stop

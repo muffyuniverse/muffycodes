@@ -1049,17 +1049,46 @@ class AppViewModel @JvmOverloads constructor(
         if (query.isNotEmpty()) append(" · search ").append(query)
     }
 
-    /** Recounts the unsynced changes of every project, behind the UI. */
+    /**
+     * **How much is unsent in the tree the person is looking at** — which is not always main's (§13d).
+     *
+     * The list on the account screen asks about projects, and a project's own count is main's. But the
+     * strip drawn *inside* a project described the tree on screen, and it read main's count: on a
+     * branch with five unsent files it said **"up to date"**, which is the one claim this app must
+     * never get wrong.
+     */
+    var changesHere: Int by mutableStateOf(0)
+        private set
+
+    /** How many paths of the open tree are ignored, for the same rows and the same reason. */
+    var ignoredHere: Int by mutableStateOf(0)
+        private set
+
+    /** Recounts the unsynced changes of every project, and of the tree on screen, behind the UI. */
     fun refreshChanges() {
         val ws = workspace ?: return
         val g = git ?: return
         val names = ws.projectNames()
+        // **Read before the worker starts**, because both are state that can change while it runs and
+        // the answer must describe the screen the person was looking at when they asked.
+        val here = currentProject
+        val branch = activeBranch
         onWorker {
             val counts = names.associateWith { g.changes(it).total }
             val ignored = names.associateWith { g.ignoredCount(it) }
+            val onBranch = g.onBranch(branch)
+            val mine = if (here != null && ws.projectNames().contains(here)) {
+                Pair(onBranch.changes(here).total, onBranch.ignoredCount(here))
+            } else {
+                null
+            }
             main.post {
                 changesByProject = counts
                 ignoredByProject = ignored
+                if (mine != null) {
+                    changesHere = mine.first
+                    ignoredHere = mine.second
+                }
             }
         }
     }
@@ -2909,8 +2938,11 @@ class AppViewModel @JvmOverloads constructor(
     fun openChanges(project: String) {
         Trace.tap("see changes", project)
         changes = emptyList()
+        // **The tree on screen**, for the same reason the strip counts it (§13d): the window lists
+        // what is unsent *here*, and main's list on a branch is both wrong and unopenable — the paths
+        // do not exist in the folder the person is looking at.
+        val g = git?.onBranch(activeBranch) ?: return
         onWorker {
-            val g = git ?: return@onWorker
             val files = g.unsentPaths(project).map { path ->
                 g.diff(project, path).fold(
                     onSuccess = { ChangedFile(path, it, null) },

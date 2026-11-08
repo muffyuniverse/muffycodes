@@ -1561,7 +1561,8 @@ fun ProjectSlimRow(viewModel: AppViewModel, onRelease: (() -> Unit)? = null) {
     SlimRow(
         account = viewModel.account?.login ?: "",
         project = project,
-        changes = viewModel.changesOf(project),
+        // **The tree on screen**, which on a branch is not the project's (see `AppViewModel.changesHere`).
+        changes = viewModel.changesHere,
         busy = viewModel.busy,
         onSeeChanges = { viewModel.openChanges(project) },
         onRelease = onRelease,
