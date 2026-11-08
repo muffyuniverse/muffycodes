@@ -119,6 +119,21 @@ class AgentRunnerTest {
         )
     }
 
+    /**
+     * A background command in `shopping`, filed under the session a tick looks for.
+     *
+     * **The key is the session, not the folder's name** — that was the bug: a worktree's folder is
+     * named after its branch, so a completion filed under `project.name` was filed under `"feature"`
+     * while the tick asked for `"shopping"`, and nothing matched.
+     */
+    private fun Background.startHere(call: Call, work: () -> String): String =
+        start(
+            ws.projectDir("shopping"),
+            call,
+            AgentSession.keyOf("shopping", AgentSession.MAIN),
+            work,
+        )
+
     @Test
     fun `asleep, a runner polls nothing and says nothing`() {
         on("shopping", now = 1_000)
@@ -383,7 +398,7 @@ class AgentRunnerTest {
         ).also { runners += it }
 
         // A command starts and lands while the agent is idle.
-        bg.start(ws.projectDir("shopping"), Call("c9", "search", "{}")) { "0 three files" }
+        bg.startHere(Call("c9", "search", "{}")) { "0 three files" }
 
         runner.tick(1_001)
         settle(runner)
@@ -422,14 +437,14 @@ class AgentRunnerTest {
             door = { door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(1_001)
         settle(runner)
         assertEquals("the first turned it", 1, door.asked.size)
 
         // A second command finishes later than the watermark.
         at = 6_000
-        bg.start(ws.projectDir("shopping"), Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two litres" }
+        bg.startHere(Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two litres" }
         runner.tick(6_001)
         settle(runner)
 
@@ -469,7 +484,7 @@ class AgentRunnerTest {
             AgentSessions(ws.accountDir).read().single()
                 .needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000),
         )
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(5_001)
         settle(runner)
 
@@ -482,7 +497,7 @@ class AgentRunnerTest {
         // Stopped, and then a command lands: nothing is spent.
         runner.stop("shopping")
         at = 9_000
-        bg.start(ws.projectDir("shopping"), Call("c2", "search", "{}")) { "0 two" }
+        bg.startHere(Call("c2", "search", "{}")) { "0 two" }
         runner.tick(9_001)
         settle(runner)
 
@@ -510,7 +525,7 @@ class AgentRunnerTest {
         ).also { runners += it }
 
         runner.stop("shopping")
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(5_001)
         settle(runner)
         assertEquals("a stopped session spends nothing", 0, door.asked.size)
@@ -543,8 +558,8 @@ class AgentRunnerTest {
             door = { door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
-        bg.start(ws.projectDir("shopping"), Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two" }
         runner.tick(5_001)
         settle(runner)
 
@@ -574,7 +589,7 @@ class AgentRunnerTest {
         ).also { runners += it }
 
         val release = runner.hold("shopping")
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(5_001)
         assertEquals("nothing went out while the screen had it", 0, door.asked.size)
 
@@ -598,7 +613,7 @@ class AgentRunnerTest {
             door = { door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         ws.projectDir("shopping").deleteRecursively()
         runner.tick(5_001)
         settle(runner)
@@ -620,7 +635,7 @@ class AgentRunnerTest {
             door = { door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        bg.start(ws.projectDir("shopping"), Call("c1", "search", "{}")) { "0 one" }
+        bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(1_000 + 2 * AgentSession.POLL_MS)
         settle(runner)
 
