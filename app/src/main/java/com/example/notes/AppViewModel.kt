@@ -2413,8 +2413,8 @@ class AppViewModel @JvmOverloads constructor(
         message = when {
             ignore && stillTracked -> "Ignoring $inside, but it is still in the repository"
             ignore && wasPushed ->
-                "Ignoring $inside. Its earlier versions stay on GitHub — ignoring stops it being " +
-                    "sent from now on; it does not take back what was sent."
+                "Ignoring $inside. Its earlier versions stay at the remote — ignoring stops it " +
+                    "being sent from now on; it does not take back what was sent."
             ignore -> "Ignoring $inside"
             else -> "Tracking $inside again — it will be sent on the next push"
         }
@@ -3435,7 +3435,7 @@ class AppViewModel @JvmOverloads constructor(
             // **Said, not silently ignored.** A local project has no remote by design, and a person
             // who presses Sync on one deserves the sentence rather than a spinner that ends.
             Trace.failure("sync", "local")
-            message = "$project stays on this phone: it has no GitHub repository to send to"
+            message = "$project stays on this phone: it has no address to send to"
             return
         }
         busy = true
@@ -3533,7 +3533,7 @@ class AppViewModel @JvmOverloads constructor(
                 // deleting a project shows the change only after you exit and enter the project
                 // menue again".
                 message = if (made.isSuccess) {
-                    "Made \"$clean\" on this phone. It does not go to GitHub."
+                    "Made \"$clean\" on this phone. It goes nowhere until it has an address."
                 } else {
                     "Made the folder, but its history could not be started"
                 }

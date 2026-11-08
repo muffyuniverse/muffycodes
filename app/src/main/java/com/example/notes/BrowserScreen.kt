@@ -266,9 +266,9 @@ fun AccountsScreen(
         if (accounts.isEmpty()) {
             EmptyState(
                 title = "No accounts yet",
-                text = "An account is a GitHub identity. Its projects live in a folder of its own, " +
-                    "and the agent works in one account at a time — so you can move between them " +
-                    "freely without their agents interfering.",
+                text = "An account is a name, a host and a key. Its projects live in a folder of " +
+                    "its own, and the agent works in one account at a time — so you can move " +
+                    "between them freely without their agents interfering.",
             )
         } else {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -646,7 +646,8 @@ fun ChangesWindow(viewModel: AppViewModel) {
         text = {
             if (files.isEmpty()) {
                 Text(
-                    "Nothing is waiting to be sent. Everything on this phone is on GitHub.",
+                    "Nothing is waiting to be sent. Everything here is at the project's address.",
+
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
@@ -859,8 +860,8 @@ private fun ProjectList(
     if (names.isEmpty() && system == null) {
         EmptyState(
             title = "No projects yet",
-            text = "The add button makes one on GitHub, brings in a repository you already " +
-                "have, or makes one that stays on this phone."
+            text = "The add button brings in a repository from any address that speaks git, " +
+                "or makes one that stays on this phone."
         )
         return
     }
@@ -872,8 +873,8 @@ private fun ProjectList(
         if (names.isEmpty()) {
             item {
                 Text(
-                    text = "No projects yet. The add button makes one on GitHub, brings in a " +
-                        "repository you already have, or makes one that stays on this phone.",
+                    text = "No projects yet. The add button brings in a repository from any " +
+                        "address that speaks git, or makes one that stays on this phone.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(16.dp),

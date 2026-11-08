@@ -26,7 +26,7 @@ class SaidTest {
             "Nothing is selected",
             "Could not change .gitignore here",
             "The app keeps secrets.txt off GitHub, and only the app can change that",
-            "shopping stays on this phone: it has no GitHub repository to send to",
+            "shopping stays on this phone: it has no address to send to",
             "shopping is already only on this phone",
             "Restore target is locked, so nothing was put back",
         )

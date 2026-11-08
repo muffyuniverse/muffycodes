@@ -1019,11 +1019,12 @@ class AgentTools(
             ),
             spec(
                 "push",
-                "Sends this project's `main` to GitHub. **Fast-forward only and never forced**, " +
+                "Sends this project's `main` to its remote — **the address the project has, " +
+                    "whatever host that is**. **Fast-forward only and never forced**, " +
                     "because a force-push can discard a commit somebody else made. " +
-                    "Pictures are uploaded first, before the branch that names them, because GitHub " +
+                    "Pictures are uploaded first, before the branch that names them, because a host " +
                     "rejects a tree referencing bytes it does not hold. " +
-                    "A push that GitHub refuses because the remote moved answers as a **conflict, " +
+                    "A push the remote refuses because it moved answers as a **conflict, " +
                     "not a failure**: `pull`, resolve if needed, then `push` again. " +
                     "It refuses outright when the working tree has uncommitted changes — commit " +
                     "first, so that what is sent is a thing you can point at. " +

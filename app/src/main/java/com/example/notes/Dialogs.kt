@@ -292,7 +292,7 @@ fun RemoveAccountDialog(
                 RadioLine(
                     selected = deleteCopies,
                     label = "Delete its projects from this phone too",
-                    detail = "The repositories stay on GitHub, and Add brings them back",
+                    detail = "The repositories stay where they are, and Add brings them back",
                     onClick = { deleteCopies = true },
                 )
             }

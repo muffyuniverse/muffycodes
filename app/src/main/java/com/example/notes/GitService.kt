@@ -734,7 +734,7 @@ object GitService {
                 val result = git.merge()
                     .include(their)
                     .setCommit(true)
-                    .setMessage("Merge what GitHub had")
+                    .setMessage("Merge what the remote had")
                     .call()
                 val status = result.mergeStatus
                 if (status == org.eclipse.jgit.api.MergeResult.MergeStatus.CONFLICTING) {
