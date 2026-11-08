@@ -628,7 +628,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowKeepLocal,
+                        onRowKeepLocal, onRowModel, onRowGit,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -900,6 +900,9 @@ private fun ProjectList(
     onDelete: (String) -> Unit,
     /** Synced -> local: take the remote away, keeping every version here. */
     onKeepLocal: (String) -> Unit,
+    /** A project's own credentials, from its row's menu — see [BrowserScreen]'s parameters. */
+    onModel: (String) -> Unit,
+    onGit: (String) -> Unit,
     /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
 ) {
     val names = viewModel.projectNames
@@ -1016,14 +1019,14 @@ private fun ProjectList(
                                 text = { Text("Model connection…") },
                                 onClick = {
                                     menu = false
-                                    onRowModel(name)
+                                    onModel(name)
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text("Git credential…") },
                                 onClick = {
                                     menu = false
-                                    onRowGit(name)
+                                    onGit(name)
                                 },
                             )
                             // **The way back, for a project that has one.** A local project has no

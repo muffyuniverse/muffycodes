@@ -1757,7 +1757,7 @@ class AppViewModel @JvmOverloads constructor(
     fun host(project: String, branch: String): String? {
         val ws = workspace ?: return null
         val url = try {
-            projectGit(ws).onBranch(branch).remoteUrlOf(project)
+            projectGit(ws).onBranch(branch).remoteUrl(project)
         } catch (e: Throwable) {
             null
         } ?: return null
@@ -1852,7 +1852,7 @@ class AppViewModel @JvmOverloads constructor(
             val ws = workspace
             val remote = ws?.let {
                 try {
-                    projectGit(it).onBranch(branch).remoteUrlOf(project)
+                    projectGit(it).onBranch(branch).remoteUrl(project)
                 } catch (e: Throwable) {
                     null
                 }
