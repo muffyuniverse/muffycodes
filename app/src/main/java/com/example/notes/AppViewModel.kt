@@ -3937,47 +3937,118 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    /** Renames a project and its repository together (§3). */
-    fun renameProject(project: String, newName: String) {
+    /**
+     * **Sets a project's address — and the local name follows it.**
+     *
+     * This is the whole of renaming, and the whole of publishing, because both are the same act seen
+     * from different sides: a project's name is a consequence of where its repository is, not a thing
+     * the app composes from one. The person renames on the host's own website, where the confirmation
+     * is the host's, and pastes the new address here; the app asks `ls-remote` whether it is true and
+     * then makes the folder agree with it.
+     *
+     * **Nothing is composed.** `cloneUrlFor` built GitHub's address out of a login and a repository
+     * name, which is GitHub's convention for spelling a URL — GitLab's and Gitea's differ, and a table
+     * of the differences is exactly what this plan removes. The address is what the person gave us.
+     *
+     * **The order is check, then address, then name.** The check comes first so a mistyped path or a
+     * key the host refuses is a sentence rather than a project that claims to be published and cannot
+     * be pushed — the one outcome §8.3 says must never happen. The address is set before the folder is
+     * renamed because the address is what was asked for; if the rename then fails, what the person
+     * asked for is still true and the sentence says which part did not happen.
+     *
+     * **A name that does not change is not a rename**, and it is a normal thing: a repository moved to
+     * another owner, or to another host, sometimes keeps its name. The sentence says the address
+     * changed rather than reporting a rename that did not happen.
+     */
+    fun setAddress(project: String, url: String, onDone: (Boolean) -> Unit = {}) {
         val ws = workspace ?: return
-        val api = github
-        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
-        val login = activeLogin
-        val clean = newName.trim()
+        val address = url.trim()
+        if (address.isEmpty()) {
+            message = "An address is needed"
+            onDone(false)
+            return
+        }
+        // **The transport first, before any credential is considered.** An SSH address cannot be
+        // spoken by this app at all (no `jgit.ssh` is packaged), so it is a fact about the address
+        // rather than about the key — and saying so after a key was chosen would be a lie about what
+        // failed.
+        Secrets.transportProblem(address)?.let {
+            message = it
+            onDone(false)
+            return
+        }
+        val clean = Workspace.repoNameOf(address)
         val problem = Workspace.nameProblem(clean)
         if (problem != null) {
             message = problem
+            onDone(false)
             return
         }
-        if (clean == project) return
-        // **Both directions.** Renaming it away would leave the settings in a folder called
-        // something else, and renaming another project *to* it would give the account two — one of
-        // which the delete guard would then refuse, which is worse than refusing the rename.
+        if (clean == project) {
+            // **Nothing to rename.** The address is the whole of this press.
+            val wasLocal = isLocalProject(project)
+            val pointed = git?.makeRemote(project, address) ?: false
+            message = if (pointed) {
+                if (wasLocal) "$project now has an address: $address" else "The address of $project is $address"
+            } else {
+                "$project could not be pointed at $address"
+            }
+            if (pointed) {
+                refresh()
+                // **A local project that just gained an address is sent**, because a project that
+                // says "synced" while the host holds an empty repository is the worst of both states
+                // — the same reason publishing used to sync in the same press.
+                if (wasLocal) sync(project)
+            }
+            onDone(pointed)
+            return
+        }
         if (Workspace.isSystem(project) || Workspace.isSystem(clean)) {
             message = if (Workspace.isSystem(project)) {
                 "\"$project\" is where this account's settings live, so it keeps its name"
             } else {
                 "\"$clean\" is reserved for this account's settings"
             }
+            onDone(false)
             return
         }
-        if (ws.projectNames().any { it.equals(clean, ignoreCase = true) }) {
+        if (ws.projectNames().any { it.equals(clean, ignoreCase = true) && it != project }) {
             message = "There is already a project called \"$clean\""
+            onDone(false)
             return
         }
+        val wasLocal = isLocalProject(project)
         busy = true
         onWorker {
-            var note = ""
-            if (api != null && login != null) {
-                val renamed = api.renameRepo(token, login, project, clean)
-                if (renamed.error != null) note = renamed.error
+            val checked = git?.checkRemote(project, address)
+            if (checked is GitService.RemoteAnswer.Refused) {
+                main.post {
+                    busy = false
+                    message = checked.said
+                    onDone(false)
+                }
+                return@onWorker
+            }
+            val pointed = git?.makeRemote(project, address) ?: false
+            if (!pointed) {
+                main.post {
+                    busy = false
+                    message = "$project could not be pointed at $address"
+                    onDone(false)
+                }
+                return@onWorker
             }
             // Not tidied: this folder stands for a repository, whose name is its own.
             val moved = ws.rename(ws.projectDir(project), clean, tidy = false)
             if (moved.isFailure) {
                 main.post {
                     busy = false
-                    message = moved.exceptionOrNull()?.message ?: "Could not rename the folder"
+                    // **Said precisely.** The address did change; the folder did not, and a person
+                    // who was told "it failed" would not know which of the two they have.
+                    message = "The address is set to $address, but the folder kept its name: " +
+                        (moved.exceptionOrNull()?.message ?: "it could not be renamed")
+                    refresh()
+                    onDone(false)
                 }
                 return@onWorker
             }
@@ -3986,28 +4057,19 @@ class AppViewModel @JvmOverloads constructor(
             // the app, and with two files naming paths that no longer exist, which JGit reports as a
             // repository with no branch rather than as a failure.
             Worktrees(ws).rename(project, clean)
-            // The repository moved too, so its address changes with it.
-            if (token != null && login != null && note.isEmpty()) {
-                val g = ProjectGit(
-                    ws,
-                    { credentials.token(login) },
-                    { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                    )
-                // A null here is not a failure: the folder was renamed, and only
-                // the address of the repository could not follow.
-                api?.cloneUrlFor(login, clean)?.let { remote ->
-                    g.open(clean)?.use { repo -> GitService.setRemoteUrl(repo, remote) }
-                }
-            }
             main.post {
                 busy = false
-                message = note.ifBlank { "Renamed to $clean" }
+                message = "Renamed to $clean, at $address"
                 // The folder was renamed, and so was the path the screen is looking at — which
                 // is now the project's own name, one level shallower than it used to be.
                 if (path.firstOrNull() == project) {
                     path = listOf(clean) + path.drop(1)
                 }
+                onDone(true)
                 refresh()
+                // **The first send, for a project that had nowhere to send to.** It is what makes
+                // "synced" true rather than claimed.
+                if (wasLocal) sync(clean)
             }
         }
     }
@@ -4169,9 +4231,14 @@ class AppViewModel @JvmOverloads constructor(
         val hadRemote = git?.remoteUrl(project)
         val ok = git?.makeLocal(project) ?: false
         Trace.tap("keep local", project)
+        // **The host, named from the address rather than assumed.** This sentence said "on GitHub"
+        // for every project, which was true only while every project had a GitHub repository - and it
+        // is the sentence that decides whether a person believes their copy is still somewhere else.
+        val where = hadRemote?.let { Secrets.hostOf(it) }?.takeIf { it.isNotBlank() }
         message = if (ok) {
-            "$project is local now. Everything it holds is still here, and its repository is " +
-                "still on GitHub" + (hadRemote?.let { " at $it" } ?: "")
+            "$project is local now. Everything it holds is still here" +
+                (where?.let { ", and its repository is still at $it" } ?: "") +
+                (hadRemote?.let { " ($it)" } ?: "")
         } else {
             "$project could not be made local"
         }

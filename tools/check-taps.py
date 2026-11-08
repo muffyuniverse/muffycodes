@@ -79,8 +79,11 @@ VOCABULARY = {
     "photo",
     # projects
     "add project", "sync", "see changes", "rename project", "delete project",
-    # the local<->synced cycle: giving a local project a repository, and taking it back
-    "publish", "keep local", "confirm publish", "confirm keep local",
+    # **The address is the verb** (2026-11-08): a project's name follows where its repository is, so
+    # publishing a local project and renaming a synced one are the same press on the same field. The
+    # old names stay because a log written by an older build still holds them.
+    "set address", "confirm set address", "publish", "keep local",
+    "confirm publish", "confirm keep local",
     # a project's newest artifact out to the phone, through the same function the agent's tool uses
     "export",
     # publishing a release from inside the app (§13b.7): the strip's button, then the window's press

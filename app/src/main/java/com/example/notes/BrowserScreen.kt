@@ -323,9 +323,7 @@ fun BrowserScreen(
     onRelease: (String) -> Unit = {},
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
-    /** Local -> synced. Asks for a licence first, because publishing is a decision. */
-    onRowPublish: (String) -> Unit = {},
-    /** Synced -> local. Asks first, because the repository stays on GitHub. */
+    /** Synced -> local. Asks first, because the repository stays where it is. */
     onRowKeepLocal: (String) -> Unit = {},
     onCreateFile: () -> Unit,
     onCreateFolder: () -> Unit,
@@ -585,7 +583,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowPublish, onRowKeepLocal, onRowExport,
+                        onRowKeepLocal, onRowExport,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -887,8 +885,6 @@ private fun ProjectList(
     onChat: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
-    /** Local -> synced: give it a repository, which asks for a licence first. */
-    onPublish: (String) -> Unit,
     /** Synced -> local: take the remote away, keeping every version here. */
     onKeepLocal: (String) -> Unit,
     /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
@@ -988,27 +984,29 @@ private fun ProjectList(
                                     onChat(name)
                                 },
                             )
-                            // **The two directions of one cycle, and only the one that applies.**
-                            // A local project has no remote, so Sync could only say no - the rule a
-                            // locked file's Rename already follows - and what it CAN do is get one.
-                            // A synced project is offered the way back. Report: "local projects
-                            // should have add to github option ... make sure that the state change
-                            // cycle (local<>synced) is complete and without errors".
-                            if (viewModel.isLocalProject(name)) {
-                                DropdownMenuItem(
-                                    text = { Text("Put on GitHub…") },
-                                    onClick = {
-                                        menu = false
-                                        onPublish(name)
-                                    },
-                                )
-                            } else {
+                            // **The address, which is where a project is** — and the whole of what
+                            // publishing and renaming became. A local project given one is published;
+                            // a project whose address names something else is renamed after it. There
+                            // is no separate "put on GitHub" because there is no repository to make
+                            // here: that is the host's own page, and this window takes its result.
+                            DropdownMenuItem(
+                                text = { Text("Set the address…") },
+                                onClick = {
+                                    menu = false
+                                    onRename(name)
+                                },
+                            )
+                            // **The way back, for a project that has one.** A local project has no
+                            // remote, so this could only say no — the rule a locked file's Rename
+                            // already follows. What it cannot do is delete the repository: that is
+                            // the host's page too, and the window says so.
+                            if (!viewModel.isLocalProject(name)) {
                                 // **No "Sync" here either.** The row lost its button and the menu
                                 // would have been the same act with a different door — the
                                 // operator moved this decision to the agent, and a second door
                                 // would make the removal look like a layout change.
                                 DropdownMenuItem(
-                                    text = { Text("Keep local only…") },
+                                    text = { Text("Go local…") },
                                     onClick = {
                                         menu = false
                                         onKeepLocal(name)
@@ -1024,13 +1022,6 @@ private fun ProjectList(
                                 onClick = {
                                     menu = false
                                     onExport(name)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Rename…") },
-                                onClick = {
-                                    menu = false
-                                    onRename(name)
                                 },
                             )
                             DropdownMenuItem(

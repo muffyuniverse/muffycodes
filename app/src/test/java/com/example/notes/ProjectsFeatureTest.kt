@@ -188,31 +188,119 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `renaming a project renames the folder and the repository together`() {
-        scene.project("Shopping")
+    fun `an address that names a new repository renames the folder after it`() {
+        // **Renaming is a consequence of the address**, which is the operator's decision: the person
+        // renames on the host's own website — where the confirmation is the host's — and pastes the
+        // address here. So the fixture renames there first, and the app is asked to agree with it.
+        scene.localProject("Shopping")
+        val address = hostRepo("Groceries")
 
-        scene.viewModel.renameProject("Shopping", "Groceries")
-        scene.await("the rename to finish") { !scene.viewModel.busy }
+        scene.viewModel.setAddress("Shopping", address)
+        scene.await("the address to be set") { !scene.viewModel.busy }
 
         assertFalse("the old folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
         assertTrue("the new folder is there", File(scene.workspace!!.accountDir, "Groceries").isDirectory)
-        assertFalse("the old repository is gone", scene.remote("Shopping").exists())
-        assertTrue("the new repository is there", scene.remote("Groceries").isDirectory)
+        assertEquals(
+            "and the address is the one that was given",
+            address,
+            scene.viewModel.git?.remoteUrl("Groceries"),
+        )
     }
 
     @Test
-    fun `renaming a project keeps the clone inside it`() {
-        scene.project("Shopping")
+    fun `the worktree moves with the folder when the address names it`() {
+        scene.localProject("Shopping")
         scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
+        val address = hostRepo("Groceries")
 
-        scene.viewModel.renameProject("Shopping", "Groceries")
-        scene.await("the rename to finish") { !scene.viewModel.busy }
+        scene.viewModel.setAddress("Shopping", address)
+        scene.await("the address to be set") { !scene.viewModel.busy }
 
         assertTrue(
             "the worktree moved with the folder",
             File(scene.workspace!!.repoOf("Groceries"), "milk.txt").isFile,
         )
+    }
+
+    @Test
+    fun `an address that names nothing is refused before the project changes`() {
+        // **The check comes first, and this is why.** Rewriting `origin` to an address that does not
+        // answer leaves a row saying "synced" while nothing can be pushed — the one outcome §8.3 says
+        // must never happen. Nothing has moved here: not the folder, not the address.
+        scene.localProject("Shopping")
+        val nowhere = File(scene.workspace!!.accountDir, "host/Nothing.git").toURI().toString()
+
+        scene.viewModel.setAddress("Shopping", nowhere)
+        scene.await("the refusal") { !scene.viewModel.busy }
+
+        assertEquals(
+            "the sentence says there is nothing there",
+            "There is no repository at that address.",
+            scene.viewModel.message,
+        )
+        assertTrue(
+            "the folder kept its name",
+            File(scene.workspace!!.accountDir, "Shopping").isDirectory,
+        )
+        assertNull("and the project still has no address", scene.viewModel.git?.remoteUrl("Shopping"))
+    }
+
+    @Test
+    fun `an SSH address is refused before a key is even considered`() {
+        // **A fact about the address, not about the key.** This app packages no SSH transport at all,
+        // so the message must not be one that sends the person looking for a better key.
+        scene.localProject("Shopping")
+
+        scene.viewModel.setAddress("Shopping", "git@gitlab.com:owner/shopping.git")
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says which address cannot be used", said.contains("SSH"))
+        assertTrue("and what to use instead", said.contains("https://"))
+        assertTrue(
+            "nothing was made",
+            File(scene.workspace!!.accountDir, "Shopping").isDirectory,
+        )
+    }
+
+    @Test
+    fun `an address with the same name changes only the address`() {
+        // **A repository that moved to another owner or host keeps its name**, which is ordinary. The
+        // sentence must say the address changed rather than report a rename that did not happen.
+        scene.localProject("Shopping")
+        val moved = hostRepo("Shopping")
+
+        scene.viewModel.setAddress("Shopping", moved)
+        scene.await("the address to be set") { !scene.viewModel.busy }
+
+        assertEquals("the address is the new one", moved, scene.viewModel.git?.remoteUrl("Shopping"))
+        assertTrue(
+            "the folder kept its name",
+            File(scene.workspace!!.accountDir, "Shopping").isDirectory,
+        )
+        assertEquals(
+            "and it says so",
+            "The address of Shopping is $moved",
+            scene.viewModel.message,
+        )
+    }
+
+    /**
+     * A repository on "the host": **a bare folder, made by hand.**
+     *
+     * That is what the host's website does, and it is the whole of what this app no longer does. The
+     * address is what the person would paste, and a bare repository is what `ls-remote` and a push
+     * really answer, so the test talks to the real thing rather than to a mock of it.
+     */
+    private fun hostRepo(name: String): String {
+        val dir = File(File(scene.workspace!!.accountDir, "host"), "$name.git")
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(dir)
+            .setBare(true)
+            .setInitialBranch("main")
+            .call()
+            .close()
+        return dir.toURI().toString()
     }
 
     @Test
@@ -596,9 +684,10 @@ class ProjectsFeatureTest : FeatureTest() {
     fun `the system project keeps its name in both directions`() {
         // **Renaming it away is one half; renaming another project *to* it is the other.** Without
         // the second, an account ends up with two folders called `system`, and the delete guard
-        // then refuses both — which is worse than refusing the rename.
+        // then refuses both — which is worse than refusing the rename. The rename is now the
+        // address's last segment, so both halves are a `setAddress` with an address that says it.
         scene.viewModel.message = null
-        scene.viewModel.renameProject("system", "settings")
+        scene.viewModel.setAddress(Workspace.SYSTEM_PROJECT, "https://host/owner/settings.git")
         assertTrue("it cannot be renamed away", scene.viewModel.message != null)
         assertTrue(
             "and it still has its own name",
@@ -607,7 +696,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
         scene.project("groceries")
         scene.viewModel.message = null
-        scene.viewModel.renameProject("groceries", "System")
+        scene.viewModel.setAddress("groceries", "https://host/owner/System.git")
         assertTrue("nor can another project take it", scene.viewModel.message != null)
         assertTrue(
             "and groceries is still groceries",

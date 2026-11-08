@@ -128,11 +128,14 @@ private sealed interface Pending {
     data object NewBranch : Pending
     /** Removing a branch, which is refused when it carries work main does not have. */
     data class RemoveBranch(val branch: String) : Pending
-    data class RenameProject(val project: String) : Pending
+    /**
+     * **The one project verb besides add and delete** — publishing and renaming are its two outcomes.
+     * A local project given an address is published; a project whose address names something else is
+     * renamed after it.
+     */
+    data class SetAddress(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
-    /** Local -> synced: a repository, seeded with the licence the person picks. */
     data class Release(val project: String) : Pending
-    data class PublishProject(val project: String) : Pending
     /** Synced -> local: the remote goes, every version stays. */
     data class KeepLocal(val project: String) : Pending
     data class RenameEntry(val entry: Entry) : Pending
@@ -556,9 +559,8 @@ private fun AppRoot(viewModel: AppViewModel) {
                 actions = actions,
                 onAddProject = { tap("add project"); pending = Pending.AddProject },
                 onRowChat = { project -> viewModel.openChat(project) },
-                onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
+                onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
-                onRowPublish = { project -> tap("publish", project); pending = Pending.PublishProject(project) },
                 onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
                 // **The same function the agent's `downloads` tool calls**, so a person's export and
                 // the agent's are the same bytes from the same place.
@@ -834,16 +836,16 @@ private fun Dialogs(
 
         Pending.NewProject -> NewProjectUI(viewModel, dismiss)
 
-        is Pending.RenameProject -> PromptDialog(
-            title = "Rename ${pending.project}",
-            label = "Name",
-            initial = pending.project,
-            confirm = "Rename",
+        is Pending.SetAddress -> SetAddressDialog(
+            project = pending.project,
+            // **The address it has now**, so the ordinary use — a repository that moved — starts from
+            // what is true rather than from an empty field the person has to retype.
+            current = viewModel.git?.remoteUrl(pending.project),
             onDismiss = dismiss,
-            onConfirm = { name ->
-                      Trace.tap("confirm rename project", pending.project)
-                      viewModel.renameProject(pending.project, name)
-                  },
+            onSet = { url ->
+                Trace.tap("confirm set address", pending.project)
+                viewModel.setAddress(pending.project, url)
+            },
         )
 
         is Pending.Release -> ReleaseDialog(
@@ -855,14 +857,9 @@ private fun Dialogs(
             },
         )
 
-        is Pending.PublishProject -> PublishProjectUI(
-            viewModel = viewModel,
-            project = pending.project,
-            dismiss = dismiss,
-        )
-
         is Pending.KeepLocal -> KeepLocalDialog(
             project = pending.project,
+            address = viewModel.git?.remoteUrl(pending.project),
             onDismiss = dismiss,
             onKeepLocal = {
                 Trace.tap("confirm keep local", pending.project)
@@ -1093,32 +1090,6 @@ private fun RestoreDeletedDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
- * Publishing a local project: **the licence list first**, because a published project has to say
- * what it may be used for.
- *
- * The same read as `NewProjectUI`, and for the same reason: the licences are GitHub's, so they are
- * fetched rather than written into the app. A failure to read them is not fatal - the dialog starts
- * on GPL-3.0 and the list is simply empty - because a project must still be publishable on a phone
- * with no network.
- */
-@Composable
-private fun PublishProjectUI(viewModel: AppViewModel, project: String, dismiss: () -> Unit) {
-    var licences by remember { mutableStateOf<List<Licence>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        viewModel.listLicences { licences = it }
-    }
-    PublishProjectDialog(
-        project = project,
-        licences = licences,
-        onDismiss = dismiss,
-        onPublish = { licence ->
-            Trace.tap("confirm publish", "$project · $licence")
-            viewModel.addProjectToGitHub(project, licence)
-        },
     )
 }
 

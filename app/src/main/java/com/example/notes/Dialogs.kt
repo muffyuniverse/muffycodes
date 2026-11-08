@@ -466,86 +466,71 @@ fun AddProjectDialog(
 }
 
 /**
- * **Publishing a local project: which licence it goes out under.**
+ * **Setting a project's address** — the one project verb, and the whole of publishing and renaming.
  *
- * The name is not asked for - the project already has one, and GitHub is told it - so the only
- * question is the licence, and it is a real one: a project on this phone has no licence file because
- * there was nothing to seed, and the moment it is on GitHub somebody can find, use and quote it.
+ * The field starts on the address the project has, because the ordinary use is *changing* it: a
+ * repository that moved to another owner, another host, or another name. The name the project takes is
+ * the address's last segment — so the sentence says that, rather than asking a second question whose
+ * answer would have to agree with the first.
  *
- * **Starts on GPL-3.0**, which is the app's policy for everything it publishes: open source, and the
- * same licence the app itself carries. A person who wants another picks it here.
+ * **Nothing here creates anything.** A repository is made on the host's website, where the licence,
+ * the visibility and the description ask their questions with real consequences; this window takes the
+ * address that came out of that and makes the app agree with it.
  */
 @Composable
-fun PublishProjectDialog(
+fun SetAddressDialog(
     project: String,
-    licences: List<Licence>,
+    current: String?,
     onDismiss: () -> Unit,
-    onPublish: (licence: String) -> Unit,
+    onSet: (url: String) -> Unit,
 ) {
-    // **Private first, and chosen by default.** The safe answer to "who may read this" is
-    // "nobody yet", and a person who has just made a project on their phone has not decided
-    // otherwise. Choosing GPL-3.0 here would publish their first save to the world before they
-    // have written it.
-    val choices = remember(licences) { licenceChoices(licences) }
-    var licence by remember { mutableStateOf(PRIVATE_LICENCE) }
-    var showLicences by remember { mutableStateOf(false) }
+    var address by remember { mutableStateOf(current.orEmpty()) }
+    val name = Workspace.repoNameOf(address)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Put $project on GitHub") },
+        title = { Text("Set the address of $project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "A repository is made and everything this project already holds is sent to " +
-                        "it. Its history goes up as it is - nothing is rewritten.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // **Said, because it is the default and the consequence is not obvious.** A private
-                // repository is invisible to everyone else; a licensed one is world-readable the
-                // moment it exists. A person choosing between them needs that sentence, not the
-                // word "Private".
-                Text(
-                    if (licence == PRIVATE_LICENCE) {
-                        "Private: nobody else can see this repository, and no licence file is " +
-                            "written. You can make it public later."
-                    } else {
-                        "A licence is a public statement about what others may do with this " +
-                            "code, so the repository will be public."
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Repository address") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "https://host/owner/repository.git — checked with ls-remote before " +
+                                "anything changes.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showLicences = !showLicences },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Licence: ${choices.firstOrNull { it.key == licence }?.name ?: licence}")
-                }
-                if (showLicences && choices.isNotEmpty()) {
-                    Column(modifier = Modifier.heightIn(max = 200.dp)) {
-                        LazyColumn {
-                            items(choices) { item ->
-                                Text(
-                                    text = item.name,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            licence = item.key
-                                            showLicences = false
-                                        }
-                                        .padding(vertical = 8.dp),
-                                )
-                            }
-                        }
-                    }
+                // **The consequence, in the window that causes it.** Renaming a folder is not
+                // obviously something that follows from typing an address, so the sentence that says
+                // it is the difference between a feature and a surprise.
+                if (name.isNotEmpty() && name != project) {
+                    Text(
+                        "The project is renamed to \"$name\", after the address. Rename it on the " +
+                            "host first if you meant to change the repository's name too.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (name == project && name.isNotEmpty()) {
+                    Text(
+                        "The name stays \"$name\" — only the address changes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onPublish(licence); onDismiss() }) { Text("Publish") }
+            TextButton(
+                enabled = address.isNotBlank(),
+                onClick = {
+                    onSet(address.trim())
+                    onDismiss()
+                },
+            ) { Text("Set") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -561,6 +546,7 @@ fun PublishProjectDialog(
 @Composable
 fun KeepLocalDialog(
     project: String,
+    address: String?,
     onDismiss: () -> Unit,
     onKeepLocal: () -> Unit,
 ) {
@@ -570,8 +556,12 @@ fun KeepLocalDialog(
         text = {
             Text(
                 "Every version stays here and the project stops being sent anywhere.\n\n" +
-                    "Its repository stays on GitHub, with everything already pushed to it. To " +
-                    "remove that too, use Delete everywhere.",
+                    // **The host named, and the address shown**, because this sentence is what
+                    // decides whether a person believes a copy still exists somewhere else. It said
+                    // "on GitHub" for every project, which was true only while every project had one.
+                    (address?.let { "Its repository is still at $it, with everything already pushed " +
+                        "to it. Nothing here deletes it — that is the host's own page." }
+                        ?: "It had no address, so there is nowhere else it could be."),
             )
         },
         confirmButton = { TextButton(onClick = { onKeepLocal(); onDismiss() }) { Text("Keep local") } },
