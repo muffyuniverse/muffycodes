@@ -239,8 +239,12 @@ class HeartbeatTest {
     @Test
     fun `a quiet hour still gets a badge, because it is a real comparison`() {
         // The operator's choice: show `—` only when the hour is *entirely* empty. One request
-        // against a busy baseline is a genuine -99.5%, not noise to be hidden.
-        for (h in 0 until Heartbeat.HOURS - 1) RequestDb.insert(db, t0 + h * hour, stats())
+        // against a busy baseline is a genuine fall, not noise to be hidden — so the baseline is
+        // **two a hour** for the forty-seven hours before, and the newest hour holds one.
+        for (h in 0 until Heartbeat.HOURS - 1) {
+            RequestDb.insert(db, t0 + h * hour, stats())
+            RequestDb.insert(db, t0 + h * hour + 1_000L, stats())
+        }
         val now = t0 + (Heartbeat.HOURS - 1) * hour + 30 * minute
         RequestDb.insert(db, now - minute, stats())
 

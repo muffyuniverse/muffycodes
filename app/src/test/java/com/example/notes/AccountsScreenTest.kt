@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -68,6 +69,7 @@ class AccountsScreenTest {
         var entered: String? = null
         var added = 0
         var removed: String? = null
+        var connections = 0
         var settings = 0
     }
 
@@ -79,6 +81,7 @@ class AccountsScreenTest {
                     onEnter = { taps.entered = it },
                     onAdd = { taps.added++ },
                     onRemove = { taps.removed = it },
+                    onConnection = { taps.connections++ },
                     onSettings = { taps.settings++ },
                 )
             }
@@ -138,30 +141,43 @@ class AccountsScreenTest {
     }
 
     @Test
-    fun `remove is a visible button that names its own account`() {
-        // **Offered, not hidden behind a long press.** And it must name its own row: a removal that
-        // took the wrong login is the one mistake here that loses a workspace.
+    fun `remove is in the row's menu, and names its own account`() {
+        // **Offered, not hidden behind a long press** — a row's own menu, which is the same door every
+        // other row in this app uses and the only door to a credential. And it must name its own row:
+        // a removal that took the wrong login is the one mistake here that loses a workspace.
         val taps = Taps()
-        // **The first row in the model's own order**, which is the order the screen draws. Written
-        // this way because the phone may hold more than one account and `onNodeWithText("Remove")`
-        // would then match several — the ambiguity is about rows, not about the claim.
+        // **The first row in the model's own order**, which is the order the screen draws.
         val first = scene.viewModel.accountsWithProjects.first().first.login
         accounts(taps)
 
-        compose.onAllNodesWithText("Remove")[0].performScrollTo().performClick()
+        compose.onAllNodesWithContentDescription("More")[0].performClick()
+        compose.onNodeWithText("Remove…").assertIsDisplayed().performClick()
 
         assertEquals("the row named its own account", first, taps.removed)
     }
 
     @Test
-    fun `every account row offers its own remove`() {
-        // **One per row, not one on the screen.** With two accounts there must be two buttons; the
+    fun `every account row has its own menu`() {
+        // **One per row, not one on the screen.** With two accounts there must be two menus; the
         // version of this screen that drew a single Remove would have removed whichever account the
         // code happened to pick.
         scene.viewModel.signIn("someone-else", "a-key", "", "")
         accounts()
 
-        compose.onAllNodesWithText("Remove").assertCountEquals(2)
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(2)
+    }
+
+    @Test
+    fun `an account row offers its own model connection`() {
+        // **The widest place a chat model may live.** A project inherits it, a branch may override it,
+        // and it is asked of the account because a chat request is made *as* somebody.
+        val taps = Taps()
+        accounts(taps)
+
+        compose.onAllNodesWithContentDescription("More")[0].performClick()
+        compose.onNodeWithText("Model connection…").assertIsDisplayed().performClick()
+
+        assertEquals("the row asked for its own window", 1, taps.connections)
     }
 
     @Test
