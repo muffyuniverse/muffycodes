@@ -373,8 +373,8 @@ class SecretsScreenTest {
             scene.credentials.secret("stripe", "api.stripe.com"),
         )
         assertEquals(
-            "and the project's value is gone",
-            null,
+            "and the project now falls back to the account's, rather than losing it",
+            "acct_key",
             scene.credentials.secret("acme", "stripe", "api.stripe.com"),
         )
     }
