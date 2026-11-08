@@ -876,7 +876,6 @@ private fun Dialogs(
                 viewModel.deleteProject(pending.project)
             },
         )
-        )
 
         is Pending.RenameEntry -> PromptDialog(
             title = "Rename ${pending.entry.name}",
