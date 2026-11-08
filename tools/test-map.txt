@@ -1,4 +1,3 @@
-CiSetupTest app/src/main/java/com/example/notes/CiSetup.kt app/src/main/java/com/example/notes/EncryptedLog.kt app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/Workflows.kt
 # Which tests belong to which files.
 #
 # One line per test class, naming every source file that class exercises. The
@@ -88,12 +87,8 @@ ModelSectionTest app/src/main/java/com/example/notes/ModelSection.kt app/src/mai
 ModelKeyTest app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/CredentialStore.kt
 AgentLogTest app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
 AgentToolsTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt
-WorkflowsTest app/src/main/java/com/example/notes/Workflows.kt
-SigningTest app/src/main/java/com/example/notes/Signing.kt app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/Workflows.kt app/src/main/java/com/example/notes/GitHub.kt
 EncryptedLogTest app/src/main/java/com/example/notes/EncryptedLog.kt
 SealedBoxTest app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/Secrets.kt
-ReleaseKeyTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/GitHub.kt
-SigningFeatureTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 ReleaseTest app/src/main/java/com/example/notes/Release.kt app/src/main/java/com/example/notes/GitHub.kt
 ExportTest app/src/main/java/com/example/notes/Export.kt
 DownloadsTest app/src/main/java/com/example/notes/Downloads.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Workspace.kt

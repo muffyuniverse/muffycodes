@@ -562,9 +562,6 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
                 onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
-                // **The same function the agent's `downloads` tool calls**, so a person's export and
-                // the agent's are the same bytes from the same place.
-                onRowExport = { project -> tap("export", project); viewModel.exportArtifact(project) },
                 // **The release button on the project's strip.** It is offered only when nothing is
                 // unsent, so the window is reached exactly when a version can honestly be named.
                 onRelease = { project -> tap("publish release", project); pending = Pending.Release(project) },

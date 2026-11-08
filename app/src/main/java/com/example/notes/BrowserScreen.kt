@@ -312,7 +312,6 @@ fun BrowserScreen(
     onAddProject: () -> Unit,
     onRowChat: (String) -> Unit,
     /** Exports the project's newest artifact, or the project's own files when it has none. */
-    onRowExport: (String) -> Unit = {},
     /**
      * Opens the window that publishes a release of [project] (§13b.7).
      *
@@ -533,12 +532,6 @@ fun BrowserScreen(
                         ?.let { project -> { onRelease(project) } },
                 )
 
-                // **One line, and only when a key on the phone is missing from CI.** The person has
-                // the material, the build cannot see it, and their next release would be unsigned —
-                // which they would otherwise discover from a failed install. The row asks; the
-                // press sends. See `AppViewModel.checkSigning`.
-                SigningRow(viewModel, onSend = { project -> viewModel.fixSigning(project) })
-
                 // What can be done with what is chosen. It appears only when
                 // something is chosen, because it is a mode: a long press on a row
                 // enters it, and the cross leaves it.
@@ -583,7 +576,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowKeepLocal, onRowExport,
+                        onRowKeepLocal,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -844,39 +837,6 @@ fun SlimRow(
     }
 }
 
-/**
- * The signing-key row: one sentence and one button, or nothing at all.
- *
- * **It draws from the view model's state rather than holding its own**, for the same reason every
- * other window in this screen does: the answer arrives on the worker after the screen was built, and
- * a value Compose cannot see does not redraw.
- */
-@Composable
-private fun SigningRow(viewModel: AppViewModel, onSend: (String) -> Unit) {
-    val said = viewModel.signingSaid ?: return
-    val project = viewModel.path.firstOrNull() ?: return
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = said,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.weight(1f),
-            )
-            // **"Fix", not "Send".** The press may create an environment, restrict it to two
-            // branches, add `environment:` to the workflow, write four secrets and delete four
-            // others — and a button called "Send" would not have said so.
-            TextButton(onClick = { onSend(project) }) { Text("Fix") }
-        }
-    }
-}
-
 /** The Projects screen: a row each, with the count and the ⋮ menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -888,7 +848,6 @@ private fun ProjectList(
     /** Synced -> local: take the remote away, keeping every version here. */
     onKeepLocal: (String) -> Unit,
     /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
-    onExport: (String) -> Unit,
 ) {
     val names = viewModel.projectNames
     // **The system folder is a row here, and it is not a project** (§13f). It lives at the account root,
@@ -1013,17 +972,11 @@ private fun ProjectList(
                                     },
                                 )
                             }
-                            // **The same function the agent's `downloads` tool calls.** Two
-                            // implementations of "copy this to Downloads" drift in the ways that are
-                            // hardest to notice, and a person and an agent exporting the same file
-                            // should find them identical.
-                            DropdownMenuItem(
-                                text = { Text("Export to Downloads") },
-                                onClick = {
-                                    menu = false
-                                    onExport(name)
-                                },
-                            )
+
+                            // **No "Export to Downloads" here any more.** It exported the newest CI
+                            // artifact, and an artifact is a run's output — a vendor's idea that
+                            // `ls-remote` cannot ask about. A file of the project's is copied out
+                            // from the file's own menu, which is where the person is looking at it.
                             DropdownMenuItem(
                                 text = {
                                     Text("Delete…", color = MaterialTheme.colorScheme.error)

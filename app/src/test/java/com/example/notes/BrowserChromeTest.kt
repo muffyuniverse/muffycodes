@@ -703,36 +703,45 @@ class BrowserChromeTest {
     // ---- the three windows nothing was asserting the words of ------------------
 
     @Test
-    fun `the publishing window names the direction and the licence it will use`() {
-        // **The direction is the whole risk.** The same row offers the opposite act when a project
-        // is already synced, so a window that did not say which way it goes could publish something
-        // a person meant to keep private. And a default licence that is not shown is a decision made
-        // on their behalf.
+    fun `the address window says which way the name will go`() {
+        // **The consequence is the whole risk.** Typing an address renames a folder, which is not
+        // obvious from the field, so the window says it — and says the opposite thing when the name
+        // would stay, because a person who reads "renamed" and gets no rename has been misled.
         compose.setContent {
             MaterialTheme {
-                PublishProjectDialog(
+                SetAddressDialog(
                     project = "groceries",
-                    licences = listOf(
-                        Licence("gpl-3.0", "GNU General Public License v3.0"),
-                        Licence("mit", "MIT License"),
-                    ),
+                    current = "https://gitlab.com/owner/food.git",
                     onDismiss = {},
-                    onPublish = {},
+                    onSet = {},
                 )
             }
         }
 
         compose.waitForIdle()
-        assertTrue("it says where the project is going", there("Put groceries on GitHub"))
-        // **Private is the default now, and that is the change this asserts.** The window used to
-        // open on GPL-3.0, which publishes the first save of a project whose owner has not decided
-        // anything yet. A licence is a public statement; "nobody can see this" is the safe answer
-        // before one has been chosen.
-        //
-        // The licence's own NAME, not its key: a test that looked for "private" would be asserting
-        // the wire format rather than the sentence a person reads.
-        assertTrue("and which licence it will publish under", there("Licence: Private (no licence)"))
-        assertFalse("and it is not the keep-local window", there("only on this phone"))
+        assertTrue("it names the project", there("Set the address of groceries"))
+        assertTrue(
+            "it starts on the address the project has",
+            there("https://gitlab.com/owner/food.git"),
+        )
+        assertTrue("and says what the name will become", there("renamed to \"food\""))
+    }
+
+    @Test
+    fun `the address window says when only the address changes`() {
+        compose.setContent {
+            MaterialTheme {
+                SetAddressDialog(
+                    project = "groceries",
+                    current = "https://gitlab.com/owner/groceries.git",
+                    onDismiss = {},
+                    onSet = {},
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue("the name stays, and the window says so", there("only the address changes"))
     }
 
     @Test
@@ -742,16 +751,23 @@ class BrowserChromeTest {
         // "keep local" would read as "delete the remote".
         compose.setContent {
             MaterialTheme {
-                KeepLocalDialog(project = "groceries", onDismiss = {}, onKeepLocal = {})
+                KeepLocalDialog(
+                    project = "groceries",
+                    address = "https://gitlab.com/owner/groceries.git",
+                    onDismiss = {},
+                    onKeepLocal = {},
+                )
             }
         }
 
         compose.waitForIdle()
         assertTrue("it names the project", there("groceries"))
         assertTrue("and says nothing is removed", there("stays here"))
-        assertTrue("including the repository", there("stays on GitHub"))
-        assertTrue("while pointing at the act that does delete", there("Delete everywhere"))
-        assertFalse("and it is not the publishing window", there("Put groceries on GitHub"))
+        // **The address, not a host's name.** This sentence said "on GitHub" for every project,
+        // which was true only while every project had a GitHub repository.
+        assertTrue("including the repository", there("still at https://gitlab.com/owner/groceries.git"))
+        assertTrue("and that deleting it is the host's page", there("Nothing here deletes it"))
+        assertFalse("and it is not the address window", there("Set the address of groceries"))
     }
 
 

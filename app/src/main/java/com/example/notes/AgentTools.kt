@@ -624,8 +624,8 @@ class AgentTools(
             // 40 MB. That step works because `outputFolder` sends the output to the project when
             // `agent/` is not writable; without it the documented workflow would be a refusal.
             // **One request, with the verb and the body the caller chose.** This is what makes the app
-            // reach any API without a typed method per endpoint - the thing that made `CiSetup` take five
-            // compile rounds. `auth` names a secret in the vault and never holds one; the vault refuses it
+            // reach any API without a typed method per endpoint - the thing that made the CI screen
+            // take five compile rounds, and the reason it is gone rather than ported. `auth` names a secret in the vault and never holds one; the vault refuses it
             // for any host the secret was not stored for, so naming a secret cannot send it somewhere else.
             "http" to setOf("method", "url", "headers", "body", "auth"),
             // **One tool, not one tool per remote tool.** The tool list is part of every request's cache
@@ -3499,8 +3499,9 @@ class AgentTools(
      * ## Why this is one tool and not a method per service
      *
      * The app has no shell: there is no `curl`, no `gh`, no `sh`. Adding GitHub's API as typed Kotlin
-     * (`createRepo`, `dispatch`, `logs`, …) is what made `CiSetup` take five compile rounds and leaves four
-     * `REPOSITORY:` bindings to keep in step — and every new endpoint would need another round. A request is
+     * (`createRepo`, `dispatch`, `logs`, …) is what made the CI screen take five compile rounds and
+     * leaves four `REPOSITORY:` bindings to keep in step — and every new endpoint would need another
+     * round. That screen is deleted rather than ported; this tool is what replaced it. A request is
      * a request: `method`, `url`, `headers`, `body`, `auth`. A GitHub endpoint nobody has written yet works
      * on the first try, and so does every other API on the internet.
      *

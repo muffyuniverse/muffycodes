@@ -1115,38 +1115,34 @@ class ScenariosTest {
     }
 
     @Test
-    fun `the window that puts a local project on GitHub`() {
-        // **The other half of the local<->synced cycle**, and the one place a licence is chosen.
-        // Pictured because the licence row is a control with a default that a person has to be able
-        // to see and change - a dialog that silently published everything as GPL-3.0 would be a
-        // decision made on their behalf.
+    fun `the window that sets a project's address`() {
+        // **Where publishing and renaming became one press.** A local project given an address is
+        // published; a project whose address names something else is renamed after it. Pictured
+        // because the consequence is invisible in the field: typing an address renames a folder, and
+        // the window is the only place that says so.
         scenario(
-            compose, "29-a-window-publishing",
-            "A window putting a local project on GitHub.",
-            "the licence a published project has to declare, before anything is sent anywhere.",
+            compose, "29-a-window-setting-the-address",
+            "A window giving a project an address.",
+            "the field, the promise that it is checked first, and the name the folder will take.",
             screen = {
                 window {
-                    PublishProjectDialog(
+                    SetAddressDialog(
                         project = "groceries",
-                        licences = listOf(
-                            Licence("gpl-3.0", "GNU General Public License v3.0"),
-                            Licence("mit", "MIT License"),
-                            Licence("apache-2.0", "Apache License 2.0"),
-                        ),
+                        current = "",
                         onDismiss = {},
-                        onPublish = {},
+                        onSet = {},
                     )
                 }
             },
         ) {
             before()
-            then("Nothing is published: the licence is shown with its default, and changing it is one tap.") {}
+            then("Nothing is pointed anywhere: the address is checked before it is used.") {}
             after()
             result(
-                "The direction is named in the title - this project goes TO GitHub - because the " +
-                    "same row offers the opposite act when the project is already synced, and the " +
-                    "two must never be confused. GPL-3.0 is chosen by default and said so, rather " +
-                    "than left blank for a person who does not know what to pick.",
+                "The window says the address is checked with ls-remote before anything changes, so " +
+                    "a mistyped path is a sentence rather than a project that claims to be " +
+                    "published. It also says the folder takes the address's last segment - the " +
+                    "consequence a person cannot see in a text field.",
             )
         }
     }
@@ -1159,10 +1155,15 @@ class ScenariosTest {
         scenario(
             compose, "30-a-window-keeping-local",
             "A window keeping a synced project on this phone only.",
-            "the promise that nothing is deleted, and the way to delete it if that is what was meant.",
+            "the promise that nothing is deleted, and where the repository still is.",
             screen = {
                 window {
-                    KeepLocalDialog(project = "groceries", onDismiss = {}, onKeepLocal = {})
+                    KeepLocalDialog(
+                        project = "groceries",
+                        address = "https://gitlab.com/owner/groceries.git",
+                        onDismiss = {},
+                        onKeepLocal = {},
+                    )
                 }
             },
         ) {
@@ -1170,9 +1171,9 @@ class ScenariosTest {
             then("Nothing is kept local: the window explains before it acts.") {}
             after()
             result(
-                "It says what stays (every version, here) and what happens to the remote (nothing, " +
-                    "it keeps what was pushed) and names the other act for somebody who wanted " +
-                    "that - Delete everywhere - rather than leaving them to guess.",
+                "It says what stays (every version, here) and what happens to the remote (nothing " +
+                    "it keeps what was pushed) and names the address it is still at, because " +
+                    "'still on GitHub' was only ever true for projects that were on GitHub.",
             )
         }
     }

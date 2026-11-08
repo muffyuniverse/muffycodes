@@ -658,27 +658,24 @@ fun SettingsScreen(
                 )
             }
 
-            Text("Workflows", style = MaterialTheme.typography.titleMedium)
+            Text("Secrets the agent may use", style = MaterialTheme.typography.titleMedium)
             Text(
-                "The agent may write and start GitHub workflows — that is how it runs a program, " +
-                    "because this app has no shell of its own. A runner is a sandbox for the " +
-                    "machine, not for the repository: every workflow in a repository can read every " +
-                    "secret in it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                // **The rule that makes everything else true.** If a secret sits at repository
-                // level, every workflow reads it and no lock matters. The sentence is here rather
-                // than in a document because this is the screen a person is on when they decide
-                // where to put one.
-                "So put a secret on an environment, never on the repository: a workflow that names " +
-                    "no environment reaches no environment secret, and one that names an " +
-                    "environment waits for that environment's reviewers. A workflow that names an " +
-                    "environment is only started from here when its file is locked — a locked file " +
-                    "cannot be written by the agent, so its bytes are yours.",
+                // **The rule that makes everything else true**, and it is the app's own now rather
+                // than a host's: a secret in the vault carries the host it may be sent to, so a
+                // secret for one host is never attached to a request to another. That is what
+                // replaced the environment-and-reviewers machinery — the app no longer holds a
+                // workflow's key at all, so there is no runner to be careful about.
+                "A secret is filed under the host it belongs to. When the agent reaches the network " +
+                    "it must name the secret it is using, and the app refuses before sending if the " +
+                    "host in the address is not the host on the secret — so a key for one server " +
+                    "cannot travel to another, however the agent was talked into it.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "A secret with no host travels nowhere: it is used on this phone, and that is all.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Text("Keepalive", style = MaterialTheme.typography.titleMedium)

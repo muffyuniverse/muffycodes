@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
  *
  * **Why this screen had to exist.** `Credentials.setSecret` was encrypted, tested, and called by
  * nothing in the app — a tested function with no caller, the same defect the morning audit found in
- * `createdByOperator` and `CiSetup`. The `http` tool's `auth:` names a secret, so without a door the
+ * `createdByOperator`. The `http` tool's `auth:` names a secret, so without a door the
  * first secret could never exist and the feature would be untestable in practice as well as unusable.
  *
  * **Names are shown and values are never shown.** Not even once after typing, and not in a masked
