@@ -378,8 +378,11 @@ class AppViewModel @JvmOverloads constructor(
     /** Re-reads the ignore state of [project], for the rows that draw it. */
     fun refreshIgnored(project: String) {
         val ws = workspace ?: return
-        val dir = ws.projectDir(project)
-        ignoredPaths = git?.open(project)?.use { repo ->
+        // **The tree the rows are drawn from** (§13d): `git status` in main's view names main's files,
+        // so on a branch every mark was attached to a path that is not on the screen — and the screen
+        // showed no marks at all while `git` said some paths were ignored.
+        val dir = ws.treeOf(project)
+        ignoredPaths = git?.onBranch(ws.branchOf(dir))?.open(project)?.use { repo ->
             GitService.ignoredPaths(repo).associate { rel ->
                 File(dir, rel).absolutePath to true
             }
@@ -1235,14 +1238,19 @@ class AppViewModel @JvmOverloads constructor(
         onWorker {
             val names = ws.projectNames()
             for (name in names) {
-                try {
-                    SearchIndex.open(ws.projectDir(name)).use { it.clear() }
-                } catch (e: Throwable) {
-                    // A project whose index cannot be emptied still gets a pass; that pass will say
-                    // why in its own note rather than the whole rebuild stopping on one folder.
+                // **Every tree of every project** (§13d): each worktree keeps its own index, so clearing
+                // only main's left every branch holding vectors from the model the person just replaced
+                // — and a search there would compare two spaces.
+                for (branch in Worktrees(ws).branches(name)) {
+                    try {
+                        SearchIndex.open(ws.treeOf(name, branch)).use { it.clear() }
+                    } catch (e: Throwable) {
+                        // A project whose index cannot be emptied still gets a pass; that pass will say
+                        // why in its own note rather than the whole rebuild stopping on one folder.
+                    }
+                    IndexQueue.want(name, "the embedding model changed", branch)
                 }
             }
-            for (name in names) IndexQueue.want(name, "the embedding model changed")
         }
     }
 
@@ -2258,7 +2266,10 @@ class AppViewModel @JvmOverloads constructor(
         // `.gitignore` answers, and a second copy of that answer is a second thing that can be
         // wrong. The index is asked the same way for "is it tracked", which is the other half of
         // what the button changes.
-        val ignored = git?.open(project)?.use { repo -> GitService.isIgnored(repo, inside) } ?: false
+        // **The file's own tree**, because whether a path is ignored is a fact about the `.gitignore`
+        // in the tree that holds it — and the line this writes goes there too.
+        val ignored = git?.onBranch(ws.branchOf(file))?.open(project)
+            ?.use { repo -> GitService.isIgnored(repo, inside) } ?: false
         setIgnored(file, project, inside, !ignored)
     }
 
@@ -2290,7 +2301,10 @@ class AppViewModel @JvmOverloads constructor(
     private fun setIgnored(file: File, project: String, inside: String, ignore: Boolean) {
         val ws = workspace ?: return
         Trace.tap(if (ignore) "ignore" else "track", inside)
-        val ignoreFile = File(ws.projectDir(project), Workspace.IGNORE)
+        // **The tree the file is in.** A branch's `.gitignore` is that branch's file: writing main's
+        // would change a document the person is not looking at, and the branch's own status would not
+        // move — which reads as "ignore did nothing".
+        val ignoreFile = File(ws.treeOf(project, ws.branchOf(file)), Workspace.IGNORE)
         val current = if (ignoreFile.isFile) ws.read(ignoreFile) else ""
         val lines = current.lineSequence().toMutableList()
         val has = lines.any { it.trim() == inside }
@@ -3100,7 +3114,9 @@ class AppViewModel @JvmOverloads constructor(
         // list when clicked should open in diff mode." A person who tapped a file in a list called
         // "Changes to send" has already said what they want to see, and making them press Diff
         // after that is asking the same question twice.
-        openEditor(File(ws.projectDir(project), path), Opening.UNSENT)
+        // **The tree the change is in**, not the project's root: on a branch this opened main's copy,
+        // which either does not have the change or holds a different text.
+        openEditor(File(ws.treeOf(project), path), Opening.UNSENT)
     }
 
     /** The file the editor is showing, or null. */
