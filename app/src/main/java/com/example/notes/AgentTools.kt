@@ -254,6 +254,14 @@ class AgentTools(
     private val repo: ProjectGit get() = git.onBranch(branch)
 
     /**
+     * **This worktree, named the way a session is** — `project/branch`.
+     *
+     * The folder's own name is not it: `main`'s tree is the project's folder, and a branch's tree is a
+     * folder called after the branch. Anything the app keys by "which conversation" uses this.
+     */
+    private val sessionKey: String get() = AgentSession.keyOf(project, branch)
+
+    /**
      * One picture that was read: where it came from, and what it became.
      *
      * **The path travels with the picture** because the message that carries it has to name it. A
@@ -1334,7 +1342,9 @@ class AgentTools(
         // **The background's own limit, and no second handover.** A background of a background is
         // how a result gets lost, so this work is bounded by the operator's background number and
         // dies honestly when it runs out.
-        bg.start(dir, call) { run(call, Deadline(backgroundMs())) }
+        // **The session key**, because a worktree's folder is named after its branch — see
+        // `Background.Done.project`.
+        bg.start(dir, call, sessionKey) { run(call, Deadline(backgroundMs())) }
         val file = bg.resultFile(dir, call)
         val path = file.relativeTo(dir).invariantSeparatorsPath
         Trace.note("agent", "${dir.name} · ${call.tool} handed over after ${deadline.expiredIn()}")
@@ -1368,7 +1378,7 @@ class AgentTools(
         if (unknown.isNotEmpty()) return refuseKeys(tool, unknown)
         val inner = Call(id = call.id, tool = tool, args = innerArgs.toString())
         val dir = projectDir
-        return bg.start(dir, inner) { run(inner, Deadline(backgroundMs())) }
+        return bg.start(dir, inner, sessionKey) { run(inner, Deadline(backgroundMs())) }
     }
 
     /**

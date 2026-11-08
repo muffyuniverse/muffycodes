@@ -283,7 +283,9 @@ class AgentRunner(
             val finished = if (current.state == AgentSession.State.STOPPED) {
                 emptyList()
             } else {
-                bg.finishedSince(current.project, current.wokenThrough)
+                // **Keyed by the worktree**, which is what `Background` records — see its
+                // `Done.project`. Asking by project name on a branch answered nothing, every tick.
+                bg.finishedSince(AgentSession.keyOf(current.project, current.branch), current.wokenThrough)
             }
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is

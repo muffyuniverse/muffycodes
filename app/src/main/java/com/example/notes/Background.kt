@@ -40,7 +40,21 @@ class Background(
      * [path] is the same relative path the tool's own answer gave, so the note that wakes the agent
      * names the file it will read.
      */
-    data class Done(val project: String, val tool: String, val path: String, val at: Long)
+    data class Done(
+        /**
+         * **The session key** (`project/branch`), not the folder's name (§13d).
+         *
+         * It used to be `project.name` — the working tree's own folder name — which was the project's
+         * name while one tree existed. On a branch it is the *branch's* name, so a command started in
+         * `feature` was remembered as `"feature"` and `finishedSince("Shopping")` never matched it: the
+         * one thing worth spending a turn on that the person did not ask for silently stopped working
+         * on every branch.
+         */
+        val project: String,
+        val tool: String,
+        val path: String,
+        val at: Long,
+    )
 
     /**
      * The completions the tick has not answered for yet — **in memory, on purpose.**
@@ -70,7 +84,13 @@ class Background(
      * truth rather than an empty folder. It is replaced atomically when the work lands: a reader
      * never sees half a result.
      */
-    fun start(project: File, call: Call, work: () -> String): String {
+    fun start(
+        project: File,
+        call: Call,
+        /** The session the completion belongs to — see [Done.project]. Defaulted to what it was. */
+        key: String = project.name,
+        work: () -> String,
+    ): String {
         val file = resultFile(project, call)
         file.parentFile?.mkdirs()
         write(file, "running")
@@ -84,7 +104,7 @@ class Background(
             }
             write(file, body)
             Trace.note("agent", "${project.name} · ${call.tool} finished in ${file.name}")
-            remember(project.name, call.tool, relativeName(project, file))
+            remember(key, call.tool, relativeName(project, file))
             body
         }
         Trace.note("agent", "${project.name} · ${call.tool} running in ${file.name}")

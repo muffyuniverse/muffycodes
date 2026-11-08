@@ -105,6 +105,25 @@ class BackgroundTest {
     }
 
     @Test
+    fun `a command started in a worktree is remembered under its session key`() {
+        // **The bug this prevents.** `start` remembered `project.name` — the working tree's own folder
+        // name — which is the project's while one tree exists. On a branch that folder is named after
+        // the *branch*, so a completion was filed under `"feature"` and the tick, which asks by project,
+        // never found it: the one thing worth a turn the person did not ask for stopped working on
+        // every branch.
+        val bg = Background(launch = { work -> work() }, now = { 4_000 })
+        val key = AgentSession.keyOf("shopping", "feature")
+
+        bg.start(project, call("search", id = "8"), key) { "${AgentLog.SUCCESS} three files" }
+
+        assertEquals("filed under the session", 1, bg.finishedSince(key, 0).size)
+        assertTrue(
+            "and not under the folder's name, which is the branch's",
+            bg.finishedSince(project.name, 0).isEmpty(),
+        )
+    }
+
+    @Test
     fun `a command that stopped leaves its reason in the file`() {
         // A background result nobody is waiting on still has to say why it is not there. Otherwise
         // the file reads `running` for ever and the agent keeps coming back to it.
