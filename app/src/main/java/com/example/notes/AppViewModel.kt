@@ -914,9 +914,16 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val before = stateSignature()
-        // The folders the app owns exist from the moment the account is shown, so
-        // that an empty account and a new one look the same.
-        ws.ensure()
+        // The folders the app owns exist from the moment the account is shown, so that an empty
+        // account and a new one look the same.
+        //
+        // **But never for an account that has just been removed.** `rememberAccount`/`removeAccount`
+        // deletes the account's folder and then asks for a redraw; a redraw that re-made the folders
+        // undid the delete a moment after it happened, and — worse — made `AccountStore.exists` true
+        // again, so a queued save found the guard open and wrote into a tree nobody owned. Found by
+        // `a queued save alone does not bring a deleted account back` failing on a loaded shard.
+        val login = activeLogin
+        if (login != null && accounts.exists(login)) ws.ensure()
         projectNames = ws.projectNames()
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()

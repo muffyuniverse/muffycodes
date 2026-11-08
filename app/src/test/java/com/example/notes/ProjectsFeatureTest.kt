@@ -474,7 +474,7 @@ class ProjectsFeatureTest : FeatureTest() {
         }
 
         scene.viewModel.sync("scratch")
-        scene.await("the refusal", 5_000) { scene.viewModel.message?.contains("no GitHub") == true }
+        scene.await("the refusal", 5_000) { scene.viewModel.message?.contains("no address") == true }
 
         assertTrue(
             "and it says where the project lives: ${scene.viewModel.message}",
@@ -664,7 +664,7 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `ignoring a file GitHub already has says its earlier versions stay there`() {
+    fun `ignoring a file the remote already has says its earlier versions stay there`() {
         // **Report 9's other half, and the sentence the operator asked for.** Ignoring stops a path
         // being *sent from now on*; it does not take back what was sent. Measured: after untracking
         // and pushing, a fresh clone has no file in its tree, but `git log --all` still finds the
@@ -710,8 +710,8 @@ class ProjectsFeatureTest : FeatureTest() {
         val said = scene.viewModel.message.orEmpty()
         assertTrue("it says the file is ignored: $said", said.contains("Ignoring secret.txt"))
         assertTrue(
-            "and that earlier versions stay on GitHub: $said",
-            said.contains("earlier versions stay on GitHub"),
+            "and that earlier versions stay at the remote: $said",
+            said.contains("earlier versions stay at the remote"),
         )
         assertTrue(
             "and what ignoring does not do: $said",

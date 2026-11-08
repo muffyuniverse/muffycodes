@@ -399,8 +399,12 @@ class AccountsFeatureTest : FeatureTest() {
         }
         assertFalse("the folder is gone", project.exists())
 
-        // The save is queued with a zero debounce, so it runs almost at once. A wait is the only
-        // way to tell "the guard refused it" from "it has not run yet".
+        // **A wait, because the queue is not observable.** The save is queued with a zero debounce,
+        // so it runs almost at once; a wait is the only way to tell "the guard refused it" from "it
+        // has not run yet". This test cannot *force* the race — the save may well finish before the
+        // removal — but it does assert that the redraw which follows a removal does not remake the
+        // folder, which is the half that made the guard moot: `exists()` is a folder check, so a
+        // repaint that recreated the tree reopened the very door the save was guarded against.
         Thread.sleep(500)
         assertFalse(
             "and the save did not recreate it",
