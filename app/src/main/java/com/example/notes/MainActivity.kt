@@ -645,6 +645,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         viewModel = viewModel,
         pending = pending,
         dismiss = { pending = Pending.None },
+        // **A window that opens another window.** The account door is a choice between two dialogs,
+        // so the choice has to be able to replace what is on screen — `dismiss` only closes.
+        show = { pending = it },
         newProject = { pending = Pending.NewProject },
     )
 }
@@ -655,6 +658,7 @@ private fun Dialogs(
     viewModel: AppViewModel,
     pending: Pending,
     dismiss: () -> Unit,
+    show: (Pending) -> Unit,
     newProject: () -> Unit,
 ) {
     // **This composable's own context**, for the two places that leave the app: the OpenRouter
@@ -705,11 +709,11 @@ private fun Dialogs(
             onDismiss = dismiss,
             onGitHub = {
                 tap("confirm add account", "github")
-                pending = Pending.SignIn
+                show(Pending.SignIn)
             },
             onAnotherHost = {
                 tap("confirm add account", "host")
-                pending = Pending.AddHostAccount
+                show(Pending.AddHostAccount)
             },
         )
 
