@@ -44,7 +44,7 @@ object LfsSync {
         val stored = storedObjects(repo)
         if (stored.isEmpty()) return Done()
         val endpoint = remoteUrl?.let { LfsClient.endpointOf(it) }
-            ?: return Done(why = "This project has no GitHub address to send pictures to")
+            ?: return Done(why = "This project has no remote address to send pictures to")
         if (token.isNullOrBlank()) {
             // **Named rather than attempted.** An anonymous upload answers 401 and would read as a
             // network problem; the real cause is that nobody is signed in.
@@ -85,7 +85,7 @@ object LfsSync {
             .distinctBy { it.oid }
         if (absent.isEmpty()) return Done()
         val endpoint = remoteUrl?.let { LfsClient.endpointOf(it) }
-            ?: return Done(why = "This project has no GitHub address to fetch pictures from")
+            ?: return Done(why = "This project has no remote address to fetch pictures from")
         if (token.isNullOrBlank()) return Done(why = "Signing in again is needed before pictures can be fetched")
         val batch = LfsClient.batch(endpoint, token, "download", absent.map { it.oid to it.size })
             .getOrElse { return Done(why = it.message) }

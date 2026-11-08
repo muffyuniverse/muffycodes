@@ -110,6 +110,23 @@ object Secrets {
         URL_USER_INFO.replace(url) { it.groupValues[1] }
 
     /**
+     * The username a remote URL names, or null when it names none.
+     *
+     * **`https://x-token-auth@bitbucket.org/team/repo.git` is how git itself says which username a
+     * token belongs to**, and it is the only portable place to say it: a host that wants a name other
+     * than the token's own is a fact about *that remote*, not a table of providers this app keeps.
+     * Adding it is one edit to the project's address; teaching the app would be a compile.
+     *
+     * A `user:password@` form answers the user, because the password half is the token and it belongs
+     * in the vault rather than in a URL.
+     */
+    fun userOf(url: String): String? {
+        val found = URL_USER_INFO.find(url) ?: return null
+        val user = found.groupValues.getOrNull(2) ?: return null
+        return user.substringBefore(':').takeIf { it.isNotBlank() }
+    }
+
+    /**
      * True when [url] points at GitHub — the only host a key is ever given to.
      * Checked before the key is attached to a request or a clone, so that a
      * repository that quietly points somewhere else cannot collect it.
@@ -149,8 +166,11 @@ object Secrets {
         return authority.substringAfterLast('@').substringBefore(':').trim().lowercase()
     }
 
-    /** `scheme://userinfo@` — the user info is the part that must not survive. */
-    private val URL_USER_INFO = Regex("""([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@""")
+    /**
+     * `scheme://userinfo@` — two groups, because the part that must not survive is also the part a
+     * token may belong to.
+     */
+    private val URL_USER_INFO = Regex("""([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s]+)@""")
 
     /**
      * The token shapes that travel without a URL: GitHub's, and OpenRouter's.

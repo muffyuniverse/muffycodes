@@ -57,6 +57,16 @@ class ProjectGit(
      * and then committed **main's** tree, which is a commit that records nothing and says nothing.
      */
     private val branch: String = AgentSession.MAIN,
+
+    /**
+     * **The secret a remote's host has in the vault, or null** — the portable half of a push.
+     *
+     * A provider like the others: a `ProjectGit` in a test must not need a keystore to answer, and a
+     * test that wants to see *that the vault was asked* passes a recorder. The app passes
+     * `Credentials::secret`, which answers narrowest-first (project, then account, then shared), so one
+     * lambda is the whole of "this project has its own key for this host".
+     */
+    private val vaultToken: (project: String, host: String) -> String? = { _, _ -> null },
 ) {
 
     /**
@@ -68,7 +78,7 @@ class ProjectGit(
      */
     fun onBranch(branch: String): ProjectGit =
         if (branch == this.branch) this
-        else ProjectGit(workspace, tokenProvider, authorProvider, index, branch)
+        else ProjectGit(workspace, tokenProvider, authorProvider, index, branch, vaultToken)
 
     /**
      * The working tree of a project on **this view's branch** — the project's own folder on `main`, the
@@ -78,6 +88,16 @@ class ProjectGit(
 
     /** True when the project has a repository. */
     fun isRepository(project: String): Boolean = GitService.isRepository(repoDir(project))
+
+    /**
+     * What this project's remote authenticates with, or the sentence that says why nothing can.
+     *
+     * **Asked before anything is sent**, so a host this phone has no credential for produces a sentence
+     * rather than a server's 401 about a key that was never offered — the failure this app forbids
+     * most. The decision itself is [GitCredentials], which has no Android in it and is tested alone.
+     */
+    private fun credentialFor(project: String, remoteUrl: String?): GitCredentials.Answer =
+        GitCredentials.forRemote(remoteUrl, tokenProvider()) { host -> vaultToken(project, host) }
 
     /** Opens the project's repository, or null when it has none. */
     fun open(project: String): Repository? {
@@ -324,7 +344,7 @@ class ProjectGit(
                     }
                 }
                 // The sync's own message, on its own commit, so that the push carries
-                // a reason to GitHub rather than only a list of files.
+                // a reason to the remote rather than only a list of files.
                 GitService.commitMarker(it, note, authorProvider())
                 // **What is sent is `HEAD` minus the unsynced paths.** The local commit is already
                 // made above and stays exactly as it is; the push derives a tree without them, so a
@@ -336,7 +356,15 @@ class ProjectGit(
                 // them moves — uploading after the push is not a slower path, it is a rejected
                 // push. The filter is off around the push itself (see `GitService.push`), which is
                 // why JGit's own hook never runs and this is the only uploader.
-                val pictures = LfsSync.push(it, tokenProvider(), remoteUrlOf(it))
+                // **Decided before anything leaves the phone.** A remote this phone has no
+                // credential for is a sentence, not a server's 401 about a key never offered.
+                val remote = remoteUrlOf(it)
+                val token = when (val answer = credentialFor(project, remote)) {
+                    is GitCredentials.Answer.Say -> return GitService.RemoteResult(answer.why, false)
+                    is GitCredentials.Answer.Use -> answer.token
+                    GitCredentials.Answer.None -> null
+                }
+                val pictures = LfsSync.push(it, token, remote)
                 if (!pictures.ok) {
                     // **Nothing is pushed over a picture that did not arrive.** The tree would name
                     // an object GitHub does not have, and the sync would report a failure the person
@@ -357,7 +385,7 @@ class ProjectGit(
                     // replaced it with classic gitignore — "a simple tracked/untracked switch" — so
                     // what is on this phone's `main` and what is on GitHub's are now the same
                     // history, and the push is a fast-forward like any other.
-                    GitService.push(it, tokenProvider())
+                    GitService.push(it, token)
                 }
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
@@ -386,7 +414,16 @@ class ProjectGit(
             )
             repo.use {
                 try {
-                    val pictures = LfsSync.push(it, tokenProvider(), remoteUrlOf(it))
+                    val remote = remoteUrlOf(it)
+                    val token = when (val answer = credentialFor(project, remote)) {
+                        is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(
+                            answer.why,
+                            false,
+                        )
+                        is GitCredentials.Answer.Use -> answer.token
+                        GitCredentials.Answer.None -> null
+                    }
+                    val pictures = LfsSync.push(it, token, remote)
                     if (!pictures.ok) {
                         return@use GitService.RemoteResult(
                             "Nothing was sent, because a picture could not be uploaded: " +
@@ -394,7 +431,7 @@ class ProjectGit(
                             false,
                         )
                     }
-                    GitService.push(it, tokenProvider())
+                    GitService.push(it, token)
                 } catch (e: Throwable) {
                     GitService.RemoteResult(Secrets.describe(e), false)
                 }
@@ -427,12 +464,17 @@ class ProjectGit(
                 try {
                     val remote = remoteUrlOf(it)
                     if (remote.isNullOrBlank()) {
-                        return@use Pulled(false, said = "This project has no GitHub address to pull from")
+                        return@use Pulled(false, said = "This project has no address to pull from")
                     }
-                    GitService.fetch(it, tokenProvider())
+                    val token = when (val answer = credentialFor(project, remote)) {
+                        is GitCredentials.Answer.Say -> return@use Pulled(false, said = answer.why)
+                        is GitCredentials.Answer.Use -> answer.token
+                        GitCredentials.Answer.None -> null
+                    }
+                    GitService.fetch(it, token)
                     val branch = it.branch ?: "main"
                     val upstream = it.resolve("refs/remotes/origin/$branch")
-                        ?: return@use Pulled(true, said = "Nothing to pull: GitHub has no $branch yet")
+                        ?: return@use Pulled(true, said = "Nothing to pull: the remote has no $branch yet")
                     val head = it.resolve("HEAD")
                         ?: return@use Pulled(false, said = "This project has no commits yet")
                     if (GitService.isAncestor(it, upstream, head)) {
@@ -451,7 +493,7 @@ class ProjectGit(
             }
         }
 
-    /** The GitHub address this project sends to, or null when it has none. */
+    /** The address this project sends to, or null when it has none. */
     private fun remoteUrlOf(repo: org.eclipse.jgit.lib.Repository): String? =
         repo.config.getString("remote", "origin", "url")
 

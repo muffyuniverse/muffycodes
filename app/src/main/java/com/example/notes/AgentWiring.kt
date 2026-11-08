@@ -104,6 +104,9 @@ object AgentWiring {
             tokenProvider = { credentials.token(login) },
             authorProvider = { author },
             index = { project, branch, why -> IndexQueue.want(project, why, branch) },
+            // **The same rule the screen's `ProjectGit` follows**, because the agent's push is the
+            // same push: a project on another host authenticates with its own secret for that host.
+            vaultToken = { project, host -> credentials.secret(project, GitCredentials.SECRET, host) },
         )
         // **The indexer, wired before anything can commit.** Both the runner and the screen build a
         // `ProjectGit`, and either of them can be the first to save something, so both wire this —

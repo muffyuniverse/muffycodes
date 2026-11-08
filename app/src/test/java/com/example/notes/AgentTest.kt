@@ -2863,16 +2863,19 @@ class AgentTest {
 
 
     @Test
-    fun `pull refuses a project with no GitHub address, and says what is missing`() {
+    fun `pull refuses a project with no address, and says what is missing`() {
         // **The refusal, not a quiet success.** This test first asserted "nothing new" and got
         // "This project has no GitHub address to pull from" — which is the *right* answer here and
         // was the wrong premise: a project in these tests has no remote, so there is nothing to pull
-        // *from*, and a tool that pretended otherwise would be telling an agent it had checked
-        // GitHub when it had not spoken to it.
+        // *from*, and a tool that pretended otherwise would be telling an agent it had checked the
+        // remote when it had not spoken to it.
+        //
+        // **"The remote", not "GitHub"** (PLAN-portable-2026-11-08 §2): the address is whatever
+        // `origin` says, and the app no longer assumes which host that is.
         val said = call("pull")
 
         assertTrue("it is refused: $said", said.startsWith("1"))
-        assertTrue("and names what is missing: $said", said.contains("no GitHub address"))
+        assertTrue("and names what is missing: $said", said.contains("no address"))
     }
 
     @Test

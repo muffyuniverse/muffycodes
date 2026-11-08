@@ -130,6 +130,7 @@ SaidTest app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/examp
 DeviceFlowTest app/src/main/java/com/example/notes/DeviceFlow.kt
 ProjectTreeTest app/src/main/java/com/example/notes/ProjectTree.kt
 TokenScopesTest app/src/main/java/com/example/notes/TokenScopes.kt app/src/main/java/com/example/notes/DeviceFlow.kt
+GitCredentialsTest app/src/main/java/com/example/notes/GitCredentials.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/CredentialStore.kt
 SwipeTest app/src/main/java/com/example/notes/Swipe.kt
 GitToolTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 LiveHttpTest app/src/main/java/com/example/notes/Fetcher.kt

@@ -571,6 +571,12 @@ class AppViewModel @JvmOverloads constructor(
         tokenProvider = { activeLogin?.let { credentials.token(it) } },
         authorProvider = { author },
         index = indexer(ws),
+        // **A project on another host carries its own key** (PLAN-portable-2026-11-08 §4 P1). The
+        // store answers narrowest-first — the project's, then the account's, then the shared one — so a
+        // single lambda is the whole of "this project can reach a host this app knows nothing about".
+        vaultToken = { project, host ->
+            credentials.secret(project, GitCredentials.SECRET, host)
+        },
     )
 
     /**

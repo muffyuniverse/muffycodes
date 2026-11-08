@@ -187,7 +187,7 @@ class LfsSyncTest {
     }
 
     @Test
-    fun `with no GitHub address a picture that has to go says so rather than trying`() {
+    fun `with no remote address a picture that has to go says so rather than trying`() {
         // **A failure has to say what happened.** A project that stays on the phone has no endpoint,
         // and the answer names that rather than reporting a network error that never occurred.
         //
@@ -198,7 +198,7 @@ class LfsSyncTest {
 
         val sent = LfsSync.push(repo, "a-token", remoteUrl = null)
         assertFalse("it did not succeed", sent.ok)
-        assertTrue("and it says why: ${sent.why}", sent.why!!.contains("no GitHub address"))
+        assertTrue("and it says why: ${sent.why}", sent.why!!.contains("no remote address"))
     }
 
     @Test
@@ -210,7 +210,7 @@ class LfsSyncTest {
 
         val got = LfsSync.pull(repo, "a-token", remoteUrl = null)
         assertFalse("it did not succeed", got.ok)
-        assertTrue("with the reason: ${got.why}", got.why!!.contains("no GitHub address"))
+        assertTrue("with the reason: ${got.why}", got.why!!.contains("no remote address"))
     }
 
     @Test

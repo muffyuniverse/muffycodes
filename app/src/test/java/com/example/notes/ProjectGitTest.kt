@@ -47,6 +47,53 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a push to a host with no secret refuses in words, and sends nothing`() {
+        // **The portability rule, at the layer a person meets it.** A project whose `origin` is on a host
+        // this app knows nothing about used to go out with the account's GitHub key attached — the
+        // `pushNow` hole `GitService.credentials` was taught to close — and then, after that guard, it
+        // went out with *no* credential and the person was told the server had refused. Both are wrong.
+        // The answer is a sentence naming the host and the secret to add, decided before anything is
+        // sent, so no request is made at all.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor(token = "ghp_the-account-key")
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use {
+            GitService.setRemoteUrl(it, "https://gitlab.com/someone/shopping.git")
+        }
+
+        val result = git.push("Shopping")
+
+        assertFalse("it did not succeed", result.success)
+        assertTrue("it names the host: ${result.message}", result.message.contains("gitlab.com"))
+        assertTrue(
+            "and the secret to add: ${result.message}",
+            result.message.contains(GitCredentials.SECRET),
+        )
+        assertFalse(
+            "and it never mentions the account's key, because it was not offered",
+            result.message.contains("ghp_"),
+        )
+    }
+
+    @Test
+    fun `a project's own secret is the credential its remote gets`() {
+        // **The positive half**, and the one a second host depends on: a secret stored for the host,
+        // in the project's scope, is used instead of the account's key. Asserted through the same
+        // decision the push makes, because a push to that host would leave the phone.
+        val answer = GitCredentials.forRemote(
+            remoteUrl = "https://gitlab.com/someone/shopping.git",
+            accountToken = "ghp_the-account-key",
+            vault = { host -> if (host == "gitlab.com") "glpat-the-project-key" else null },
+        )
+
+        assertEquals(
+            "the vault's key is what goes",
+            GitCredentials.Answer.Use("glpat-the-project-key"),
+            answer,
+        )
+    }
+
+    @Test
     fun `a project of text files can be pushed while the LFS filter is on`() {
         // **The bug that made every sync fail, and it had nothing to do with pictures.**
         //

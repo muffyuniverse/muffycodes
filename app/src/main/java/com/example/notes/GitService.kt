@@ -435,8 +435,8 @@ object GitService {
                 .setDirectory(partial)
                 .setCloneAllBranches(true)
             deadline?.let { command.setProgressMonitor(it.monitor()) }
-            // **No guard here any more.** `credentials` takes the URL and answers nothing for a
-            // host that is not GitHub's, which is the same rule stated once instead of twice.
+            // **Guarded above, in words, before anything is opened** — `credentials` no longer decides
+            // whether this token belongs here, so this call must not be the first place it is asked.
             credentials(remoteUrl, token)?.let { command.setCredentialsProvider(it) }
             val git = command.call()
             git.use {
@@ -2178,29 +2178,32 @@ object GitService {
         }
     }
 
-    /** The credentials for talking to GitHub, when a token is available. */
     /**
-     * The credentials for [remoteUrl] — **or null, and never a key for the wrong host.**
+     * The credentials for [remoteUrl], from a token the caller has already decided to send there.
      *
-     * **The URL is a parameter rather than something the caller has already checked.** Every call
-     * site used to do its own `isGitHubHost` test, and `pushNow` was the one that did not: it
-     * attached the account's GitHub key to whatever `origin` said, so a project cloned from another
-     * host would have had the key sent to that host on the first push. A guard each caller has to
-     * remember is a guard that one of them forgets, and the one that forgot was the one that sends.
+     * **The decision is not made here, and that is the change.** This function used to answer null for
+     * any host that was not GitHub's — which is [GitCredentials]' question, about *whose* token it is.
+     * Two answers to one question is how a non-GitHub project could never be pushed at all: the vault's
+     * own credential for that host was refused here, by a rule about the account's token.
      *
-     * Taking the URL makes that unrepresentable: there is no way to ask for credentials without
-     * saying where they are going, and the answer for anywhere but GitHub is nothing at all.
+     * **The username comes from the remote when it names one.** `https://x-token-auth@bitbucket.org/…`
+     * is git's own way of saying which username a token belongs to, and it is the only portable place
+     * to say it: a host wanting a name other than the token's is a fact about that remote. Otherwise
+     * the token is the username with an empty password, which is GitHub's shape and the one GitLab's
+     * and Gitea's work with too.
      *
-     * **A URL with no host is allowed through.** A local path — a bare repository beside the
-     * project, which is how the tests and a folder-to-folder clone work — has nowhere for the key to
-     * go, so there is nothing to protect. `Secrets.hostOf` answers with an empty string there.
+     * **A URL with no host still works**, because a local path — a bare repository beside the project,
+     * which is how the tests and a folder-to-folder clone work — needs no username at all.
      */
     private fun credentials(remoteUrl: String?, token: String?): CredentialsProvider? {
         if (token.isNullOrBlank()) return null
         if (remoteUrl == null) return null
-        val host = Secrets.hostOf(remoteUrl)
-        if (host.isNotEmpty() && !Secrets.isGitHubHost(remoteUrl)) return null
-        return UsernamePasswordCredentialsProvider(token, CharArray(0))
+        val user = Secrets.userOf(remoteUrl)
+        return if (user == null) {
+            UsernamePasswordCredentialsProvider(token, CharArray(0))
+        } else {
+            UsernamePasswordCredentialsProvider(user, token.toCharArray())
+        }
     }
 
     /** The `origin` URL of [repo], or null when it has none. */

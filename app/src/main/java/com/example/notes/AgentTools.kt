@@ -5075,9 +5075,13 @@ class AgentTools(
         if (result.success) return success(result.message.ifBlank { "Pushed" })
         // **Rejected means the remote moved.** `RemoteResult` carries the server's own words, so the
         // answer passes them on rather than guessing — but it says what they mean.
+        //
+        // **"The remote", not "GitHub"**: the push is a git push to whatever `origin` says, and a
+        // sentence naming a host the person is not using is a sentence they cannot act on
+        // (PLAN-portable-2026-11-08 §2).
         return refusal(
             "${result.message.ifBlank { "Nothing was pushed" }}\n\n" +
-                "If GitHub refused because it has commits this phone does not, that is a conflict " +
+                "If the remote refused because it has commits this phone does not, that is a conflict " +
                 "and not an error: call `pull`, resolve anything it names, then `push` again.",
         )
     }
