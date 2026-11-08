@@ -172,11 +172,13 @@ class StreamTest {
         assertFalse("the turn's body is streamed", turn.getBoolean("stream"))
         assertFalse("and so is the ping's, until the turn flips it", ping.getBoolean("stream"))
         // **What the turn changes is one field**, so everything the provider caches is identical:
-        // the tools, the pin and the reasoning block are the same bytes in both.
+        // the tools and the stream options are the same bytes in both. (`provider` used to be here,
+        // back when it was a routing pin; the address is the connection now, so there is no field to
+        // compare — the identical prefix is the tools and the usage request.)
         assertEquals(
             "the cache sees the same prefix either way",
-            turn.getJSONObject("provider").toString(),
-            ping.getJSONObject("provider").toString(),
+            turn.getJSONObject("stream_options").toString(),
+            ping.getJSONObject("stream_options").toString(),
         )
         assertEquals("and the same tools", turn.getJSONArray("tools").length(), ping.getJSONArray("tools").length())
     }

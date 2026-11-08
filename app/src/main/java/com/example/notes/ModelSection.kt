@@ -1234,7 +1234,7 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
                         "A key is kept for this account. This phone has to be unlocked before the " +
                             "model list or the agent can read it."
                     KeyState.NONE ->
-                        "No OpenRouter key yet, so the model list cannot be read and the agent " +
+                        "No model key yet, so the model list cannot be read and the agent " +
                             "cannot talk."
                     // **The sentence that was missing.** This row said "no key yet" about a key that
                     // was stored and unreadable for an unrecognised reason, which is what the

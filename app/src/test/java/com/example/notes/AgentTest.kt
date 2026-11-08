@@ -755,8 +755,8 @@ class AgentTest {
 
         assertTrue("it says the phone is locked: $lockedWords", "locked" in lockedWords)
         assertTrue("and that the key is kept: $lockedWords", "unlock" in lockedWords)
-        assertFalse("it does not claim the account has no key", "No OpenRouter key" in lockedWords)
-        assertTrue("while an account with none is told so: $missingWords", "No OpenRouter key" in missingWords)
+        assertFalse("it does not claim the account has no key", "No model key" in lockedWords)
+        assertTrue("while an account with none is told so: $missingWords", "No model key" in missingWords)
     }
 
     @Test
@@ -788,7 +788,7 @@ class AgentTest {
             tools = emptyList(),
         )
         val words = unreadable.turn(request).exceptionOrNull()?.message.orEmpty()
-        assertFalse("it does not say the key was never set: $words", "No OpenRouter key" in words)
+        assertFalse("it does not say the key was never set: $words", "No model key" in words)
         assertTrue("it says a key is stored: $words", "stored" in words)
         assertTrue("and what to do about it: $words", "again" in words)
     }
