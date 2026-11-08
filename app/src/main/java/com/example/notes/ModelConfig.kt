@@ -63,7 +63,11 @@ const val OPENROUTER_BASE = "https://openrouter.ai/api/v1"
  * An empty value falls back to the shipped default rather than producing a relative URL.
  */
 fun chatEndpoint(baseUrl: String): String =
-    baseUrl.trim().trimEnd('/').ifEmpty { OPENROUTER_BASE } + "/chat/completions"
+    // **The join is the shape's** ([Shape.address]), and the fallback is here. A connection with no
+    // address is the vendor's default; an address is joined one way, in one place, so a shape's url
+    // that gains or loses a slash cannot produce `//chat/completions` at one call site and not
+    // another.
+    Shape.CHAT.address(baseUrl.trim().ifEmpty { OPENROUTER_BASE })
 
 /**
  * A model chosen for one job, **where the job decides what the third value means.**

@@ -26,6 +26,7 @@ TraceCoverageTest app/src/main/java/com/example/notes/Trace.kt app/src/main/java
 SqlToolTest app/src/main/java/com/example/notes/SqlTool.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/RequestStats.kt
 StreamTest app/src/main/java/com/example/notes/Stream.kt
 PicturesInDoorTest app/src/main/java/com/example/notes/Door.kt
+ShapeTest app/src/main/java/com/example/notes/Shape.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Embedder.kt app/src/main/java/com/example/notes/ModelConfig.kt
 LookTest app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/ContextBudget.kt
 LookToolTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/Agent.kt
 DrawingTest app/src/main/java/com/example/notes/Drawing.kt app/src/main/java/com/example/notes/EditorScreen.kt

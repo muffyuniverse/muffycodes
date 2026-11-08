@@ -468,21 +468,27 @@ class OpenRouterDoor(
      * its switch for throwing reasoning away, and the app wants the reasoning streamed, because it is
      * the liveness signal that tells a diligent model from a dead connection.
      */
-    internal fun body(request: Request, maxTokens: Int? = null): JSONObject {
-        val body = JSONObject()
-            .put("model", request.model)
-            .put("messages", messagesOf(request))
-            .put("tools", toolsOf(request.tools))
-            .put("tool_choice", "auto")
-            .put("stream_options", JSONObject().put("include_usage", true))
-            .put("stream", false)
-        if (request.effort.isNotBlank()) body.put("reasoning_effort", request.effort)
-        // **Everything above is unchanged by a ping, and must be.** A provider's cache matches the
+    internal fun body(request: Request, maxTokens: Int? = null): JSONObject =
+        // **The body is a shape, not a function** (see `Shape`). The default preset is this same
+        // object, field for field — so this line changed nothing about the wire format, and it is
+        // what makes "ask a self-hosted server in its own words" a template rather than a patch.
+        //
+        // **Everything here is unchanged by a ping, and must be.** A provider's cache matches the
         // longest common prefix, so the tools and the options are part of what is being kept warm;
-        // only the answer's size differs, and that is not part of the prompt.
-        if (maxTokens != null) body.put("max_tokens", maxTokens)
-        return body
-    }
+        // only the answer's size differs, and that is not part of the prompt. A blank effort and a
+        // null `max_tokens` therefore have to *remove* their keys rather than send `""` and `null`,
+        // which is the shape's rule (see `Shape`) and not an accident of this map.
+        Shape.CHAT.bodyOf(
+            mapOf(
+                "model" to request.model,
+                "messages" to messagesOf(request),
+                "tools" to toolsOf(request.tools),
+                "tool_choice" to "auto",
+                "stream" to false,
+                "effort" to request.effort.ifBlank { null },
+                "max_tokens" to maxTokens,
+            ),
+        )
 
     /** One exchange, as text. **Unparsed**, because a ping does not read its answer. */
     private fun exchange(request: Request, maxTokens: Int?): String {

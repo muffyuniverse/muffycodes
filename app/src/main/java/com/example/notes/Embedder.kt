@@ -88,15 +88,23 @@ interface Embedder {
 
             override fun embed(texts: List<String>, model: String, dims: Int): Result<List<FloatArray>> =
                 try {
-                    val body = JSONObject().apply {
-                        put("model", model)
-                        put("input", JSONArray(texts))
-                        // **Sent only when the person chose one.** A model that does not take the
-                        // parameter rejects the request if it is present, so sending `dimensions` to
-                        // every model would break the ones that do not support it.
-                        if (dims > 0) put("dimensions", dims)
-                    }
-                    val answer = post("/embeddings", body, key, baseUrl())
+                    // **Through the shape, like every other request** (see `Shape`). The default
+                    // preset is this same body, field for field, so nothing about the wire format
+                    // changed when the mechanism arrived - and the day a self-hosted server wants
+                    // `{prompt}` instead of `{model, input[]}`, that is a template rather than a
+                    // patch.
+                    //
+                    // `dimensions` is sent only when the person chose one: a model that does not
+                    // take the parameter rejects the request if it is present, which is the blank
+                    // placeholder rule rather than an `if` here.
+                    val body = Shape.EMBEDDING.bodyOf(
+                        mapOf(
+                            "model" to model,
+                            "input" to JSONArray(texts),
+                            "dimensions" to dims.takeIf { it > 0 },
+                        ),
+                    )
+                    val answer = post(Shape.EMBEDDING.address(baseUrl()), body, key)
                     parseEmbeddings(answer, texts.size, dims)
                 } catch (e: Exception) {
                     Result.failure(IllegalStateException(Secrets.explain(e, "The text could not be embedded")))
@@ -104,24 +112,33 @@ interface Embedder {
 
             override fun rerank(query: String, documents: List<String>, model: String): Result<List<Ranked>> =
                 try {
-                    val body = JSONObject().apply {
-                        put("model", model)
-                        put("query", query)
-                        put("documents", JSONArray(documents))
-                    }
-                    val answer = post("/rerank", body, key, baseUrl())
+                    val body = Shape.RERANK.bodyOf(
+                        mapOf(
+                            "model" to model,
+                            "query" to query,
+                            "documents" to JSONArray(documents),
+                        ),
+                    )
+                    val answer = post(Shape.RERANK.address(baseUrl()), body, key)
                     parseRerank(answer)
                 } catch (e: Exception) {
                     Result.failure(IllegalStateException(Secrets.explain(e, "The results could not be reranked")))
                 }
         }
 
-        private fun post(path: String, body: JSONObject, key: () -> String?, baseUrl: String): String {
+        /**
+         * One POST, to an address the shape built.
+         *
+         * **The address rather than a path and a base**, so there is exactly one place that joins
+         * them ([Shape.address]) - two joins are two chances to write `//embeddings` and one of them
+         * to be forgotten when a shape's url is edited.
+         */
+        private fun post(url: String, body: JSONObject, key: () -> String?): String {
             val token = key()
                 ?: throw IllegalStateException("No model key on this account yet")
             var connection: HttpURLConnection? = null
             return try {
-                connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection)
+                connection = (URL(url).openConnection() as HttpURLConnection)
                     .apply {
                         requestMethod = "POST"
                         connectTimeout = 20_000
@@ -136,7 +153,7 @@ interface Embedder {
                 val text = (if (code in 200..299) connection.inputStream else connection.errorStream)
                     ?.bufferedReader()?.use { it.readText() }.orEmpty()
                 if (code !in 200..299) {
-                    throw IllegalStateException("OpenRouter answered $code: ${text.take(300)}")
+                    throw IllegalStateException("The model server answered $code: ${text.take(300)}")
                 }
                 text
             } finally {
