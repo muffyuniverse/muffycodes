@@ -2,6 +2,7 @@ package com.example.notes
 
 import android.content.Context
 import android.util.Base64
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -205,6 +206,35 @@ interface Credentials {
             is SecretScope.Branch -> setBranchSecret(scope.project, scope.branch, name, value, host)
         }
     }
+
+    /**
+     * **The connection a narrower scope puts in front of the account's** — the pair, or null.
+     *
+     * The account is not answered here, and that is the point rather than an omission: the account's
+     * own pair already lives in one record each (`token_<login>` with [Account.host] and [Account.gitUser]
+     * for git, `model_key_<login>` with the address in `model_conf.json` for llm). A vault that kept a
+     * second copy would be two records of one secret, which is the drift this whole design avoids —
+     * so the caller supplies the account's, and this store answers only the scopes *below* it.
+     */
+    fun connection(scope: SecretScope, kind: ConnKind): Connection? = null
+
+    /** Keeps a connection for [scope]. See [connection]. */
+    fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {}
+
+    /** Forgets a scope's connection, if it has one. */
+    fun forgetConnection(scope: SecretScope, kind: ConnKind) {}
+
+    /**
+     * The model and effort [scope] asks for, or null when it asks for nothing and inherits.
+     *
+     * **Separate from [connection] because it inherits separately** (see `Connections.kt`): the pair is
+     * atomic, the choice is not. Written per field so "inherit the key, choose my own model" is one
+     * record rather than a copy of a secret.
+     */
+    fun choice(scope: SecretScope, kind: ConnKind): Choice? = null
+
+    /** Keeps a scope's choice. A blank model means "inherit", so the row is removed. */
+    fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {}
 
     /**
      * Keeps [value] for one branch of [project].
@@ -422,7 +452,13 @@ class CredentialStore(context: Context) : Credentials {
         // **The named secrets go with the account.** A key that reached a server is that account's, and a
         // signed-out account leaving its MCP tokens on the phone would be a leak the person believes they
         // closed.
-        val mine = prefs.all.keys.filter { it.startsWith("secret_${login}_") }
+        // **The connections go with the account too** — a project's own address and key are that
+        // account's rows, and leaving them would leave a key on the phone for an identity that is
+        // gone. The general scope is deliberately *not* matched: it has no login in its key, because
+        // it belongs to the app.
+        val mine = prefs.all.keys.filter {
+            it.startsWith("secret_${login}_") || it.startsWith("conn_${login}_")
+        }
         prefs.edit()
             .remove(tokenKey(login))
             .remove(modelKeyKey(login))
@@ -566,19 +602,124 @@ class CredentialStore(context: Context) : Credentials {
      */
     override fun forgetBranchSecrets(project: String, branch: String): Int {
         val login = activeLogin ?: return 0
-        val prefix = branchSecretPrefix(login, project, branch)
-        val doomed = prefs.all.keys.filter { it.startsWith(prefix) }
+        val scope = SecretScope.Branch(project, branch)
+        // **One branch's rows, matched by the encoded branch — not by the project.**
+        //
+        // This used to add every key under `secret_<login>_branch_` whose project part was this one,
+        // which is *every branch of the project*: dropping `feature` deleted the tokens kept for
+        // `main`, and the message said "the secrets kept for it". The same lesson as `SecretRow`,
+        // one level down — a row is `(scope, name)`, and here the scope has two parts.
+        //
+        // A prefix match is safe for exactly one branch because every part is percent-encoded and the
+        // prefix ends in a slash: `feature` and `feature/x` encode to `feature` and `feature%2Fx`, so
+        // neither is a prefix of the other's key.
+        val prefixes = listOfNotNull(
+            branchSecretPrefix(login, project, branch),
+            connPrefix(login, scope),
+        )
+        val doomed = prefs.all.keys.filter { key -> prefixes.any { key.startsWith(it) } }
         if (doomed.isEmpty()) return 0
-        val branchPrefix = "secret_${login}_branch_"
-        val branchKeys = prefs.all.keys.filter { key ->
-            key.startsWith(branchPrefix) &&
-                decode(key.removePrefix(branchPrefix).substringBefore('/')) == project
-        }
         val edit = prefs.edit()
         for (key in doomed) edit.remove(key)
-        for (key in branchKeys) edit.remove(key)
         edit.apply()
-        return doomed.size + branchKeys.size
+        return doomed.size
+    }
+
+    // ---- connections: the pair, and the choice ------------------------------------------------
+
+    /**
+     * A narrower scope's connection, **with the address outside the ciphertext.**
+     *
+     * The reason is the same one `secretHost` has: the address is not a secret, and asking "does this
+     * scope have a connection for this remote" has to work while the phone is locked — only the key
+     * refuses then, and the refusal is already a state with a sentence. Two fields, one string, so
+     * they cannot drift apart.
+     */
+    override fun connection(scope: SecretScope, kind: ConnKind): Connection? {
+        val key = connKey(activeLogin, scope, kind) ?: return null
+        val stored = prefs.getString(key, null) ?: return null
+        val at = stored.indexOf(HOST_SEPARATOR)
+        if (at < 0) return null
+        val address = stored.substring(0, at)
+        val json = try {
+            JSONObject(decrypt(stored.substring(at + HOST_SEPARATOR.length)))
+        } catch (t: Throwable) {
+            // **A key that cannot be read is not a connection that can be used.** The states -
+            // locked, dead, unreadable - are already told apart for the model key by
+            // [modelKeyState]; a scoped row answers null and its absence is what the caller reports.
+            return null
+        }
+        val secret = json.optString("secret")
+        if (secret.isBlank()) return null
+        val shape = json.optString("url").takeIf { it.isNotBlank() }?.let { url ->
+            val body = try {
+                JSONObject(json.optString("shape"))
+            } catch (t: Throwable) {
+                return null
+            }
+            Shape(url, body, shapeKindOf(kind))
+        }
+        return Connection(
+            address = address,
+            secret = secret,
+            user = json.optString("user"),
+            shape = shape,
+        )
+    }
+
+    override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {
+        val key = connKey(activeLogin, scope, kind) ?: return
+        val json = JSONObject().apply {
+            put("secret", connection.secret)
+            if (connection.user.isNotBlank()) put("user", connection.user)
+            connection.shape?.let {
+                put("url", it.url)
+                put("shape", it.body.toString())
+            }
+        }
+        // **The address as written**, not lowercased: it is a base URL, and lowercasing a path is
+        // how a connection starts 404ing on a server that is case-sensitive.
+        prefs.edit().putString(key, connection.address.trim() + HOST_SEPARATOR + encrypt(json.toString())).apply()
+    }
+
+    override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
+        val key = connKey(activeLogin, scope, kind) ?: return
+        val choice = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
+        prefs.edit().remove(key).remove(choice).apply()
+    }
+
+    override fun choice(scope: SecretScope, kind: ConnKind): Choice? {
+        val key = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return null
+        val stored = prefs.getString(key, null) ?: return null
+        return try {
+            val json = JSONObject(stored)
+            val model = json.optString("model")
+            if (model.isBlank()) null else Choice(
+                model = model,
+                effort = json.optString("effort"),
+                contextLength = json.optInt("contextLength", 0).takeIf { it > 0 },
+                maxOutput = json.optInt("maxOutput", 0).takeIf { it > 0 },
+            )
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
+        val key = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
+        // **A blank model removes the row**, which is what "inherit" means: the absence of a local
+        // value is the inheritance, so there is no switch to keep in step with the text.
+        if (choice.model.isBlank()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
+        val json = JSONObject().apply {
+            put("model", choice.model)
+            if (choice.effort.isNotBlank()) put("effort", choice.effort)
+            choice.contextLength?.let { put("contextLength", it) }
+            choice.maxOutput?.let { put("maxOutput", it) }
+        }
+        prefs.edit().putString(key, json.toString()).apply()
     }
 
     /**
@@ -619,11 +760,26 @@ class CredentialStore(context: Context) : Credentials {
 
     override fun forgetProjectSecrets(project: String): Int {
         val login = activeLogin ?: return 0
-        // **The branch rows first**, because their prefix (`secret_<login>_branch_<p>/`) does not
-        // start with the project prefix and would otherwise survive the project's own deletion —
-        // a stored credential for a project that no longer exists.
+        // **The branch rows too, and the comment used to claim this while the code did not do it.**
+        // A branch key is `secret_<login>_branch_<p>/<b>/<name>`, whose prefix is not the project's
+        // (`secret_<login>_project_<p>/`), so deleting a project left a credential behind for a
+        // project that no longer exists. The project part is decoded and compared exactly, because
+        // `acme` is a prefix of `acme2` and a `startsWith` on the encoded text would take both.
         val prefix = projectSecretPrefix(login, project)
-        val doomed = prefs.all.keys.filter { it.startsWith(prefix) }
+        val branchPrefix = "secret_${login}_branch_"
+        val connBranchPrefix = "conn_${login}_branch_"
+        val doomed = prefs.all.keys.filter { key ->
+            key.startsWith(prefix) ||
+                key.startsWith(connPrefix(login, SecretScope.Project(project))!!) ||
+                (
+                    key.startsWith(branchPrefix) &&
+                        decode(key.removePrefix(branchPrefix).substringBefore('/')) == project
+                    ) ||
+                (
+                    key.startsWith(connBranchPrefix) &&
+                        decode(key.removePrefix(connBranchPrefix).substringBefore('/')) == project
+                    )
+        }
         if (doomed.isEmpty()) return 0
         val edit = prefs.edit()
         for (key in doomed) edit.remove(key)
@@ -827,6 +983,43 @@ class CredentialStore(context: Context) : Credentials {
             java.net.URLEncoder.encode(project, "UTF-8") + "/" +
             java.net.URLEncoder.encode(branch, "UTF-8") + "/"
 
+    /**
+     * `conn_<login>_project_<p>/<kind>` and `conn_<login>_branch_<p>/<b>/<kind>` — and `conn_general_<kind>`.
+     *
+     * **The same shape as the secret keys, and for the same reason**: every part is percent-encoded
+     * and the separator is a slash, so a project called `a/b` is one part and no two rows can share a
+     * key. The kind is the last part rather than a prefix, so every row of one project is under one
+     * prefix and the sweeps in [forgetProjectSecrets] stay a scan rather than a guess.
+     *
+     * **The account answers null.** Its pair is `token_<login>`/`model_key_<login>` with the address
+     * in the account's own records — one record each, which is the point of the vault.
+     */
+    private fun connPrefix(login: String?, scope: SecretScope): String? = when (scope) {
+        SecretScope.Account -> null
+        SecretScope.General -> "conn_general_"
+        // **No login, no row.** Every scope but general belongs to an identity, and a key written
+        // with the word "null" in it would be a row nobody could ever read again.
+        is SecretScope.Project -> login?.let {
+            "conn_${it}_project_" + java.net.URLEncoder.encode(scope.name, "UTF-8") + "/"
+        }
+        is SecretScope.Branch -> login?.let {
+            "conn_${it}_branch_" +
+                java.net.URLEncoder.encode(scope.project, "UTF-8") + "/" +
+                java.net.URLEncoder.encode(scope.branch, "UTF-8") + "/"
+        }
+    }
+
+    private fun connKey(login: String?, scope: SecretScope, kind: ConnKind, field: String = ""): String? =
+        connPrefix(login, scope)?.let { it + kind.name.lowercase() + field }
+
+    /** The shape a kind sends, when the caller did not say (a row read back from storage). */
+    private fun shapeKindOf(kind: ConnKind): Shape.Kind = when (kind) {
+        ConnKind.LLM -> Shape.Kind.CHAT
+        // **A git connection has no HTTP body at all**, so it never carries a shape; the chat kind is
+        // the harmless answer rather than a new enum value nothing would ever use.
+        ConnKind.GIT -> Shape.Kind.CHAT
+    }
+
     private fun branchSecretKey(login: String, project: String, branch: String, name: String): String =
         branchSecretPrefix(login, project, branch) + java.net.URLEncoder.encode(name, "UTF-8")
 
@@ -935,6 +1128,9 @@ class CredentialStore(context: Context) : Credentials {
          * ciphertext is base64. Any separator would do; this one is the one that cannot be forged.
          */
         const val HOST_SEPARATOR = "\n"
+
+        /** The field a scope's choice is stored under, beside its connection. */
+        private const val CHOICE_SUFFIX = "_choice"
 
         /**
          * The prefix of a general secret's key: `secret_general_<name>`.

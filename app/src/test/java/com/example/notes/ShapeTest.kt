@@ -175,7 +175,10 @@ class ShapeTest {
 
         assertTrue("names the placeholder: $said", said != null && said.contains("{{reasoning}}"))
         assertTrue("and lists the vocabulary: $said", said!!.contains("{{messages}}"))
-        assertFalse("while a name it knows passes", said.contains("{{model}}"))
+        // **The vocabulary lists the names it knows**, so checking for a known name's *presence* would
+        // always fail - the sentence offers `{{model}}` as one of the things it can fill. What must
+        // not appear is a refusal of it.
+        assertFalse("while the name it knows is not the one refused", said.contains("asks for {{model}}"))
     }
 
     @Test

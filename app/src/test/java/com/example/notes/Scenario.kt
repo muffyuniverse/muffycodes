@@ -176,6 +176,45 @@ open class MemoryCredentials : Credentials {
     private val generalSecrets = LinkedHashMap<String, String>()
     private val generalHosts = LinkedHashMap<String, String>()
 
+    /**
+     * **Connections**, keyed `scope/kind` — the pair and the choice in two maps, because the real
+     * store keeps them under two keys for the same reason they inherit differently (see
+     * `Connections.kt`). The account scope is absent on purpose: its pair is `token_`/`model_key_`
+     * plus the account's own records, so a fake that stored one here would let a test pass where the
+     * phone reads nothing.
+     */
+    private val connections = LinkedHashMap<String, Connection>()
+    private val choices = LinkedHashMap<String, Choice>()
+
+    private fun connKey(scope: SecretScope, kind: ConnKind): String? = when (scope) {
+        SecretScope.Account -> null
+        SecretScope.General -> "general/${kind.name}"
+        is SecretScope.Project -> "project_${scope.name}/${kind.name}"
+        is SecretScope.Branch -> "branch_${scope.project}/${scope.branch}/${kind.name}"
+    }
+
+    override fun connection(scope: SecretScope, kind: ConnKind): Connection? =
+        connKey(scope, kind)?.let { connections[it] }
+
+    override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {
+        connKey(scope, kind)?.let { connections[it] = connection }
+    }
+
+    override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
+        connKey(scope, kind)?.let {
+            connections.remove(it)
+            choices.remove(it)
+        }
+    }
+
+    override fun choice(scope: SecretScope, kind: ConnKind): Choice? =
+        connKey(scope, kind)?.let { choices[it] }
+
+    override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
+        val key = connKey(scope, kind) ?: return
+        if (choice.model.isBlank()) choices.remove(key) else choices[key] = choice
+    }
+
     override fun generalSecret(name: String, host: String): String? {
         val allowed = generalHosts[name] ?: return null
         return if (hostMatches(allowed, host)) generalSecrets[name] else null
