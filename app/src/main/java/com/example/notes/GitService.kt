@@ -2119,16 +2119,28 @@ object GitService {
                 // is the one outcome worse than a refused release.
                 push.setRefSpecs(RefSpec("refs/tags/$name:refs/tags/$name"))
                 credentials(remoteOf(repo), token, gitUser)?.let { push.setCredentialsProvider(it) }
-                val result = push.call()
-                val refused = result.flatMap { it.remoteUpdates }
-                    .filter { it.status != RemoteRefUpdate.Status.OK }
-                    .mapNotNull { it.message }
-                    .firstOrNull()
-                if (result.isSuccessful) {
-                    RemoteResult("Tagged $name and sent it", true)
-                } else {
-                    RemoteResult(refused ?: "The host refused the tag", false)
+                val results = push.call()
+                // **The update's status is the verdict, not the remote's silence.** A local push
+                // answers with no message at all, so a reply that says nothing is not a failure —
+                // the same rule `pushNow` follows, spelled the same way.
+                val updates = results.flatMap { it.remoteUpdates }
+                val ok = updates.isNotEmpty() && updates.all {
+                    it.status == RemoteRefUpdate.Status.OK ||
+                        it.status == RemoteRefUpdate.Status.UP_TO_DATE
                 }
+                val refused = updates
+                    .filter { it.status != RemoteRefUpdate.Status.OK &&
+                        it.status != RemoteRefUpdate.Status.UP_TO_DATE }
+                    .mapNotNull { it.message }
+                    .filter { it.isNotBlank() }
+                    .joinToString("; ")
+                RemoteResult(
+                    Secrets.scrub(
+                        if (ok) "Tagged $name and sent it"
+                        else refused.ifBlank { "The host refused the tag" },
+                    ),
+                    ok,
+                )
             }
         } catch (e: Throwable) {
             RemoteResult(Secrets.describe(e), false)
