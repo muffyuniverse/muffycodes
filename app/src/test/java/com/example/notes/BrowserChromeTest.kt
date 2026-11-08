@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -703,45 +704,34 @@ class BrowserChromeTest {
     // ---- the three windows nothing was asserting the words of ------------------
 
     @Test
-    fun `the address window says which way the name will go`() {
-        // **The consequence is the whole risk.** Typing an address renames a folder, which is not
-        // obvious from the field, so the window says it — and says the opposite thing when the name
-        // would stay, because a person who reads "renamed" and gets no rename has been misled.
-        compose.setContent {
-            MaterialTheme {
-                SetAddressDialog(
-                    project = "groceries",
-                    current = "https://gitlab.com/owner/food.git",
-                    onDismiss = {},
-                    onSet = {},
-                )
-            }
-        }
-
-        compose.waitForIdle()
-        assertTrue("it names the project", there("Set the address of groceries"))
+    fun `the address window's sentence follows the address's last segment`() {
+        // **The consequence, tested as a rule rather than painted.** A window with a text field in it
+        // never reports idle under Robolectric — the caret blinks for ever — so a test that composed
+        // this window and waited would hang and then exhaust the heap for every test after it. What
+        // actually needs checking is the rule, and the rule is a function.
+        //
+        // The three answers, and the middle one is the interesting one: a repository that moved owner
+        // or host keeps its name, and a window that said "renamed" would report an act that did not
+        // happen.
         assertTrue(
-            "it starts on the address the project has",
-            there("https://gitlab.com/owner/food.git"),
+            "a new name is announced",
+            addressNameSaid("groceries", "https://gitlab.com/owner/food.git")
+                .orEmpty().contains("renamed to \"food\""),
         )
-        assertTrue("and says what the name will become", there("renamed to \"food\""))
-    }
-
-    @Test
-    fun `the address window says when only the address changes`() {
-        compose.setContent {
-            MaterialTheme {
-                SetAddressDialog(
-                    project = "groceries",
-                    current = "https://gitlab.com/owner/groceries.git",
-                    onDismiss = {},
-                    onSet = {},
-                )
-            }
-        }
-
-        compose.waitForIdle()
-        assertTrue("the name stays, and the window says so", there("only the address changes"))
+        assertTrue(
+            "and it points at the host for the repository's own name",
+            addressNameSaid("groceries", "https://gitlab.com/owner/food.git")
+                .orEmpty().contains("on the host first"),
+        )
+        assertTrue(
+            "the same name is said to be only an address change",
+            addressNameSaid("groceries", "https://gitlab.com/owner/groceries.git")
+                .orEmpty().contains("only the address changes"),
+        )
+        assertNull(
+            "and an empty address says nothing",
+            addressNameSaid("groceries", ""),
+        )
     }
 
     @Test

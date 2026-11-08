@@ -521,6 +521,11 @@ class Scenario(
     fun hostRepo(name: String, licence: String = "mit", seeded: Boolean = true): String {
         val dir = remote(name)
         dir.parentFile?.mkdirs()
+        // **A repository with this name is replaced, not joined.** A test that deletes a project and
+        // makes one with the same name is asking the host for a *new* repository, and pushing a fresh
+        // initial commit into the old one would be rejected as a non-fast-forward — a failure about
+        // git's history that has nothing to do with the thing under test.
+        dir.deleteRecursively()
         if (!seeded) {
             // **A repository just made on the host's page**: bare, and empty. A person's first push
             // fills it, which is the ordinary way a project arrives at a host that has never seen it.

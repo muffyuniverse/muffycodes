@@ -461,6 +461,29 @@ fun AddProjectDialog(
 }
 
 /**
+ * **What typing [address] will do to [project]'s name**, or null when there is nothing to say yet.
+ *
+ * A function rather than a branch inside the window, because this is the sentence that decides
+ * whether the window is a feature or a surprise: typing an address renames a folder, and nothing in
+ * a text field suggests it. The rule has three answers and only one of them is silent:
+ *
+ * - **the name changes** — the folder follows the address's last segment, and the window says so;
+ * - **the name stays** — a repository that moved owner or host keeps its name, which is ordinary,
+ *   and saying "renamed" would report something that did not happen;
+ * - **nothing yet** — an empty address names nothing, and a window that guessed would be inventing.
+ */
+fun addressNameSaid(project: String, address: String): String? {
+    val name = Workspace.repoNameOf(address)
+    if (name.isEmpty() || name == "." || name == "..") return null
+    return if (name == project) {
+        "The name stays \"$name\" — only the address changes."
+    } else {
+        "The project is renamed to \"$name\", after the address. Rename it on the host first if " +
+            "you meant to change the repository's name too."
+    }
+}
+
+/**
  * **Setting a project's address** — the one project verb, and the whole of publishing and renaming.
  *
  * The field starts on the address the project has, because the ordinary use is *changing* it: a
@@ -499,19 +522,13 @@ fun SetAddressDialog(
                         )
                     },
                 )
-                // **The consequence, in the window that causes it.** Renaming a folder is not
-                // obviously something that follows from typing an address, so the sentence that says
-                // it is the difference between a feature and a surprise.
-                if (name.isNotEmpty() && name != project) {
+                // **The consequence, in the window that causes it**, read from the function that
+                // states it so the rule can be tested without a window. Renaming a folder is not
+                // obviously something that follows from typing an address, and the sentence that
+                // says it is the difference between a feature and a surprise.
+                addressNameSaid(project, address)?.let { said ->
                     Text(
-                        "The project is renamed to \"$name\", after the address. Rename it on the " +
-                            "host first if you meant to change the repository's name too.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else if (name == project && name.isNotEmpty()) {
-                    Text(
-                        "The name stays \"$name\" — only the address changes.",
+                        said,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

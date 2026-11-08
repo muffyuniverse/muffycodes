@@ -120,9 +120,20 @@ agent that wants a build dispatches it with `http` and a secret for that host.
 
 ## 6. The steps, in order
 
-**Progress, 2026-11-08:** V1, V2, V3, V4 and V5 are landed and CI-green; V6 is half done (the
-agent's `ci`/`runs`/`artifact` tools are gone, the CI/signing files and the view model's actions
-are not yet); V7 has not started. The `**state**` column below is the truth, not the plan.
+**Progress, 2026-11-08:** **every step is landed and CI-green.** The `**state**` column below is the
+truth, not the plan.
+
+**Two measurements changed the plan while it was being executed, and both are worth keeping:**
+
+- **`TokenScopes` survives.** V6 listed it for deletion, on the reasoning that it judged what a
+  token may do *for CI*. Its two scopes are `repo` and `workflow`, and `workflow` is about pushing a
+  file under `.github/workflows/` — a **git** concern, not an Actions one. A token without it pushes
+  every other file and is refused only on those, with a message that names nothing. Deleting the
+  check would have lost a real refusal of a real push failure.
+- **`DiskWho` survives, `DiskGitHub` does not.** The test account still needs a host that answers
+  "whose key is this" on a machine with no key; what it does not need is a folder of repositories,
+  because the app no longer makes one. The fixtures make a bare repository by hand instead — which
+  is precisely what a host's page does — so the tests exercise the feature a person uses.
 
 | # | Step | Why here | State |
 |---|---|---|---|
@@ -132,11 +143,11 @@ are not yet); V7 has not started. The `**state**` column below is the truth, not
 | **V4** | **The picker leaves**: `listRepositories`, `pullRepository(repo)`, `AddProjectDialog`'s list | the list is the vendor feature; the URL replaces it | **landed** |
 | **V5** | **A release is a tag**: `git {op:"tag"}`, `ReleaseDialog` keeps the field, no dispatch | replaces the biggest remaining GitHub feature | **landed** |
 | **V4b** | **The two doors become one process** (§7): `acquire(): Result<String>` with a device implementation and a typed one; `addAccount(login, host, gitUser, token)` is the single save; `signInWithToken` and `signIn` collapse into it | a convenience on top of the shared process, not a second process | **landed** (as step 4 of V1) |
-| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, `renameProject`'s host call | deletion, after V5 so nothing is lost that a tag now covers | **half** — the tools have gone; the files have not |
+| **V6** | **The CI surface leaves**: `ci`, `runs`, `artifact`, `CiSetup`, `Workflows`, `ReleaseKey`, `Signing`, `TokenScopes`, `exportArtifact`, `checkSigning`/`fixSigning`/`SigningRow`, `renameProject`'s host call | deletion, after V5 so nothing is lost that a tag now covers | **landed** |
 | **V6b** | **The address is the verb** (§8.3): *Set the address* runs `ls-remote`, then renames the folder and every branch's tree to the URL's last segment when the name differs. `renameProject` becomes this and nothing else | renaming stops being an app operation and becomes a verified consequence of the address | **landed** |
 | **V6c** | **Go local** (§8.2): `GitService.disconnect` + one project action + its sentence | the universal half of "remove on remote", and a state the app already models | **landed** — `GitService.removeRemote` already was it; the sentences now name the address instead of GitHub |
-| **V7** | **`GitHub.kt` and `githubFor` are gone — except `identity()`**, which moves into the device door because *a door knows its own host* (§7.1); the tests that pinned the deleted behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case", and the one call that survives has a home | not started |
-| **V8** | **`deleteProject` becomes one choice**, with the sentence naming the host and saying nothing there was touched (§8.2) | the second choice stopped being an act on 2026-11-08, and is now a sentence on every host | not started |
+| **V7** | **`GitHub.kt` and `githubFor` are gone — except `identity()`**, which moves into the device door because *a door knows its own host* (§7.1); the tests that pinned the deleted behaviour are deleted with their subjects, not adapted | the file cannot linger as a "just in case", and the one call that survives has a home | **landed** — `Who.kt` is 160 lines, and it is one question |
+| **V8** | **`deleteProject` becomes one choice**, with the sentence naming the host and saying nothing there was touched (§8.2) | the second choice stopped being an act on 2026-11-08, and is now a sentence on every host | **landed** |
 
 **V6 is the big one and it is last on purpose.** Every one of those features is currently reachable by a
 press, so deleting them first would take working buttons away while the replacement was unbuilt.
