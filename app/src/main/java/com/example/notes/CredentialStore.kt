@@ -154,8 +154,16 @@ interface Credentials {
     fun secret(project: String?, branch: String?, name: String, host: String): String? =
         secret(project, name, host)
 
-    /** **This project on `main`** — the shorthand for a caller that has no branch in hand. */
-    fun secret(project: String?, name: String, host: String): String? = secret(name, host)
+    /**
+     * **The shorthand for a caller that has no branch in hand**: the project's own value, then the
+     * account's, then the shared one.
+     *
+     * **Not `secret(name, host)`**, which is the account alone. Delegating to that was a silent narrowing
+     * of every project question — a store with a project secret answered "nothing" for it, and six
+     * tests about scope said so before this line was read carefully.
+     */
+    fun secret(project: String?, name: String, host: String): String? =
+        secret(project, null, name, host)
 
     /**
      * A secret **every project can read, whatever the account** (§13c.4).
