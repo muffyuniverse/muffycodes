@@ -22,9 +22,10 @@ import java.time.ZoneId
  * than a column beside it, that a bucket with no requests has no average rather than a zero, and
  * that a share keeps the decimals the operator asked for, because a rounded share hides a change.
  *
- * The precision tests are here because the numbers this app produces are small enough that the
- * obvious format destroys them: a ping costs about $0.00002, which three decimals prints as
- * "0.000" — indistinguishable from free.
+ * **Money is not one of them, and that is a decision.** `usage.cost` is a gateway's own field
+ * rather than the protocol's, so a total built from it reads as zero on a server that does not
+ * report one — which is the one direction a record must not lie in. The token counts survive in
+ * full, and so does every share taken from them.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -41,8 +42,6 @@ class RequestStatsTest {
             cachedTokens = 3584,
             completionTokens = 1,
             reasoningTokens = 1,
-            cost = 0.0000241,
-            costReported = 1,
         )
 
         assertEquals("a share of input", 0.9710, stats.cachedShare!!, 0.0001)

@@ -290,6 +290,22 @@ interface Credentials {
     fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? = null
 
     /**
+     * **What `auth: <name>` resolves to in the scoped vault** — the checkmarked connection, or null.
+     *
+     * One function rather than a branch at each call site, because this is the door the checkmark has
+     * to hold: a tool that looked a connection up itself could forget to ask whether the agent was
+     * granted it. A default that answers null, so a store that has never heard of checkmarks cannot
+     * hand one out.
+     */
+    fun spendable(name: String, host: String, project: String?, branch: String?): String? {
+        val kind = kindFor(name) ?: return null
+        if (host.isBlank()) return null
+        return namedConnection(name, host, kind, project, branch) { connection(it, kind) }
+            ?.secret
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    /**
      * The model and effort [scope] asks for, or null when it asks for nothing and inherits.
      *
      * **Separate from [connection] because it inherits separately** (see `Connections.kt`): the pair is
@@ -717,6 +733,9 @@ class CredentialStore(context: Context) : Credentials {
             secret = secret,
             user = json.optString("user"),
             shapes = shapesOf(json.optJSONObject("shapes")),
+            // **Off unless it was written**, which is the only safe default for a permission: a row
+            // stored before the checkmark existed is a row on which it was never given.
+            nameable = json.optBoolean("nameable", false),
         )
     }
 
@@ -726,6 +745,7 @@ class CredentialStore(context: Context) : Credentials {
             put("secret", connection.secret)
             if (connection.user.isNotBlank()) put("user", connection.user)
             if (connection.shapes.isNotEmpty()) put("shapes", shapesJson(connection.shapes))
+            if (connection.nameable) put("nameable", true)
         }
         // **The address as written**, not lowercased: it is a base URL, and lowercasing a path is
         // how a connection starts 404ing on a server that is case-sensitive.

@@ -207,6 +207,14 @@ open class MemoryCredentials : Credentials {
         return connection(at, ConnKind.GIT)
     }
 
+    override fun spendable(name: String, host: String, project: String?, branch: String?): String? {
+        val kind = kindFor(name) ?: return null
+        if (host.isBlank()) return null
+        return namedConnection(name, host, kind, project, branch) { connection(it, kind) }
+            ?.secret
+            ?.takeIf { it.isNotBlank() }
+    }
+
     override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
         connKey(scope, kind)?.let {
             connections.remove(it)

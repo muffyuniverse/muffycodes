@@ -3,6 +3,7 @@ package com.example.notes
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -440,5 +441,95 @@ class ConnectionsTest {
 
         assertEquals(SecretScope.Account, wired.at)
         assertEquals(account.model, wired.active.model)
+    }
+
+    // ---- the checkmark, and the two names it enables --------------------------------------
+
+    private fun named(
+        name: String,
+        host: String,
+        connections: Map<SecretScope, Connection>,
+        project: String? = "acme",
+        branch: String? = "feature",
+    ): Connection? = namedConnection(
+        name = name,
+        host = host,
+        kind = kindFor(name) ?: ConnKind.LLM,
+        project = project,
+        branch = branch,
+        at = { connections[it] },
+    )
+
+    @Test
+    fun `a connection is invisible to auth unless the checkmark is on`() {
+        // **The default is off, and that is a permission's only safe default.** A git token can push;
+        // a model key can spend money. Neither is handed to an agent because a row exists.
+        val off = mapOf(
+            SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = false),
+        )
+
+        assertNull("off means nothing is named", named("git", "gitlab.com", off))
+        assertEquals(
+            "and on means the token, for that host",
+            "glpat",
+            named("git", "gitlab.com", off.mapValues { it.value.copy(nameable = true) })?.secret,
+        )
+    }
+
+    @Test
+    fun `a name never chooses the destination`() {
+        // **The rule that makes `auth:` an authentication feature rather than an exfiltration
+        // primitive.** The agent names the value; the vault decides where it may go. A token stored
+        // for gitlab.com is not answered for another host, and not for "nowhere".
+        val on = mapOf(
+            SecretScope.Project("acme") to Connection("gitlab.com", "glpat", nameable = true),
+        )
+
+        assertNull("another host gets nothing", named("git", "github.com", on))
+        assertNull("and neither does an empty one", named("git", "", on))
+        assertNull("a look-alike is another host", named("git", "notgitlab.com", on))
+        assertNotNull("while the host it was stored for does", named("git", "gitlab.com", on))
+    }
+
+    @Test
+    fun `the two kinds are two names, and neither answers for the other`() {
+        // **Independent checkmarks, because the blast radii differ.** A person may let the agent ask
+        // the model server what models exist without letting it push as them — and a name that
+        // resolved the other kind's token would be the worst of both.
+        val both = mapOf(
+            SecretScope.Project("acme") to Connection("gitlab.com", "glpat-git", nameable = true),
+            SecretScope.Branch("acme", "feature") to Connection(
+                address = "https://models.example/v1",
+                secret = "sk-llm",
+                nameable = true,
+            ),
+        )
+
+        assertEquals("git answers for git", "glpat-git", named("git", "gitlab.com", both)?.secret)
+        assertEquals("llm answers for llm", "sk-llm", named("llm", "models.example", both)?.secret)
+        assertNull("and neither answers on the other's host", named("git", "models.example", both))
+        assertNull("a name that is neither kind is nobody's", named("github", "gitlab.com", both))
+    }
+
+    @Test
+    fun `a nearer scope is asked first, and only if it was granted`() {
+        // **The chain applies to a name as well as to a push.** A branch's own checkmarked token wins
+        // over the project's; a branch that has one *without* the checkmark does not shadow the
+        // project's, because a checkmark that is absent is not a refusal of everything wider — it is
+        // the absence of a grant for that row.
+        val project = SecretScope.Project("acme")
+        val branch = SecretScope.Branch("acme", "feature")
+        val grant = mapOf(
+            project to Connection("gitlab.com", "glpat-project", nameable = true),
+            branch to Connection("gitlab.com", "glpat-branch", nameable = true),
+        )
+
+        assertEquals("the branch's", "glpat-branch", named("git", "gitlab.com", grant)?.secret)
+        assertEquals(
+            "and without the checkmark the project's is still the answer",
+            "glpat-project",
+            named("git", "gitlab.com", grant + (branch to grant.getValue(branch).copy(nameable = false)))
+                ?.secret,
+        )
     }
 }

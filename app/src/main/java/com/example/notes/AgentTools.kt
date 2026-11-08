@@ -3570,7 +3570,12 @@ class AgentTools(
             // **The branch is part of the question.** A secret kept for `feature` is for `feature`:
             // an agent working in a branch's worktree must not spend a value the person stored for
             // the project's other branches, which is what a lookup without the branch would do.
+            // **A name may also be one of the two credentials the app itself uses** — `git` and
+            // `llm` — and only when the row carries the checkmark that says the agent may spend it.
+            // Asked second, so a person's own named secret always wins over the app's; asked with the
+            // host, so naming the value cannot choose the destination.
             val value = credentials.secret(project, branch, authName, host)
+                ?: credentials.spendable(authName, host, project, branch)
                 ?: return refusal(secretRefusal(credentials, authName, host))
             // **A named secret is a bearer token**, which is what every API this is for accepts. A scheme
             // the caller needs beyond that can be asked for with `headers` on a non-secret header.
@@ -3826,9 +3831,14 @@ class AgentTools(
             return "The secret \"$name\" is not for $host. It is stored for $where, and the app " +
                 "will not send it anywhere else. Add a secret for $host if one is needed."
         }
+        // **The app's own two are named too**, because a refusal that did not mention them would leave
+        // a person unable to discover a feature that exists: `auth: git` and `auth: llm` resolve to a
+        // connection whose row carries "the agent may spend this", and the sentence says so.
         return "There is no secret called \"$name\" on this phone, in this project, or for every " +
             "project. The names it knows are: " +
-            credentials.secretNames().joinToString(", ") { "\"$it\"" }.ifEmpty { "none" } + "."
+            credentials.secretNames().joinToString(", ") { "\"$it\"" }.ifEmpty { "none" } +
+            ". It also answers `git` and `llm` for a connection whose row says the agent may " +
+            "spend it, and only for the host that connection is bound to."
     }
 
     private fun sealKey(args: JSONObject, host: String): Result<String> {

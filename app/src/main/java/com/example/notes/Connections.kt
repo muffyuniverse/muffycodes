@@ -66,6 +66,20 @@ data class Connection(
     val secret: String,
     val user: String = "",
     val shapes: Map<ShapeKind, Shape> = emptyMap(),
+    /**
+     * **"The agent may spend this on its own requests to this host"** — one checkmark per kind,
+     * independent, **off unless somebody ticks it**.
+     *
+     * Off, the entry is exactly as invisible to `auth:` as the account's own token is. On, `auth: git`
+     * (or `auth: llm`) resolves to it **only for the host it is bound to**, which is the rule that
+     * keeps a named secret from being a token-exfiltration primitive: the agent names the value, and
+     * the vault decides where it may go ([namedConnection]).
+     *
+     * **Per kind rather than per entry**, because the two have different blast radii: a git token can
+     * push, a model key can spend money, and a person may want the agent to ask the model server what
+     * models exist without letting it push as them.
+     */
+    val nameable: Boolean = false,
 ) {
     /** The request shape for [kind]: the server's own when it was recorded, the preset otherwise. */
     fun shapeFor(kind: ShapeKind): Shape = shapes[kind] ?: Shape.preset(kind)
@@ -131,6 +145,42 @@ fun hostCovers(stored: String, asked: String): Boolean {
     val wanted = asked.trim().lowercase()
     if (allowed.isEmpty() || wanted.isEmpty()) return allowed == wanted
     return wanted == allowed || wanted.endsWith(".$allowed")
+}
+
+/**
+ * **The connection `auth:` may name**, or null when none may.
+ *
+ * The two names are the two kinds (`git`, `llm`) — not arbitrary: a name is what an article or a tool
+ * argument carries, and a per-entry name would be a second namespace to keep in step with the vault's
+ * own. **The host must be the one the entry is bound to**, which is the whole reason this is a
+ * function rather than a field: naming a value must not choose the destination.
+ */
+fun namedConnection(
+    name: String,
+    host: String,
+    kind: ConnKind,
+    project: String?,
+    branch: String?,
+    at: (SecretScope) -> Connection?,
+): Connection? {
+    val scope = connectionScope(project, branch) { one ->
+        at(one)?.let {
+            it.nameable && hostCovers(hostOfAddress(it.address), host) && kindFor(name) == kind
+        } == true
+    } ?: return null
+    return at(scope)
+}
+
+/**
+ * **Which kind a name is**, or null when it is not one this vault answers to.
+ *
+ * The two names are the two kinds' own: an article says `auth: git` or `auth: llm`, and there is no
+ * third, because a per-entry name would be a namespace to keep in step with the vault's.
+ */
+fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
+    "git" -> ConnKind.GIT
+    "llm" -> ConnKind.LLM
+    else -> null
 }
 
 /**
