@@ -1320,10 +1320,13 @@ fun ScopeDialog(
     var chosen by remember { mutableStateOf<SecretScope?>(null) }
     var hint by remember { mutableStateOf<String?>(null) }
 
-    val lines = scopeLines(here, projects, branches)
-    val title = when (here) {
+    // **Read once into a value, because `here` is a delegated property** — a `when` over it cannot
+    // smart-cast, which the compiler says once and then fails the whole build for.
+    val where = here
+    val lines = scopeLines(where, projects, branches)
+    val title = when (where) {
         ScopeHere.Root -> "The account"
-        is ScopeHere.InProject -> here.project
+        is ScopeHere.InProject -> where.project
     }
 
     AlertDialog(
