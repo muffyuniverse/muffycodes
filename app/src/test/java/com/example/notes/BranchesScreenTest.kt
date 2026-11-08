@@ -256,10 +256,12 @@ class BranchesScreenTest {
     }
 
     /**
-     * **The branch scope window offers the branches that really exist.**
+     * **The branch scope window offers the branches that exist, tree or no tree.**
      *
-     * `Worktrees.branches` is the list of trees, so a value scoped to a branch with no working tree
-     * would be a row nothing can ever read — and the picker must therefore not offer one.
+     * A branch can exist before it has a working tree — `+ Branch` makes the ref, and the tree appears
+     * when the branch is entered — so a person setting up a token for `feature` may well do it before
+     * opening the branch. Offering only the trees would make the value impossible to store at the
+     * moment it is most wanted, and the row's promise is about a branch, which is a ref.
      */
     @Test
     fun `the scope window offers a project's real branches`() {
@@ -269,7 +271,7 @@ class BranchesScreenTest {
         scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
 
         val branches = scene.viewModel.branchesOf("Shopping")
-        assertEquals("main first, then the branch that has a tree", listOf("main", "feature"), branches)
+        assertEquals("main first, then the branch that was made", listOf("main", "feature"), branches)
     }
 
     @Test

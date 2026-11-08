@@ -1635,9 +1635,26 @@ class AppViewModel @JvmOverloads constructor(
         is SecretScope.Branch -> credentials.secret(scope.project, scope.branch, name, host)
     }
 
-    /** The branches of [project] that have a working tree, `main` first — the scope window's list. */
-    fun branchesOf(project: String): List<String> =
-        workspace?.let { Worktrees(it).branches(project) } ?: listOf(AgentSession.MAIN)
+    /**
+     * **The branches [project] has**, `main` first — the scope window's list.
+     *
+     * Asked of git, not of the worktree folders. A branch can exist before it has a tree (`+ Branch`
+     * makes the ref; the tree appears when the branch is entered), and a person setting up a token for
+     * `feature` may well do it *before* opening the branch — so offering only the trees would make the
+     * value impossible to store at the moment it is most wanted. The row's promise is about a branch,
+     * and a branch is a ref.
+     *
+     * `main` is always among them — every project is made with it — but the fallback is here rather
+     * than assumed, because a repository that will not open must still answer with something.
+     */
+    fun branchesOf(project: String): List<String> {
+        val repo = git?.open(project) ?: return listOf(AgentSession.MAIN)
+        return try {
+            GitService.localBranches(repo).ifEmpty { listOf(AgentSession.MAIN) }
+        } finally {
+            repo.close()
+        }
+    }
 
     /** Keeps [name] where [scope] says, and reads back **that row** before answering "kept". */
     fun saveSecret(scope: SecretScope, name: String, value: String, host: String): String? {
