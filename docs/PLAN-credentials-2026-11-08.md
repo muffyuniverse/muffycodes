@@ -675,10 +675,10 @@ doors — the account screen and Settings — which onboarding never was the onl
 with a `.git` in it. It holds one file, `hello.md`: two lines saying what the folder is and how to make
 another — so the first project is not an empty repository, and the editor has something to open.
 
-**Why it is keyed on the provisional account and not on every account.** `AccountStore.adoptProvisional`
-**renames** `~local` to the person's login at the first sign-in, so the project comes with them as their
-own. A second, later account must not be handed a `notes` project it never made, and a fresh `~local` after
-the last account is removed gets its starter back — which is the same rule, read in the other direction.
+**Why it is keyed on the provisional account and not on every account.** A signed-in account must not be
+handed a `notes` project it never made. **It no longer comes along at sign-in**, because §3.9 makes `~local`
+permanent: adoption-by-rename is deleted, and moving a project to an account is a verb the person uses
+(§3.9.3). The starter is made when `~local` has no projects, which after a transfer is true again.
 
 **What it is for** is the operator's own sentence: enter it, make some notes, and reach `shared/` through
 the link its worktree already holds. That makes the next section a folder away instead of a menu away.
@@ -878,6 +878,133 @@ not the location**:
 | **T3b** | the pointer is a **path** (§3.8.3), so `wiredFor` resolves a path rather than joining a name onto a folder, and the picker lists `shared/requests/chat/` |
 | **T4** | the two vector pointers are paths too, and the two rows list `shared/requests/embedding/` and `…/rerank/` |
 | **F5** | unchanged: the Settings row goes once F1 makes the folder a door — and now the door is `shared/requests/`, which is where the working files are |
+
+## 3.9 Local is permanent, local has no remote, and projects move between accounts
+
+**The operator, 2026-11-09:**
+
+> *"make it possible to move and clone projects between accounts, and make ~local undeletable and its
+> projects unconnectable to remote, so that local always exist and we dont need machinery for its
+> recreation, and users can just transfer its projects to proper remote accounts and there connect them to
+> origin."*
+
+Three rulings in one sentence, and the first two delete machinery rather than add it.
+
+### The contradictions this settles (§3.9.1)
+
+Written down because "fix the contradictions" is the instruction, and each of these was a live claim:
+
+| the claim | where it was | what is true now |
+|---|---|---|
+| *"whatever you made as `~local` comes with you — it is moved, not copied"* | `README_TEXT`, `AccountStore.adoptProvisional`, `addAccount`'s adopt-before-save comment | **false.** `~local` stays; projects are moved by the person, with a verb |
+| *"a fresh `~local` after the last account is removed gets its starter back"* | §3.7.4 | **dead.** `~local` is never removed, so there is nothing to remake |
+| `removeAccount`'s `?: accounts.ensureProvisional().login` | `AppViewModel` | **dead fallback.** `~local` is always an account on this phone, so the chain's last resort is a fact rather than a call |
+| *"the provisional account is the floor … made here rather than assumed, because this is the moment it can have been adopted away"* | `removeAccount`'s comment | **inverted.** Nothing adopts it away any more |
+| a local project may `Set the address…` and become published | the project row's ⋮, `setAddress` | **refused in `~local`**, and the menu item is not offered there |
+| *"An account is a name, a host and a key"* | `AddAccountDialog` | **unchanged, and it is the argument for the rest**: accounts cannot be local, so an undeletable local account is the only way local-only work always has a home |
+
+**One thing that is deliberately *not* a contradiction:** `Go local…` (keep-local) still removes a remote from
+a project *in a real account*. The rule is about `~local`, not about "a project without an origin" — a person
+may keep a project on this phone while signed in, and that project may still be given an address later.
+
+### `~local` is undeletable (§3.9.2)
+
+**The rule, in one place:** the provisional account has no removal. `AccountStore.remove`/`forget` answer
+`false` for it, `AppViewModel.removeAccount` refuses with a sentence, and the accounts row shows **no
+`Remove…`** — three places because a disabled menu item is not a rule, exactly as `closeEditor`'s refusal was
+not one during onboarding.
+
+The refusal's sentence names the way out rather than the prohibition alone: *"Local is this phone's own
+workspace and cannot be removed. Move its projects to an account first — they are already there once they
+are."*
+
+**What deletes with it:** `AccountStore.adoptProvisional`, its call and its trace note in `addAccount`, the
+three `AccountStoreTest` tests about adoption (replaced by one that asserts the opposite — signing in leaves
+`~local` and its projects exactly where they were), and `removeAccount`'s recreation call. `ensureProvisional()`
+stays, because a fresh install still needs the folder made once; it is creation, not recreation.
+
+**`ensureProvisional` keeps writing nothing when the folder is there** — the existing rule — which matters more
+now: it runs on every start, and the folder it would otherwise touch holds the person's only copy of work on a
+phone that has never signed in.
+
+### Local projects cannot have a remote (§3.9.3)
+
+**Three doors, all refused in `~local`, each naming the transfer:**
+
+- `setAddress` — the address a project points at;
+- `addProjectFromUrl` — a clone *arrives* with an origin, so it is the same act with the address already
+  filled in;
+- `transferProject` — a project that **has** a remote may not be moved or copied **into** `~local`, because it
+  would arrive connected. (A local project with no remote may.)
+
+The refusals are in the view model and the transfer object, not only in the menu: an agent may reach the same
+verbs, and a rule enforced by a hidden menu item is a rule with a hole in it. The menu hides `Set the
+address…` in `~local` for the ordinary reason — a menu item that always says no is a menu item that wastes a
+press — and `AddProjectDialog` says why the address half is missing rather than showing an empty field.
+
+**Why this is the right shape and not a restriction for its own sake.** The point of the local account is that
+it is *not* an identity: it has no host, no key, and `whoFor` answers `null` for it, so a push could only be
+anonymous. A project with an origin inside it would be a repository this phone cannot speak to.
+
+### Moving and copying a project (§3.9.4)
+
+**One verb, two modes**, in `Transfer.kt` — `move(project, toAccount)` and `copy(project, toAccount)` — called
+by the view model and by nothing else. A project is more than its folder:
+
+| part | what happens |
+|---|---|
+| `<account>/<project>/` | renamed (move) or copied (copy) |
+| `<account>/.muffy/worktrees/<project>/` | the same, then **repointed** |
+| the two absolute pointers | rewritten: the tree's `.git` names `<account>/<project>/.git/worktrees/<id>`, and that entry's `gitdir` names the tree back. **`commondir` (`../..`) and the `shared` link are relative and survive** |
+| the repository itself | nothing. `search.db` lives in the project's `agent/`, so it travels with the folder — the index is about the files, and they are the same files |
+
+**`Worktrees.rename`'s repointing is extracted, not copied.** Its body already rewrites both absolute pointers
+per branch, and it is the only code that knows the four-file recipe; `Transfer` calls `repoint(project)` and
+`rename(from, to)` becomes "move the folders, then repoint".
+
+**Four things do not travel, and each is a decision:**
+
+- **the request history** (`.muffy/`) — it is the account's record of what that account's key spent, and
+  moving it would make one account's usage look like another's;
+- **the branch's schema pointer** — it names a path in the *source* account's `shared/requests/`, which does
+  not exist in the destination. The row is removed on both sides, so a moved branch refuses by naming its
+  picker rather than pointing at a file that is not there;
+- **the agent session rows** — a session is a claim about an agent standing in a worktree, and the moved
+  project has no agent standing in it;
+- **`shared/`** — the app's references and the person's units belong to the account. A person who wants their
+  units in the new account copies the file, which is the browser's Copy and needs nothing new.
+
+**Refusals, all of them sentences:** the destination is the account the project is already in; the
+destination has a folder of that name (a merge of two repositories is not a move, and §5's reasoning about
+two histories applies unchanged); the project is not a project; the project has a remote and the destination
+is `~local`.
+
+**The destination is offered, not typed** — a list of this phone's accounts, minus the one the project is in.
+Which is why the menu item only appears when there are two.
+
+### What this costs (§3.9.5)
+
+- **A person who signs in no longer finds their work moved for them.** They find it where they left it, in
+  Local, one menu item away — which is the trade the operator asked for: local always exists, and nothing
+  happens to their files that they did not do.
+- **`copy` walks a repository on the main thread**, exactly as the browser's Copy of a folder already does. A
+  large project makes the screen wait; it is the same cost the app already pays for the same act, and the
+  transfer is a deliberate press rather than something a refresh does.
+- **A moved project's branches keep their commits and lose their pointer rows**, so an agent in the
+  destination asks for a template once. That is the honest state: the template it was using is in another
+  account.
+
+### Steps (§3.9.6)
+
+| step | what |
+|---|---|
+| **L1** | `~local` undeletable: `AccountStore.remove`/`forget` refuse it, `removeAccount` refuses with a sentence, the row loses `Remove…`; **delete `adoptProvisional`**, its call and its trace note; simplify the takeover chain; replace the three adoption tests with one that asserts local is untouched |
+| **L2** | No origin in `~local`: refuse in `setAddress`, `addProjectFromUrl`, and a connected project arriving by transfer; hide `Set the address…` and the address half of `AddProjectDialog` there |
+| **L3** | `Transfer.kt` + `Worktrees.repoint`/`rename` split; move and copy with the refusals above; tests for a project with branches (history, branches, repointed pointers, `shared` link still working) |
+| **L4** | The row's ⋮ gains `Move to account…` and `Copy to account…`, offered when there are two accounts, with a destination list |
+
+**L1 and L2 before L3**, because the transfer has to refuse a connected project entering `~local`, and that
+rule is L2's. **L3 before L4**, so the menu has something to call.
 
 ## 4. Cost is removed
 
