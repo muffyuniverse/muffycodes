@@ -389,7 +389,8 @@ one that leaves it out is simply a schema that cannot be sent.
 
 ### What one schema is (§3.6.1)
 
-`<account>/.muffy/schemas/<name>.json` — **`Schema`** (`Schema.kt`):
+`<account>/shared/requests/<kind>/<name>.jsonc` — **`Schema`** (`Schema.kt`). **The path is §3.8's; this
+table is the document, not the folder:**
 
 | key | what it is | absent means |
 |---|---|---|
@@ -430,9 +431,12 @@ carry a small one. Zero or absent means that hand is off, which is a statement r
 
 | pointer | stored where | the file is |
 |---|---|---|
-| the worktree's chat request | `.muffy/agents.json`, per `project/branch` — the file that already holds the session | a chat schema |
-| the embedding model | `.muffy/model_conf.json`'s `embedding` | an embedding schema |
-| the rerank model | `model_conf.json`'s `rerank` | a rerank schema |
+| the worktree's chat request | `.muffy/schemas.json`, per `project/branch` — a **path** from the account root | a chat unit |
+| the embedding model | `.muffy/model_conf.json`'s `embedding` | an embedding unit |
+| the rerank model | `model_conf.json`'s `rerank` | a rerank unit |
+
+**The pointer is a path, not a name** (§3.8.3): the operator's *"branch just holds a path link to a llm
+request template it should use"*.
 
 **Which pointer named a schema is what it is for**, so a file cannot disagree with the place that chose it:
 the vocabulary it is checked against travels with the question, not with the document.
@@ -480,8 +484,7 @@ name and an existence.
   | path | lock | what it stops |
   |---|---|---|
   | `shared/` | **system** | renaming or deleting the folder. Its contents are the person's. |
-  | `shared/schemas/` | **system** | renaming or deleting it — a template's folder is named by pointers |
-  | `shared/schemas/example.json` | **system** | editing, renaming, deleting. **Readable**, so it can be copied. |
+  | `shared/schemas/` **and everything under it** | **system** | editing, renaming, deleting — these are the app's reference templates, and every file in the folder is one (§3.8.5) |
   | `shared/schemas/chat.json` | *none* | nothing. The person may edit it — see §3.7.2 for why the code does not yet, and §3.7.5 for the agent's half. |
   | `.muffy/`, `agent/`'s records | **system** | the same, as they already are |
 
@@ -574,7 +577,7 @@ and, in the same breath, the question this section answers:
 | can a person **read** `shared/` from a project? | **yes** — every worktree holds a `shared` link and the browser follows it. The README *means* to send people there, by a name that no longer exists (§3.7.6) |
 | can a person **write** a template in `shared/schemas/`? | **no — and that is the defect this section turns on.** `Workspace.appHold`'s `isSystemPath(joined)` answers `Hold.APP` for **any** path whose first segment is `shared`, and `isLocked` — the *may anybody write this* question — is `appHold(file) == Hold.APP`. So `Workspace.write(shared/schemas/chat.json)` returns `false`, `createFile` refuses with `lockProblem`, and the editor opens it read-only. The agent is refused separately by `mayWrite` (*"the account's own folder… you may read it"*). **Only the app itself can write a template today**: the shipped three, and nothing else |
 | is the Settings row a door? | it opens `shared/schemas` in the browser — which can **read** the folder and cannot add to it. A display case |
-| is there a locked **exemplar** to copy? | **no.** `Schemas.EXAMPLE = "example.json"` and `Workspace.SCHEMA_EXAMPLE_PATH` both exist, and `appHold` holds that path as a file — but **nothing ever writes it**: `Schemas.ensure` writes `chat.json`, `embedding.json`, `rerank.json` and stops. The operator's *"one system locked example template from which other templates can then be copied"* is a constant and a lock on an absent file, so `shared/schemas/` holds no locked file at all and there is no seed |
+| is there a locked **exemplar** to copy? | **no.** `Schemas.EXAMPLE = "example.json"` and `Workspace.SCHEMA_EXAMPLE_PATH` both exist, and `appHold` holds that path as a file — but **nothing ever writes it**: `Schemas.ensure` writes `chat.json`, `embedding.json`, `rerank.json` and stops. So the exemplar is a lock on an absent file. **Superseded by §3.8**: the references are one per kind, in their own folders, and they are written |
 
 So the operator's proposal is one rule away, and it is the rule he already made, applied to the second
 question as well: **a folder lock is a name and an existence, in both directions.**
@@ -584,9 +587,15 @@ question as well: **a folder lock is a name and an existence, in both directions
 The fix is three lines, not a redesign. `isSystemPath` stops being a subtree test:
 
 ```kotlin
-// was: parts[0].equals(SYSTEM_PROJECT, ignoreCase = true)   — the whole project read-only
-joined.equals(SYSTEM_PROJECT, ignoreCase = true) || joined.equals(Schemas.DIR, ignoreCase = true)
+// was: parts[0].equals(SYSTEM_PROJECT, ignoreCase = true)   — the whole folder read-only
+joined.equals(SYSTEM_PROJECT, ignoreCase = true) ||
+    joined == Schemas.DIR || joined.startsWith(Schemas.DIR + "/")
 ```
+
+**The reference folder keeps its subtree, and the reason is the one already used above**: every file inside
+`shared/schemas/` is the app's — shipped, commented, never edited in place — so the inheritance is the point,
+exactly as it is for `agent/` and `.muffy/`. What the fix unlocks is `shared/`'s *other* contents, and above
+all **`shared/requests/`**, which is where a person's and an agent's filled units live (§3.8.1).
 
 with `SCHEMA_EXAMPLE_PATH` already held as a **file** above it, and `isSystemLocked` keeping its two name
 rules — `agent/` and `.muffy/` — **because those are the app's own records: every file inside them was
@@ -598,8 +607,8 @@ the person's:
 |---|---|---|
 | `shared/` | app, **folder** | renaming or deleting it |
 | `shared/schemas/` | app, **folder** | renaming or deleting it — a template's folder is named by pointers |
-| `shared/schemas/example.json` | app, **file** | editing, renaming, deleting. **Readable**, so it can be copied |
-| `shared/schemas/chat.json` | nobody | nothing. The person may edit it, copy it, delete it, or make a fourth |
+| `shared/schemas/**` | app, **subtree** | editing, renaming, deleting. **Readable**, so it can be copied |
+| `shared/requests/**` | nobody | nothing. The person may edit a unit, copy it, delete it, or make a fourth |
 | `shared/onboarding/01-…md` | nobody | nothing (§3.7.3) |
 | `agent/…`, `.muffy/…` | app, by **name** | writing them, wherever they appear — unchanged |
 
@@ -691,17 +700,10 @@ than giving access to templates folder via general settings menue."* So:
 thing that opened it. **F1 therefore lands before the row is removed**, or the door is removed with the
 handle still locked.
 
-**And the exemplar has to exist, which is a decision rather than a line of code.** Two shapes, and the code
-is presently neither:
-
-- **`example.json` replaces `chat.json`** — one locked chat seed, complete and unusable in place, and the
-  branch picker offers only what is inside the folder, so **copying is how a branch gets a request**. This is
-  the operator's sentence read literally, and it costs a person one copy before their first run.
-- **`example.json` sits beside the shipped three** — `chat.json` stays usable as it is, and the exemplar is
-  a format reference. Nothing is forced, and the folder holds two files whose content is nearly the same.
-
-The measurement above says the current state is the third option — *neither*, with a lock on nothing — which
-is the one outcome that cannot be defended.
+**And the exemplar has to exist — settled in §3.8**: there is no single `example.json`. The references are
+one per kind (chat, embedding, rerank), each in its own subfolder of `shared/schemas/`, each commented, each
+locked; and the app also ships a **filled unit** per kind in `shared/requests/`, so the request is not
+something a person has to assemble before their first run.
 
 ### The README is wrong today (§3.7.6)
 
@@ -720,18 +722,162 @@ It also gains the two facts this section creates: where the introduction lives (
 
 | step | what | why this order |
 |---|---|---|
-| **F1** | `appHold`: `shared` and `shared/schemas` held as folders, `example.json` as a file, contents ordinary; **and `Schemas.ensure` writes the exemplar, or the lock and the constant go**. The `WorkspaceTest` that asserts the subtree flips | it is the smallest change that makes the folder usable, and everything below assumes a writable `shared/schemas/` with a seed in it |
+| **F1** | `appHold`: `shared` held as a **folder**, `shared/schemas/**` held as a **subtree** (the app's references), everything else in `shared/` ordinary — `shared/requests/` above all. The `WorkspaceTest` that asserts the whole subtree flips | it is the smallest change that makes the folder usable, and every step below assumes a writable `shared/requests/` |
 | **F2** | The starter project in `~local` + `hello.md`, through `ProjectGit.init`: made on a fresh account, not made for a signed-in account, renamed with the account on adoption, made again when `~local` returns | it owns the `shared` link that F5's door is reached through |
 | **F3** | Onboarding as files: seed once by folder existence, one `onboardingShown`, delete the gate, drop 06 and the `app:` machinery, correct 02's opening sentence, and replace the six tests with the five folder tests | independent of F1/F2, and the largest deletion |
 | **F4** | `README_TEXT` corrected (`shared/`, no approval sentence, where the introduction is, the starter project) | one string, and it should be right before F5 removes the Settings row that the wrong README tells people to use |
 | **F5** | `ModelSection`'s templates row removed | last, because it is the row that currently opens the folder — F1 must be in place first |
+| **F6** | The template library (§3.8): the JSONC scanner and `Schema.parse`, `.jsonc` in `Schemas.names`, `shared/schemas/<kind>/` references and `shared/requests/<kind>/` units, and the pointer as a **path** | after F1, because the units' folder must be writable; and before T3b, which resolves the pointer F6 defines |
 
 **`app:` links die with 06, and that is a ruling worth recording.** They were allowed in any file **exactly
 two levels down** inside `shared/`, because `followLink` derives the folder as `parent.parent.name` and asks
-whether that is the system one — so `shared/onboarding/01.md` and `shared/schemas/chat.json` were pages that
-could act. While `shared/` was read-only for the person that was harmless; with F1 it would mean a note the
+whether that is the system one — so `shared/onboarding/01.md` and any `shared/schemas/<kind>/…` reference
+were pages that could act. While `shared/` was read-only for the person that was harmless; with F1 it would mean a note the
 person wrote at `shared/notes/x.md` could carry `app:delete-account`. Deleting the verbs with the page is
 both the simpler and the safer answer, and it leaves nothing to get wrong when the folder becomes writable.
+
+## 3.8 The template library: references, units, and JSONC
+
+**The operator, 2026-11-09, correcting §3.6.1's shorthand:**
+
+> *"I thought that branch just holds a path link to a llm request template it should use, while shared folder
+> holds the actual templates with request structure commented system locked templates in jsonc (to allow for
+> comments), and user or agent can copy those and make a filled in units to be used by the app to power chat
+> agents."*
+
+and, asked what ships:
+
+> *"we provide an openrouter oauth door, so we can ship a request form for openrouter's deepseek 1017 endpoint
+> when user chooses to use this door - and if user chooses to use the door this form will work out of the box,
+> same for embedding and rerank models - but I think that they should have their own subfolders."*
+
+### Two folders, and the difference is who may write (§3.8.1)
+
+| folder | holds | written by | locked |
+|---|---|---|---|
+| `shared/schemas/<kind>/` | **references** — the request structure, each field commented | the app only | **yes**, the whole subtree (§3.7.2) |
+| `shared/requests/<kind>/` | **units** — what the app actually sends | the person, and the agent | no |
+
+`<kind>` is `chat`, `embedding` or `rerank` — **the subfolders are the kinds**, which is the reading that earns
+its keep: the kind already travels with the pointer (§3.6.2), and a folder makes the picker's list *already*
+the right kind, so an embedding picker cannot offer a chat unit at all. (If the intent was one subfolder per
+*provider*, it is one constant and a rename: nothing below depends on the word.)
+
+**Why two folders rather than one with a lock-list.** The reference must be untouchable and the unit must be
+the person's; a single folder would need a lock entry per shipped file, and the entry list would have to grow
+every time the app shipped another reference. Two folders make the rule a location, and the location is then
+the lock (§3.7.2's `appHold`), with no per-file bookkeeping.
+
+**A unit is a copy, not a second format.** With JSONC the comments survive the copy, so the shipped unit *is*
+the reference with the address, the key name and the model chosen — one artifact, two addresses. Nothing strips
+anything, and an agent that edits a unit keeps the sentence explaining what it changed.
+
+### JSONC, and the one trap (§3.8.2)
+
+The references are `.jsonc` so a field can be explained beside itself, which is the whole reason the operator
+asked for it. The units are `.jsonc` too, because a copy of a commented file is a commented file.
+
+**`Schema.parse` cannot be `JSONObject(text)` any more** — measured: a `//` line makes `JSONObject` throw, and
+`Schema.parse` catches that as *"…could not be read"*, so today a commented template is a template the app
+refuses with a sentence about being unreadable.
+
+**The trap is that `//` appears inside the data.** Every address in this library is
+`"https://openrouter.ai/api/v1"`, so a stripping pass that does not track string state deletes the address
+and leaves a template that parses and points nowhere — a failure that looks like a typo in the file. The reader
+is therefore a small scanner, and its rules are the testable part:
+
+- inside a string, `//` and `/*` are text; outside, they start a comment;
+- `\"` inside a string does not end it, and `\\` does not start an escape;
+- a line comment ends at a newline, a block comment at `*/`, and an unterminated block comment is refused **by
+  name and line**, in the same class of sentence `whereIn` already produces;
+- the result must still parse, and a comment that was hiding a structural break is reported as the parse error
+  it is.
+
+Comments need no preserving on write: `Schema.text()` writes plain JSON, which is valid JSONC, so a unit the
+app rewrites (`Schemas.write`) loses its comments — acceptable, and worth saying because it is the one place a
+comment can vanish.
+
+The suffix rule widens: `Schemas.names` offers `.jsonc` **and** `.json`, so a person who writes strict JSON is
+not refused for it.
+
+### The pointer is a path (§3.8.3)
+
+`Schemas.pointer`/`setPointer` store a **path from the account root** — `shared/requests/chat/deepseek-1017.jsonc`
+— not a bare name, and `Schemas.read` resolves it. The reasons a path wins:
+
+- the operator's word is *"a path link"*;
+- a unit may be kept wherever the person wants, including inside a project, without a second mechanism to
+  express "somewhere else";
+- the refusal can quote the whole path, which is what a person needs when a pointer outlives the file it named.
+
+The validation is the same three questions a name asked, plus one: not empty, **resolves inside the account**
+(a `..` that climbs out is refused rather than clamped), is a file, and parses as the requested kind. A pointer
+whose file is gone refuses by naming the path and the picker — never a fallback, for §3.6.2's reason.
+
+### What ships, and why it works out of the box (§3.8.4)
+
+| reference (locked) | unit (editable) |
+|---|---|
+| `shared/schemas/chat/openrouter.jsonc` | `shared/requests/chat/deepseek-1017.jsonc` |
+| `shared/schemas/embedding/openrouter.jsonc` | `shared/requests/embedding/qwen3-8b.jsonc` |
+| `shared/schemas/rerank/openrouter.jsonc` | `shared/requests/rerank/voyage-2.5-lite.jsonc` |
+
+The unit's `"key": "@openrouter"` and its address are what make the operator's sentence true: **the unit works
+the moment that door has been used**, and refuses before that with the sentence `KeyRow` already has. No
+conditional writing, no "create the form when the door is chosen" — a file that is inert until a credential
+exists is a file, and the credential is what changes.
+
+**The chat unit names `deepseek/deepseek-v4.1-flash-1017` and `"reasoning_effort": "high"`** — the model this
+app has been measuring against. The two vector units name the models `ModelConfig` was already built around;
+the embedding one carries `"dimensions": "{{dimensions}}"`, because dimensions are a request parameter and the
+picker still chooses among 1024/2048/4096.
+
+**A unit is only chosen by a branch, never inferred.** The picker lists `shared/requests/chat/`; a branch with
+no pointer refuses naming the picker (§3.6.2). So "out of the box" means *one press away*, not *silently on*.
+
+### Accounts and projects, measured (§3.8.5)
+
+The operator asked, and the answer decides whether a default local account is justified:
+
+| question | measurement |
+|---|---|
+| can a **local account** be created? | **no.** Every account goes through `addAccount(login, host, gitUser, token, …)`, which stores a key and a host; `AddAccountDialog` offers exactly two doors — GitHub's device flow, or *another host* with a name, a host and a key. `Account` has no shape without a host |
+| so what is `~local`? | the **floor**, not a creation: `ensureProvisional()` makes it at start and again whenever the last account is removed. It is already the app's answer to "work without an account" |
+| can a **local project** be created? | **yes.** `NewProjectDialog` asks for a name and nothing else — *"It starts here, with its own history. An address can be added whenever you want it to live somewhere else as well."* |
+| can a local project gain a **remote origin** later? | **yes, in one press.** `setAddress` → `ProjectGit.makeRemote` and, when the project was local, an immediate `sync`. The name comes from the address's last segment, so the address's own page names the repository |
+| can a project arrive from one? | **yes** — `addProjectFromUrl` clones |
+
+**So the operator's reading is exactly the app's shape, and it is worth writing down because it is the
+argument for shipping a local account at all:** accounts are remote identities and cannot be local, projects are
+local by default and can be pointed at a remote whenever the person wants. Local-only work is therefore the
+normal state of a fresh install rather than a special case, and it is why `~local` + a starter project (§3.7.4)
+is a path a person can walk with no account at all.
+
+### The agent's hand (§3.8.6)
+
+**"User or agent can copy those and make filled units" is a requirement now**, and it collides with the rule
+`mayWrite` states: *"any project's agent gets readonly access to account folders outside his project (other
+projects, including system)"*. The resolution is the one §3.6.2b already chose for writes — **the lock decides,
+not the location**:
+
+- `shared/schemas/**` is system-locked, so an agent copying a reference *reads* it and writes the copy
+  elsewhere. Copying is a read plus a write, and only the write needs a place to land.
+- `shared/requests/**` is unlocked, so an agent may create and edit a unit there. It may edit **the request it
+  is running under**, which is the operator's own position — *"an agent that can rewrite its own request body is
+  doing what it was told"* — and the person can lock a unit (`isAgentLocked`) if they do not want that.
+- Everything else under `shared/` follows the same rule: unlocked means the agent may write it, locked means it
+  may not. `mayWrite`'s special sentence about *"the account's own folder"* therefore goes — it is the third
+  copy of a rule the lock already answers.
+
+### What this changes in the step list (§3.8.7)
+
+| step | change |
+|---|---|
+| **F1** | unchanged in size, changed in scope: `shared/schemas/**` inherits, `shared/requests/` does not |
+| **F6** (new) | the library: the JSONC scanner + `Schema.parse`, `.jsonc` in `Schemas.names`, per-kind subfolders, the three references and the three units, and `Schemas.ensure`'s flag becoming **the `requests` folder** — one existence flag for both folders, so emptying either is a thing a person can mean |
+| **T3b** | the pointer is a **path** (§3.8.3), so `wiredFor` resolves a path rather than joining a name onto a folder, and the picker lists `shared/requests/chat/` |
+| **T4** | the two vector pointers are paths too, and the two rows list `shared/requests/embedding/` and `…/rerank/` |
+| **F5** | unchanged: the Settings row goes once F1 makes the folder a door — and now the door is `shared/requests/`, which is where the working files are |
 
 ## 4. Cost is removed
 
