@@ -459,8 +459,11 @@ class SearchIndexTest {
         // leaves behind can. A file whose attempt **failed** is not "indexed at that time" either:
         // answering its time would make the next pass skip it for ever.
         built()
-        index.note("a.txt", 1_000L, SearchIndex.INDEXED)
-        index.note("b.txt", 2_000L, SearchIndex.FAILED, "it is not text")
+        // **The size is an argument, not a default.** It is a second opinion on "unchanged", and
+        // `-1` was the sentinel a kept-along schema needed; with one schema there is nothing to be
+        // unsure about, so every writer says what the directory entry already carried.
+        index.note("a.txt", 1_000L, SearchIndex.INDEXED, size = 12L)
+        index.note("b.txt", 2_000L, SearchIndex.FAILED, "it is not text", size = 40L)
 
         assertEquals("the indexed file's time", 1_000L, index.indexedAt("a.txt"))
         assertNull("a failed file has no time to compare", index.indexedAt("b.txt"))
@@ -477,7 +480,7 @@ class SearchIndexTest {
         // answers "up to date" about nothing.
         built()
         index.put("a.txt", "", Chunker.split("milk"), vectors()).getOrThrow()
-        index.note("a.txt", 1_000L, SearchIndex.INDEXED)
+        index.note("a.txt", 1_000L, SearchIndex.INDEXED, size = 12L)
 
         index.forget("a.txt")
 
