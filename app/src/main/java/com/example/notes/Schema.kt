@@ -1,0 +1,164 @@
+package com.example.notes
+
+import org.json.JSONException
+import org.json.JSONObject
+
+/**
+ * **One request, as a file** — the address, the path on it, the body, and the numbers the agent runs
+ * under.
+ *
+ * This is the whole of what the app knows about a model. There is no model list, no provider tag, no
+ * effort ladder and no window that asks for four fields one at a time: a person writes the request the
+ * server will receive, and the app sends it. The operator's decision, 2026-11-09: *"we could just leave
+ * in general settings a button that then could open a hidden folder with llm request schema templates
+ * as files that user can open and edit."*
+ *
+ * ### Why the model is a literal here and a placeholder there
+ *
+ * [Shape]'s placeholders are for what **only the app can know at call time** — the conversation, its
+ * tools, whether the reply is streamed. A model id is not like that: it is a name the server assigned,
+ * and it stays the same for every turn of every session that uses this file. So it is written as a
+ * literal, which means a template carries its model with it: `deepseek-fast.json`,
+ * `claude-careful.json`, `llama-on-my-pc.json` are three requests, and copying one is how you get
+ * another. That is also why the address is here rather than in a settings screen — a file that names a
+ * model but not the server is a file that cannot be sent.
+ *
+ * ### The three numbers are here for the same reason the model is
+ *
+ * `target`, `forget` and `trim` are the compaction policy, and policy belongs with the request it
+ * governs. A "long careful" template can therefore also carry a bigger target, and a template used for
+ * a small local model can carry a small one, without any second place to look. Zero — or an absent key —
+ * means that hand is off, which is a statement rather than a gap.
+ *
+ * ### What is deliberately absent
+ *
+ * **The key.** A file is a thing a person reads, copies and commits; a key in one would be the leak the
+ * vault exists to prevent. The key is looked up by host instead ([SchemaKey]), so a template naming
+ * `openrouter.ai` is sent with whatever this phone has stored for `openrouter.ai` and nothing else.
+ *
+ * **The model's window and reply reserve.** Nothing clamps any more (`ContextBudget`), so a number about
+ * a model's size would be a fact nothing reads.
+ */
+data class Schema(
+    /** The base URL: `https://openrouter.ai/api/v1`. An address, because it is where bytes go. */
+    val address: String,
+    /** The path on it: `chat/completions`. Relative, by [Shape]'s third rule. */
+    val url: String,
+    /** What is sent, with the placeholders the app fills. */
+    val body: JSONObject,
+    /** Where the context should end up. Zero is off. */
+    val target: Long = 0,
+    /** The size at which the agent is asked to clear up. Zero is off. */
+    val forget: Long = 0,
+    /** The size at which the app trims the context itself. Zero is off. */
+    val trim: Long = 0,
+) {
+    /** This request as the shape the sender uses, for a call of [kind]. */
+    fun shape(kind: ShapeKind): Shape = Shape(url = url, body = body, kind = kind)
+
+    /**
+     * Why this file cannot be used, or null when it can.
+     *
+     * **Every refusal names the key it is about** — `address`, `url`, `target` — because a person
+     * edited a document and "invalid schema" would leave them looking at it. [kind] is the vocabulary
+     * of placeholders the caller will fill; null checks only the two rules that hold for every kind,
+     * which is what the editor wants while a file is half written.
+     */
+    fun problem(kind: ShapeKind? = null): String? {
+        val where = address.trim()
+        if (where.isEmpty()) return "\"address\" is empty — it is the server this request goes to."
+        if (!where.startsWith("http://") && !where.startsWith("https://")) {
+            return "\"address\" must start with http:// or https:// — it is an address, like " +
+                "https://openrouter.ai/api/v1."
+        }
+        if (target < 0) return "\"target\" is negative; write a size, or 0 for off."
+        if (forget < 0) return "\"forget\" is negative; write a size, or 0 for off."
+        if (trim < 0) return "\"trim\" is negative; write a size, or 0 for off."
+        // The url and the placeholders are [Shape]'s rules, and the sender enforces them again — one
+        // copy of each, because a file can arrive from the editor, from a copy, or from a person's
+        // hands, and the rule must not depend on which.
+        val shape = shape(kind ?: ShapeKind.CHAT)
+        val shapeProblem = shape.problem()
+        if (shapeProblem != null) return shapeProblem
+        return if (kind == null) Shape.placeholderProblem(body) else null
+    }
+
+    /** The file's text. Two-space pretty, because a person opens these. */
+    fun text(): String = toJson().toString(2)
+
+    private fun toJson(): JSONObject = JSONObject().apply {
+        put("address", address)
+        put("url", url)
+        // **Written only when they are not zero**, so a template that turns a hand off says nothing
+        // about it rather than saying 0 twice — and so an embedding template is not cluttered with
+        // three keys that mean nothing to it.
+        if (target != 0L) put("target", target)
+        if (forget != 0L) put("forget", forget)
+        if (trim != 0L) put("trim", trim)
+        put("body", body)
+    }
+
+    companion object {
+        /**
+         * Reads a schema, or says which key is wrong.
+         *
+         * **A file that will not parse is refused, never replaced** — the same rule `model_conf.json`
+         * followed, and for the same reason: a parser that falls back to defaults eats a person's work
+         * and they find out from an agent using something they did not choose.
+         */
+        fun parse(text: String): Result<Schema> {
+            val root = try {
+                JSONObject(text)
+            } catch (e: JSONException) {
+                return Result.failure(IllegalArgumentException(whereIn(text, e)))
+            }
+            val address = root.optString("address").trim()
+            val url = root.optString("url").trim()
+            if (address.isEmpty()) {
+                return Result.failure(IllegalArgumentException("\"address\" is missing"))
+            }
+            if (url.isEmpty()) return Result.failure(IllegalArgumentException("\"url\" is missing"))
+            val body = root.optJSONObject("body")
+                ?: return Result.failure(
+                    IllegalArgumentException("\"body\" must be an object — the request to send."),
+                )
+            // **A number that is not a number is refused rather than read as zero.** Zero means "this
+            // hand is off", which is a decision; `"target": "60k"` is a typo, and reading it as off
+            // would silently turn compaction off on the file where somebody tried to set it.
+            fun number(key: String): Result<Long> {
+                if (!root.has(key)) return Result.success(0L)
+                val raw = root.opt(key)
+                if (raw !is Number) {
+                    return Result.failure(
+                        IllegalArgumentException("\"$key\" must be a whole number of tokens"),
+                    )
+                }
+                return Result.success(raw.toLong())
+            }
+            val target = number("target").getOrElse { return Result.failure(it) }
+            val forget = number("forget").getOrElse { return Result.failure(it) }
+            val trim = number("trim").getOrElse { return Result.failure(it) }
+            return Result.success(Schema(address, url, body, target, forget, trim))
+        }
+
+        /**
+         * Where a syntax error is, in a line.
+         *
+         * `org.json` reports a character offset, and the bracket form sometimes carries the real line —
+         * the same conversion `ModelConfigFile` does, and the same reason: a person editing a file needs
+         * a line, not an offset.
+         */
+        private fun whereIn(text: String, error: JSONException): String {
+            val message = error.message.orEmpty().ifBlank { "it is not valid JSON" }
+            Regex("""line (\d+)""").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?.let { return "line $it: $message" }
+            val offset = Regex("""character (\d+)""").find(message)
+                ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: Regex("""\bat (\d+)""").find(message)
+                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?: return message
+            val line = text.take(offset.coerceIn(0, text.length)).count { it == '\n' } + 1
+            return "line $line: $message"
+        }
+    }
+}

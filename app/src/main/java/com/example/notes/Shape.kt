@@ -88,6 +88,21 @@ data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = Sh
      */
     fun bodyOf(values: Map<String, Any?>): JSONObject = fill(body, values) as JSONObject
 
+    /**
+     * This body with [values] written where their placeholders are, **and every other placeholder left
+     * exactly as it is.**
+     *
+     * **Not [bodyOf]**, which is the sender's fill: that one removes a key whose value is missing,
+     * because a request must not carry an empty field. This one produces a *file*, and a file has to
+     * keep the placeholders it has not been given a value for — `{{messages}}` is the whole point of the
+     * template, and a body with that key removed could never be sent.
+     *
+     * Used by the shipped schemas: the model and the effort are literals in a file (`Schema`), so the
+     * app writes them in once and leaves the rest to be filled per call.
+     */
+    fun literal(vararg values: Pair<String, String>): JSONObject =
+        written(body, values.toMap()) as JSONObject
+
     /** The address this shape is sent to, given the connection's [base]. */
     fun address(base: String): String {
         val root = base.trim().trimEnd('/')
@@ -228,6 +243,35 @@ data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = Sh
                     if (value != null) out.put(key, value)
                 }
                 out
+            }
+            else -> template
+        }
+
+        /**
+         * [template] with only the named placeholders replaced — the file-writing twin of [filled].
+         *
+         * A name [values] does not mention is left as the placeholder string, which is what makes this
+         * the right one for producing a template rather than a request.
+         */
+        private fun written(template: Any?, values: Map<String, String>): Any? = when (template) {
+            is JSONObject -> {
+                val out = JSONObject()
+                for (key in template.keys()) {
+                    out.put(key, written(template.opt(key), values))
+                }
+                out
+            }
+            is JSONArray -> {
+                val out = JSONArray()
+                for (at in 0 until template.length()) {
+                    out.put(written(template.opt(at), values))
+                }
+                out
+            }
+            is String -> {
+                val name = placeholderIn(template)
+                val given = name?.let(values::get)
+                if (name != null && given != null && template.trim() == "{{$name}}") given else template
             }
             else -> template
         }
