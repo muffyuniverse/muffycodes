@@ -158,27 +158,13 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
-        // **The attribute goes in before the repository is made**, so the very first commit already
-        // holds it and a project that has just been created has nothing waiting to be sent. Writing
-        // it afterwards left `.gitattributes` as an uncommitted change in every new project — which
-        // the app then reported as "1 change" before anybody had touched anything.
-        //
-        // In the person's repository, not the app's storage: a clone elsewhere has to know which
-        // files are pointers, and an attribute only this app could read would make a picture arrive
-        // as 130 bytes of JSON that looks like corruption.
-        GitService.ensureLfsAttributes(dir)
+        // **A repository and nothing else.** An `.gitattributes` used to be written here before the
+        // repository existed, because a picture was stored as an LFS pointer and a clone had to know
+        // it. Nothing stands between the tree and the working copy now, so a project is a git project
+        // and a clone anywhere reads every file it holds.
         RepoLocks.hold(dir, "init") {
             val repo = GitService.initOrOpen(dir, authorProvider())
-            try {
-                // **Before anything is committed**, so the very first picture a person saves is a
-                // pointer rather than a 400 KB blob in the object store. The registration is here
-                // as well as in `MainActivity` because a repository can be made before any screen
-                // exists — an agent's first write does exactly that.
-                GitService.registerLfs()
-                GitService.enableLfs(repo)
-            } finally {
-                repo.close()
-            }
+            repo.close()
         }
         // After the repository, because the lines live in `.git/info/exclude` — they are the app's
         // own local rule, not a file in the person's repository.
@@ -288,28 +274,7 @@ class ProjectGit(
                 // Getting this backwards is not a subtle bug: it disables recovery from the corpse
                 // of a killed process, and `a lock left by a killed app does not lose the change`
                 // fails with the project refusing every save for ever.
-                val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
-                if (outcome.written) {
-                    // **A picture is a pointer, and its bytes are beside the repository.**
-                    //
-                    // There is nothing to rewrite here, and that is the design: a commit that holds
-                    // a picture holds 130 bytes naming its bytes by SHA-256, so a version of a
-                    // picture costs the tree almost nothing and the *store* holds exactly one copy
-                    // of the content. When a picture is deleted the pointer leaves the tree and
-                    // `LfsStore.sweep` reclaims the bytes nothing names any more — no commit is
-                    // rebuilt, and no id changes.
-                    //
-                    // **A marker, so the sweep happens at the next start.** It is proportional to
-                    // what is stored rather than to the whole repository, but it is still work that
-                    // has nothing to do with this save, so the save does not wait for it.
-                    val touched = outcome.id?.let { id ->
-                        GitService.changedPaths(it, ObjectId.fromString(id))
-                    }.orEmpty()
-                    if (touched.any { Workspace.kindOfPath(it) != EntryKind.TEXT }) {
-                        Maintenance.mark(repoDir(project), "a picture was saved")
-                    }
-                }
-                outcome
+                GitService.commitEverything(it, what, authorProvider(), inFlight = false)
             }
         }
 
@@ -396,29 +361,21 @@ class ProjectGit(
                     is GitCredentials.Answer.Use -> answer.token to userOf(answer)
                     GitCredentials.Answer.None -> null to gitUser()
                 }
-                val pictures = LfsSync.push(it, token, remote)
-                if (!pictures.ok) {
-                    // **Nothing is pushed over a picture that did not arrive.** The tree would name
-                    // an object GitHub does not have, and the sync would report a failure the person
-                    // cannot act on. Saying which picture is the actionable half.
-                    GitService.RemoteResult(
-                        "Nothing was sent, because a picture could not be uploaded: " +
-                            (pictures.why ?: "${pictures.failed} of them failed"),
-                        false,
-                    )
-                } else {
-                    // A push that fails leaves the row saying there is work to send, which is the
-                    // truth, and is what makes the next attempt meaningful — nothing has to be
-                    // recorded either way, because the count is asked of the repository.
-                    //
-                    // **Ordinary push, not a derived tree.** There used to be a third mechanism here:
-                    // "unsync" left a file tracked and derived a commit without it, which could only
-                    // be delivered by force because that commit was on no local branch. The operator
-                    // replaced it with classic gitignore — "a simple tracked/untracked switch" — so
-                    // what is on this phone's `main` and what is on GitHub's are now the same
-                    // history, and the push is a fast-forward like any other.
-                    GitService.push(it, token, gitUser = user)
-                }
+                // A push that fails leaves the row saying there is work to send, which is the
+                // truth, and is what makes the next attempt meaningful — nothing has to be
+                // recorded either way, because the count is asked of the repository.
+                //
+                // **Ordinary push, not a derived tree.** There used to be a third mechanism here:
+                // "unsync" left a file tracked and derived a commit without it, which could only be
+                // delivered by force because that commit was on no local branch. The operator replaced
+                // it with classic gitignore — "a simple tracked/untracked switch" — so what is on this
+                // phone's `main` and what is on GitHub's are now the same history.
+                //
+                // **And nothing has to be uploaded first any more.** A picture used to be a pointer in
+                // the tree with its bytes in a separate store, so the bytes had to arrive before the
+                // ref moved or GitHub refused the push (GH008). Every file is in the commit now, so a
+                // push is a push.
+                GitService.push(it, token, gitUser = user)
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
             }
@@ -433,9 +390,6 @@ class ProjectGit(
      * an ordinary push is a fast-forward and a rejection means the remote genuinely moved. Forcing
      * would discard whatever arrived there, and the agent is the one actor that must never be able
      * to do that — it would be a silent loss with the app's own authority behind it.
-     *
-     * **Pictures first.** `LfsSync.push` uploads before the ref moves, because GitHub rejects a tree
-     * naming bytes it does not hold. Uploading after would be a rejected push, not a slower one.
      *
      * Answers the same shape as [sync], because the callers say the same kind of sentence.
      */
@@ -454,14 +408,6 @@ class ProjectGit(
                         )
                         is GitCredentials.Answer.Use -> answer.token to userOf(answer)
                         GitCredentials.Answer.None -> null to gitUser()
-                    }
-                    val pictures = LfsSync.push(it, token, remote)
-                    if (!pictures.ok) {
-                        return@use GitService.RemoteResult(
-                            "Nothing was sent, because a picture could not be uploaded: " +
-                                (pictures.why ?: "${pictures.failed} of them failed"),
-                            false,
-                        )
                     }
                     GitService.push(it, token, gitUser = user)
                 } catch (e: Throwable) {
@@ -718,20 +664,9 @@ class ProjectGit(
         if (result.success) {
             open(project)?.use { repo ->
                 GitService.scrubRemoteUrls(repo)
-                // **A cloned project arrives with the attribute already committed** — that is what
-                // makes LFS portable — but the *filter* is per-repository configuration, and a
-                // clone does not carry it. Without this the pointers would be checked out as
-                // pointers: a project of 130-byte files that look like corruption.
-                GitService.enableLfs(repo)
             }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
-            // **Not written here.** A project cloned from GitHub that holds pictures already carries
-            // the attribute — it is committed content, which is the whole point of it — and writing
-            // it again would leave the freshly-arrived project with an uncommitted change nobody
-            // made. Only a clone of a project that has no attribute gets one, and then it is
-            // genuinely new content that has to be committed like anything else.
-            GitService.ensureLfsAttributesIfMissing(dir)
         }
         return result
     }

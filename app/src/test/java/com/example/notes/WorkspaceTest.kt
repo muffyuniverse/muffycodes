@@ -1362,8 +1362,8 @@ class WorkspaceTest {
     fun `a picture is born untracked, because assets is where it belongs`() {
         // **The operator's rule, and it is wider than what shipped.** The rule was
         // `kindOf == UNKNOWN`, and `EntryKind` has a separate `IMAGE` - so pictures were born
-        // *tracked*, which is why `LFS_ATTRIBUTE` is a list of image extensions. Now anything that
-        // is not text is born untracked, and `assets/` is the one place a picture is tracked.
+        // *tracked*. Now anything that is not text is born untracked, and `assets/` is the folder a
+        // person puts the ones they mean to push.
         //
         // The cost is real and accepted: a picture outside `assets/` has no version and no undo.
         // This test is what says the rule changed, so a later edit cannot quietly revert it.

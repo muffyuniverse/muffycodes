@@ -52,155 +52,6 @@ object GitService {
     const val ORIGIN = "refs/remotes/origin/"
 
     /**
-     * Registers JGit's built-in LFS client, **once, before any repository is opened.**
-     *
-     * **JGit reaches for this through an SPI**, so until it is set every LFS operation silently does
-     * nothing: a commit stores the raw bytes and the attribute is ignored, with no error anywhere.
-     * That is the failure this call exists to prevent — it looks exactly like "LFS is not supported"
-     * rather than like a missing registration.
-     *
-     * Idempotent, because it is called from more than one place and a second registration is not an
-     * error; `setInstance` simply replaces the instance with an equivalent one.
-     */
-    fun registerLfs(): Boolean = try {
-        org.eclipse.jgit.lfs.BuiltinLFS.register()
-        true
-    } catch (t: Throwable) {
-        // **A phone that cannot register LFS still edits and commits.** The consequence is that
-        // pictures are stored whole in git rather than as pointers, which is what every build before
-        // this one did; failing the app over it would be a worse trade than the storage.
-        //
-        // **But it is not swallowed.** The answer is returned so a caller that cares — a test, a
-        // trace — can say so. A registration that failed silently is indistinguishable from one
-        // that worked, right up until somebody notices their pictures are megabytes.
-        false
-    }
-
-    /**
-     * Turns LFS on for one repository, and says whether it is on.
-     *
-     * **`filter.lfs.useJGitBuiltin` is not optional.** `BuiltinLFS.isEnabled` reads it and answers
-     * false without it, so the filter is a silent no-op — verified by committing a PNG with the
-     * attribute set and watching the tree store the raw bytes. This is the one line that makes the
-     * difference between LFS working and appearing not to.
-     */
-    fun enableLfs(repo: Repository): Boolean = try {
-        val config = repo.config
-        config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
-        config.save()
-        true
-    } catch (t: Throwable) {
-        false
-    }
-
-    /**
-     * The line that makes git treat a picture as a pointer, **written into the person's repository.**
-     *
-     * `.gitattributes` is committed content, which is the point: a clone anywhere else then knows
-     * which files are pointers, and a repository whose attribute lived only in this app's own storage
-     * would arrive as 130-byte files that look like corruption. The cost is that a line appears in
-     * the person's project — and it is the line every LFS repository in the world has.
-     */
-    fun ensureLfsAttributes(dir: File) {
-        try {
-            val attributes = File(dir, ".gitattributes")
-            // **Line by line, because [LFS_ATTRIBUTE] is several lines.** Comparing the whole block
-            // against one line of the file never matches, so the first version appended the block
-            // again on every call — a `.gitattributes` that grew by six lines each time the app
-            // looked at the project, and a "1 changed" that was the app's own doing.
-            val wanted = LFS_ATTRIBUTE.lines().filter { it.isNotBlank() }
-            val was = if (attributes.isFile) attributes.readText() else ""
-            val have = was.lines().map { it.trim() }.toSet()
-            val missing = wanted.filter { it.trim() !in have }
-            if (missing.isEmpty()) return
-            val now = if (was.isEmpty() || was.endsWith("\n")) {
-                was + missing.joinToString("") { it + "\n" }
-            } else {
-                was + "\n" + missing.joinToString("") { it + "\n" }
-            }
-            attributes.writeText(now)
-        } catch (t: Throwable) {
-            // A project that could not be told still commits; its pictures are stored whole, which is
-            // what every build before this one did.
-        }
-    }
-
-    /**
-     * Writes the attribute **only when the project has no `.gitattributes` at all.**
-     *
-     * The difference matters after a clone. A project that came from GitHub with pictures in it
-     * already carries the attribute as committed content — writing it again would leave a change
-     * nobody made, and the app would report a freshly-arrived project as having work to send. A
-     * project with no attribute and no pictures does not need one; and a project with pictures but
-     * no attribute could not have arrived that way, so the only case this serves is a clone of a
-     * project whose attribute was never written — where the new file is genuinely new content.
-     */
-    fun ensureLfsAttributesIfMissing(dir: File) {
-        if (File(dir, ".gitattributes").isFile) return
-        ensureLfsAttributes(dir)
-    }
-
-    /**
-     * Which paths are stored as LFS pointers — **one line per kind the app can draw or show.**
-     *
-     * Written as a list rather than one wildcard so that adding a picture format is one edit here and
-     * nothing else. The `-text` is git's own requirement: it stops git from trying to convert line
-     * endings in a binary, which would corrupt the bytes before they are ever hashed.
-     */
-    private val LFS_ATTRIBUTE: String =
-        // **The folder first, and it is the rule that matters.**
-        //
-        // `assets/` is where a binary belongs, and it covers every kind at once — a `.zip`, an
-        // `.mp4`, an `.apk`, a format nobody has thought of yet. The extension list below could
-        // only ever cover pictures, so a dependency tarball fetched and unpacked into a project was
-        // committed as a raw blob into ordinary git history, where it stays for ever.
-        //
-        // **Kept alongside rather than replaced**, because the extension list still governs a
-        // picture saved before `assets/` existed: those files are in the repository root and have no
-        // folder rule to cover them. Removing it would change how they are stored on the next save,
-        // which is a silent re-storage of everything a person already has.
-        "assets/** filter=lfs diff=lfs merge=lfs -text\n" +
-            Workspace.IMAGE_EXTENSIONS
-                .sorted()
-                .joinToString("") { "*.$it filter=lfs diff=lfs merge=lfs -text\n" }
-
-    /**
-     * Makes git store files ending in [extension] through LFS, in [dir].
-     *
-     * **A binary the person chose to track needs this, and without it the choice costs them the
-     * repository.** A `.pdf` or a `.zip` is not in [Workspace.IMAGE_EXTENSIONS], so no attribute
-     * covers it — and a tracked binary with no attribute is committed **whole, into ordinary git
-     * history, for ever**: a 40 MB video in one commit stays in every clone of that repository
-     * until the history is rewritten, which this app never does. Tracking one is the person saying
-     * "this belongs on GitHub", and this is what makes that sentence safe to act on.
-     *
-     * The extension is normalised to lower case, because `.PDF` and `.pdf` are the same kind of
-     * file and two lines for one kind would be a second rule for the same thing.
-     */
-    fun ensureLfsAttribute(dir: File, extension: String) {
-        val ext = extension.lowercase().removePrefix(".").trim()
-        if (ext.isEmpty()) return
-        try {
-            val attributes = File(dir, ".gitattributes")
-            val wanted = "*.$ext filter=lfs diff=lfs merge=lfs -text"
-            val was = if (attributes.isFile) attributes.readText() else ""
-            // **Matched on the attribute, not on the extension.** A project may already carry its
-            // own line for this kind — written by hand, or by another tool — and a second line for
-            // the same pattern would be two rules that happen to agree today.
-            val covered = was.lines().any { line ->
-                val trimmed = line.trim()
-                trimmed.startsWith("*.$ext ") && "filter=lfs" in trimmed
-            }
-            if (covered) return
-            val now = if (was.isEmpty() || was.endsWith("\n")) "$was$wanted\n" else "$was\n$wanted\n"
-            attributes.writeText(now)
-        } catch (t: Throwable) {
-            // A project that could not be told still commits; its binary is stored whole, which is
-            // what every build before this one did.
-        }
-    }
-
-    /**
      * How many versions a reader may return.
      *
      * Not a limit on the history: how far back a person can go is the setting in
@@ -1827,20 +1678,14 @@ object GitService {
      */
     fun restore(repo: Repository, path: String, revisionId: String, deadline: Deadline? = null) {
         val clean = path.trim('/')
-        // **A picture has no versions, so there is nothing to put back.** LFS stores a pointer in the
-        // tree and the bytes in a content-addressed store that is pruned to what the newest commits
-        // reference — so the version this call was given may already be gone, and writing the pointer
-        // over the picture would replace an image with 130 bytes of JSON. The refusal comes before
-        // anything is opened, because the answer does not depend on the repository.
+        // **A picture is restored like anything else**, because the bytes are in the commit.
         //
-        // **The app says this elsewhere too** (the history screen and the delete warning), and it is
-        // the same sentence each time: a binary keeps one version, so it cannot be brought back.
-        if (Workspace.kindOfPath(clean) != EntryKind.TEXT) {
-            throw IllegalStateException(
-                "\"$clean\" is not text, and a picture or another binary has only one version. " +
-                    "Saving it again replaces it, and nothing older can be put back.",
-            )
-        }
+        // The refusal that used to be here was LFS's: the tree held a pointer and the bytes lived in a
+        // content-addressed store pruned to what the newest commits referenced, so putting an older
+        // version back wrote 130 bytes of JSON over the picture. No filter stands between the tree and
+        // the working copy any more, so a binary has versions and the write below is the whole of it —
+        // and `HistoryScreen` already told the person "it can still be put back", which was true only
+        // once this line went.
         val target = File(repo.workTree, clean)
         val walk = RevWalk(repo)
         try {
@@ -1978,32 +1823,7 @@ object GitService {
         force: Boolean = false,
         gitUser: String? = null,
     ): RemoteResult {
-        // **The filter is switched off around the push, and this is not an optimisation.**
-        //
-        // JGit's LFS pre-push hook runs on every push once the filter is enabled, and it asks for an
-        // LFS connection *before* it knows whether it has anything to send. On a repository with no
-        // SSH session factory configured — every Android app — that call dies inside
-        // `SshSupport.runSshCommand` with a `NullPointerException` about `SshSessionFactory.getInstance()`
-        // being null, and **the whole push fails**: a project of text files cannot be synced at all.
-        // Measured: identical push succeeds without the registration and throws with it.
-        //
-        // The hook short-circuits on an empty pointer set (`findObjectsToPush().isEmpty()`), so with
-        // no pictures in this push it never reaches the network — and with pictures it would send no
-        // `Authorization` header anyway, which is why `LfsSync` uploads them itself. So the filter is
-        // turned off for the duration and put back afterwards, whatever happens.
-        val wasEnabled = repo.config.getBoolean("filter", "lfs", "useJGitBuiltin", false)
-        if (wasEnabled) {
-            repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", false)
-            repo.config.save()
-        }
-        try {
-            return pushNow(repo, token, force, gitUser)
-        } finally {
-            if (wasEnabled) {
-                repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
-                repo.config.save()
-            }
-        }
+        return pushNow(repo, token, force, gitUser)
     }
 
     private fun pushNow(

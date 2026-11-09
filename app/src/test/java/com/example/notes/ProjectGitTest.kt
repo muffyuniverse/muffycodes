@@ -153,18 +153,17 @@ class ProjectGitTest {
     }
 
     @Test
-    fun `a project of text files can be pushed while the LFS filter is on`() {
-        // **The bug that made every sync fail, and it had nothing to do with pictures.**
+    fun `a push needs no filter, because every file is in the commit`() {
+        // **The bug this replaces, kept as history.** Once `filter.lfs.useJGitBuiltin` was enabled,
+        // JGit's LFS pre-push hook ran on *every* push and asked `LfsConnectionFactory` for a
+        // connection before checking whether it had anything to upload. That reached
+        // `SshSupport.runSshCommand`, dereferenced `SshSessionFactory.getInstance()` — null on
+        // Android — and threw a `NullPointerException` that took the whole push with it, so a project
+        // of text files could not be synced at all. `push` turned the filter off around itself as a
+        // workaround.
         //
-        // Once `filter.lfs.useJGitBuiltin` is enabled, JGit's LFS pre-push hook runs on *every* push
-        // and asks `LfsConnectionFactory` for a connection before it has checked whether it has
-        // anything to upload. That call reaches `SshSupport.runSshCommand`, which dereferences
-        // `SshSessionFactory.getInstance()` — null on Android, since nothing configures one — and
-        // throws a `NullPointerException` that takes the whole push with it. Measured both ways: the
-        // identical push succeeds with the registration absent and fails with it present.
-        //
-        // So `push` turns the filter off for its own duration. This test is the one that fails if
-        // that guard is ever removed: a project with no pictures at all must still be able to sync.
+        // The filter is gone, so the workaround is gone with it: a push is a push, and a picture is
+        // bytes in the tree rather than a pointer with its content in a separate store.
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
@@ -175,40 +174,31 @@ class ProjectGitTest {
         val result = git.sync("Shopping")
 
         assertTrue("the sync succeeded: ${result.message}", result.success)
-        // **And the filter is left as it was**, so the next picture is still a pointer.
-        git.open("Shopping")!!.use {
-            assertTrue(
-                "the filter is back on afterwards",
-                it.config.getBoolean("filter", "lfs", "useJGitBuiltin", false),
-            )
-        }
     }
 
-    // ---- a picture has one version, so it cannot be put back ----------------
+    // ---- a binary keeps its versions, because the bytes are in the commit ----------------
 
     @Test
-    fun `restoring a picture is refused by name, and changes nothing`() {
-        // **A picture is a pointer, and history holds no version of its bytes.** Every commit names
-        // the same SHA-256, so "going back" would hand a person the same picture they are looking at,
-        // presented as a restore that changes something. The refusal says so by name instead.
-        //
-        // **The folders first.** `init` makes the repository but not the project folder, and the
-        // first version of this test wrote into a directory that did not exist yet.
+    fun `restoring a picture puts the older bytes back`() {
+        // **The opposite of what this test used to assert.** A picture was a pointer in the tree and
+        // its bytes lived in a content-addressed store pruned to what the newest commits referenced,
+        // so "go back" would have written 130 bytes of JSON over the image — and the app refused by
+        // name instead. Nothing stands between the tree and the working copy now, so a binary has
+        // versions exactly as text does, which is also what `HistoryScreen` already promised.
         workspace.createProjectFolders("shopping").getOrThrow()
         val git = gitFor()
         val picture = File(workspace.projectDir("shopping"), "page.png")
         // Real PNG magic bytes, so this is a picture by content as well as by name.
         picture.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + "one".toByteArray())
         git.init("shopping").getOrThrow()
+        val first = RepoHistory(workspace.projectDir("shopping")).log().first().id
         val before = picture.readBytes()
+        picture.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + "two".toByteArray())
+        requireNotNull(git.commit("shopping", "drew on the page"))
 
-        val outcome = git.restore("shopping", "page.png", "HEAD")
+        git.restore("shopping", "page.png", first).getOrThrow()
 
-        assertTrue("it is refused: ${outcome.exceptionOrNull()?.message}", outcome.isFailure)
-        val said = outcome.exceptionOrNull()?.message.orEmpty()
-        assertTrue("and it names the file: $said", said.contains("page.png"))
-        assertTrue("and says why: $said", said.contains("only one version"))
-        assertTrue("the picture on disk is untouched", before.contentEquals(picture.readBytes()))
+        assertTrue("the older bytes are back", before.contentEquals(picture.readBytes()))
     }
 
     @Test

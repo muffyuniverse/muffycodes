@@ -388,50 +388,6 @@ dependencies {
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:7.8.1.202611041320-r")
 
-    // **LFS is in the build, and JGit's own client is only half of it.**
-    //
-    // A picture has to live on GitHub with the rest of the project, and a version of it must not be
-    // kept for ever by the commit that held it. LFS is the only mechanism that does both without
-    // rewriting history — and JGit's implementation of it cannot authenticate over HTTPS:
-    // `LfsConnectionFactory` builds its batch request with `Accept`, `Content-Type` and
-    // `Accept-Encoding` and **no `Authorization` header**; the only auth path it has is SSH. Against a
-    // private repository the download does not merely fail, it **succeeds silently and leaves the
-    // pointer in the working tree** — measured, 127 bytes on disk and zero objects fetched, no
-    // exception. Against a public one the same clone downloads correctly, which is what proves the
-    // code path works and the credential is the missing part.
-    //
-    // So the local half is JGit's and the network half is ours: `LfsClient` speaks the batch API with
-    // the app's own token, and `LfsSync` orders the two so that objects reach GitHub before the ref
-    // that names them does.
-    //
-    // **Re-measured on 7.8.1, 2026-11-07: still not fixed, so this client stays.** The new
-    // `LfsConnectionFactory$AuthCache` looks like a credential cache and is not one — it holds an
-    // `ExpiringAction` (the batch response's own expiry), and the request still sets exactly three
-    // headers: `Accept`, `Accept-Encoding`, `Content-Type`. No `Authorization` anywhere in the
-    // class's constant pool. Upstream eclipse-jgit/jgit#11 remains open with no fix version.
-    //
-    // So the split is unchanged: JGit for the pointer format, the clean filter and the blob loader;
-    // `LfsClient` for the batch API, because it is the only half that can send a token.
-
-    // **Large files, in Java, with no `git-lfs` binary.** The official client is a Go program and
-    // there is no android-arm64 build of it — but JGit's own implementation is pure Java and this is
-    // the same version as the JGit above, which matters: the LFS classes are registered into JGit
-    // through an SPI, and a mismatched pair would fail at run time rather than at build time.
-    //
-    // **JGit's client is used for the local half only** — the pointer format, the clean filter that
-    // moves bytes into `.git/lfs/objects`, and the blob loader that reads them back. Its network half
-    // cannot authenticate over HTTPS (`LfsConnectionFactory` sets no `Authorization` header), so the
-    // batch API is spoken by `LfsClient` instead. Gson is here because `Protocol.gson()` is what
-    // parses the batch response, and writing a second parser for a documented JSON shape would be a
-    // second thing to keep correct.
-    //
-    // **Checked, not assumed:** every class in this artifact was scanned for `ProcessBuilder` and
-    // `Runtime.exec`, and the only one that spawns anything is `InstallBuiltinLfsCommand`, which this
-    // app never calls.
-    //
-    implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:7.8.1.202611041320-r")
-    implementation("com.google.code.gson:gson:2.11.0")
-
     // **Two crypto dependencies left with the secret API they existed for.** The sealed box
     // (`xsalsa20poly1305` + BouncyCastle) existed to produce GitHub's `encrypted_value` for an
     // environment secret, and this app no longer writes one: an environment and its secrets are

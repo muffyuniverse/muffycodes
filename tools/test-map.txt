@@ -100,9 +100,6 @@ ExportTest app/src/main/java/com/example/notes/Export.kt
 BrowseToolsTest app/src/main/java/com/example/notes/AgentTools.kt
 SearchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-MaintenanceTest app/src/main/java/com/example/notes/Maintenance.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/LfsStore.kt
-LfsClientTest app/src/main/java/com/example/notes/LfsClient.kt
-LfsSyncTest app/src/main/java/com/example/notes/LfsSync.kt
 McpTest app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
 McpTestTools app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt
 BrowserTest browser/src/main/java/com/example/notes/browser/Browser.kt browser/src/main/java/com/example/notes/browser/WebViewBrowser.kt

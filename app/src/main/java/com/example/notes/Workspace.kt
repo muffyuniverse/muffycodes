@@ -704,9 +704,9 @@ class Workspace(
         // **The operator widened it, and `assets/` is why.** All files can be tracked; what differs
         // is the default at the moment of creation. A non-text file is born untracked, so a stray
         // screenshot in `src/` no longer becomes a repository blob by accident — and a picture the
-        // person means to keep goes in `assets/`, which is the one place a picture is tracked, and
-        // tracked through LFS. The cost is real and accepted: a non-text file outside `assets/` has
-        // no version and no undo.
+        // person means to keep goes in `assets/`, the folder that says "this belongs on the host".
+        // The cost is real and accepted: a non-text file outside `assets/` has no version and no undo
+        // until somebody tracks it.
         //
         // The ignore comes first when it happens, and the order is load-bearing: `ignore` writes
         // `.gitignore` through `write`, which refuses a locked path, so locking first would make
@@ -720,8 +720,8 @@ class Workspace(
      *
      * **Anything that is not text.** A picture is now included: it used to be tracked on the
      * reasoning that the app understood it, but `assets/` is a better answer — a picture that is
-     * meant to be kept goes there and is stored through LFS, and one that is not meant to be kept
-     * should not silently become a repository blob.
+     * meant to be kept goes there, and one that is not meant to be kept should not silently become a
+     * repository blob.
      *
      * **This is the one-line rule the operator asked for**: *"all files can be tracked but nontext
      * files are born untracked, it already should be default behaviour."* It was not — the rule was
@@ -741,9 +741,9 @@ class Workspace(
         // version and no undo, which is the one promise this app is built on.
         //
         // The operator's rule is about *defaults at creation*, and a person pressing New File and
-        // choosing a picture name is not a default — it is a decision. `assets/` still matters: it is
-        // where pictures are stored through LFS, so a picture made here and moved there stops being
-        // an ordinary blob. What it is not is a licence to take the version away.
+        // choosing a picture name is not a default — it is a decision. `assets/` still matters as a
+        // place, but it is a name a person gives a folder they mean to push, not a storage rule. What
+        // it is not is a licence to take the version away.
         if (kind == EntryKind.IMAGE) return false
         return kind != EntryKind.TEXT
     }
@@ -1661,11 +1661,12 @@ class Workspace(
         //
         // **`assets/` is the person's, and it is a folder rule rather than a lock.**
         //
-        // It is the one folder whose contents cost money to store — LFS bandwidth and quota are
-        // billed — and whose size is unbounded, so an agent that can write there can spend the
-        // operator's quota without asking. The rule is structural rather than a list of locked
-        // paths because the folder is what the rule is about: a new picture in `assets/` must be
-        // refused without anybody having remembered to lock it.
+        // It is the one folder whose contents are large and whose size is unbounded: a picture there
+        // is a blob in every clone of the project for ever, and the quota it spends is the operator's
+        // hosting rather than anything this app can measure. So an agent that can write there can
+        // make a repository expensive without asking, and the rule is structural rather than a list of
+        // locked paths because the folder is what the rule is about: a new picture in `assets/` must
+        // be refused without anybody having remembered to lock it.
         //
         // **Refused, not hidden.** `read` and `search` still see it, the same as a locked file —
         // "locked doesnt mean blind, it means readonly".
@@ -2222,11 +2223,11 @@ class Workspace(
         val APP_IGNORES = listOf("agent/", ".muffy/", "requests/", SYSTEM_PROJECT)
 
         /**
-         * The folder a person keeps binaries in, stored through LFS.
+         * The folder a person keeps binaries in.
          *
          * **The agent may not write here** — see [isAgentLocked] — because it is the one folder whose
-         * contents cost the operator quota and whose size is unbounded. Everything else in the
-         * project is the agent's to change.
+         * contents are large and whose size is unbounded: a picture the agent puts here is in every
+         * clone of the project for ever. Everything else in the project is the agent's to change.
          */
         const val ASSETS = "assets"
 

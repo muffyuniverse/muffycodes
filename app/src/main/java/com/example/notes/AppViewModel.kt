@@ -62,20 +62,6 @@ class AppViewModel @JvmOverloads constructor(
      * answer a *release* build gives, and that is asserted separately.
      */
     private val signInGitHub: () -> Who = { HttpWho() },
-    /**
-     * Whether this phone runs the **app-start housekeeping** — the sweep and `git gc` that reclaim
-     * what a prune and a pull leave behind.
-     *
-     * **A seam rather than a rule, and it exists because of what the work is.** Housekeeping is a
-     * concern of *the app being opened*: a `gc` runs for seconds to minutes, it holds a repository
-     * for the length of it, and it is exactly right once per launch. A view model built in a test is
-     * not a launch — it is a screen somebody is inspecting — and hundreds of them in one shard, each
-     * starting a thread that walks a temp folder, is work nobody asked for competing with the thing
-     * the test is measuring.
-     *
-     * The default is `true`, so the app is unchanged and only a test says otherwise.
-     */
-    private val housekeeping: Boolean = true,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -505,68 +491,6 @@ class AppViewModel @JvmOverloads constructor(
         // thing. The call is posted instead, so it happens once everything above and below has been
         // built.
         main.post { openOnboarding() }
-        // **The housekeeping, after the screen is up.** A prune moves a ref and a pull replaces the
-        // history; both strand objects that nothing has ever deleted, because `gc` is proportional to
-        // the whole repository and has no place inside a save. It runs here — app start, daemon
-        // thread, only for a project that said something is waiting — and it is posted rather than
-        // called so that nothing above it waits for a `gc`.
-        if (housekeeping) main.post { runHousekeeping() }
-    }
-
-    /**
-     * Runs [Maintenance] in the background, for every project that asked for it.
-     *
-     * **Guarded by the same "is an agent on" answer the runner uses**, because a collection holding a
-     * repository for a minute would stall the next commit an agent makes. A skipped project keeps its
-     * marker, so the next start tries again — which is the same rule the pass itself follows when a
-     * lock is taken.
-     */
-    private fun runHousekeeping() {
-        val ws = workspace ?: return
-        // **No thread unless something is waiting.** A start where nothing has been pruned or pulled
-        // is the ordinary start, and spawning a worker for it costs a thread and a file read on every
-        // construction — which in a test shard is hundreds of them, all competing with whatever the
-        // shard is actually measuring.
-        // **Every tree, because a marker is kept in a tree's own `agent/`.** Asking only the project
-        // folder would leave a branch's marker for ever, which is housekeeping that never runs while
-        // the app reports that there is nothing to do.
-        val any = (ws.accountDir.listFiles() ?: emptyArray())
-            .filter { it.isDirectory && !ws.isHidden(it.name) }
-            .any { dir ->
-                Worktrees(ws).branches(dir.name).any { Maintenance.waiting(ws.treeOf(dir.name, it)) }
-            }
-        if (!any) return
-        // **The account it was started for, named.** A `gc` can run for a minute, and an account
-        // deleted while it does would be re-created by nothing here — but the log row a finished pass
-        // writes would be written into a folder the person removed, which is a deleted account coming
-        // back in the smallest possible form. So the folder is checked before the pass writes
-        // anything, and the whole thing stops if the account went away.
-        val account = ws.accountDir
-        Thread({
-            try {
-                if (!account.isDirectory) return@Thread
-                val sessions = AgentSessions(account).read()
-                val done = Maintenance.run(
-                    ws = ws,
-                    // **The account can go away mid-pass.** A person can delete it while a `gc` is
-                    // running, and the log row a finished pass writes would be written into a folder
-                    // they removed — a deleted account coming back in the smallest possible form.
-                    alive = { account.isDirectory },
-                    // **Per worktree**, because two branches of one project are two agents and a
-                    // `gc` must not wait for the wrong one — nor run beside a branch's commit.
-                    busy = { project, branch ->
-                        sessions.any { it.project == project && it.branch == branch && it.running }
-                    },
-                )
-                // **Only what did something refreshes the screen.** A start where nothing was
-                // waiting is the normal case; a project whose sweep removed picture bytes has just
-                // changed what the storage figure says, so the screens are asked again. The log row
-                // is written by the pass itself, per project, so nothing is lost by not repeating it.
-                if (done.any { it.freed > 0 }) main.post { refresh() }
-            } catch (e: Throwable) {
-                // Housekeeping that could not run leaves its markers for the next start.
-            }
-        }, "maintenance").apply { isDaemon = true }.start()
     }
 
     /**
@@ -2320,19 +2244,6 @@ class AppViewModel @JvmOverloads constructor(
                 // **Added, not restored from a version.** The file on disk is the truth; a person who
                 // tracked it again is saying "send this", and what is on the phone is what to send.
                 GitService.track(repo, inside)
-                // **And a binary gets an LFS line before it is ever committed.** Without this the
-                // choice to track a `.pdf` or a `.zip` costs the person their repository: a tracked
-                // binary with no attribute is committed whole, into ordinary history, and stays in
-                // every clone for ever — this app never rewrites history. Written before the commit
-                // below, so the attribute and the file arrive in the same commit and the pointer
-                // rule is in force from the first byte.
-                //
-                // Only a file the app cannot read as text needs it; a picture already has its line
-                // from `ensureLfsAttributes`, and a text file must not be turned into a pointer.
-                val extension = file.name.substringAfterLast('.', "")
-                if (extension.isNotEmpty() && Workspace.kindOfPath(file.name) == EntryKind.UNKNOWN) {
-                    GitService.ensureLfsAttribute(ws.projectDir(project), extension)
-                }
             }
         }
 
@@ -3294,11 +3205,16 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Writes a picture that was drawn on, **either over the file it came from or as a new one.**
      *
-     * **`target` is what makes a picture's versioning a file operation.** A binary has exactly one
-     * version (see `docs/PLAN-lfs-2026-11-05.md`): saving over it destroys what was there, and saving
-     * beside it keeps both as two files. The screen asks which, and this is the one place both answers
-     * land — the same funnel for locks, the record's protection, and the commit, so a new file cannot
-     * skip a rule the old one obeys.
+     * **`target` is what makes a picture's versioning a file operation**, and the choice is still the
+     * person's: saving over the file keeps one chain of versions, and saving beside it keeps both as
+     * two files. The screen asks which, and this is the one place both answers land — the same funnel
+     * for locks, the record's protection, and the commit, so a new file cannot skip a rule the old one
+     * obeys.
+     *
+     * **It used to be the only way to keep anything.** A binary had exactly one version because its
+     * bytes lived outside the tree, so overwriting it destroyed what was there. That is not true any
+     * more — every version of a picture is a commit (see `docs/REMOVED-…-lfs.md`) — so "save over" is
+     * a choice about how the folder reads rather than a warning about losing history.
      *
      * **A new name does not delete the original.** The person asked for a copy; the file they were
      * editing keeps its own version, and the one they made starts with its own.
@@ -5780,18 +5696,11 @@ class AppViewModel @JvmOverloads constructor(
             message = "${dir.name} is not a project, so there is no history to bring anything back from"
             return false
         }
-        // **A binary is not in the history, so there is nothing to bring back.** A picture has one
-        // version — the newest — and the LFS store keeps only what the newest commits reference, so
-        // the bytes at `gone.revision` may already be gone. Offering it back would be offering
-        // something that may not exist, and writing a pointer over it would replace a picture with
-        // JSON. The person is told instead of being shown a button that might work.
+        // **Every file is in the history, so there is no kind to refuse.** This used to turn a picture
+        // away: a binary had one version and its bytes lived outside the tree, so the version named
+        // might already be gone. The bytes are in the commit now, so a photograph someone deleted by
+        // accident is as recoverable as a note.
         //
-        // **A folder is allowed**, because it may hold text; the per-file refusal below decides.
-        if (!gone.isFolder && Workspace.kindOfPath(gone.name) != EntryKind.TEXT) {
-            message = "\"${gone.name}\" is not text, and a picture has only one version — it " +
-                "cannot be brought back. Deleting one is permanent."
-            return false
-        }
         // The folder's own tree, for the same reason [deletedIn] read it there.
         val branch = ws.branchOf(dir)
         val repo = git?.onBranch(branch)
@@ -5806,10 +5715,6 @@ class AppViewModel @JvmOverloads constructor(
             val prefix = under.joinToString("/")
             val held = repo?.paths(project, prefix, gone.revision).orEmpty()
             for (name in held) {
-                // **The same rule inside a folder.** A folder's version may hold pictures, and a
-                // picture's bytes at that version may no longer exist; skipping it leaves the folder
-                // restored without the pictures it used to hold, which the answer says.
-                if (Workspace.kindOfPath(name) != EntryKind.TEXT) continue
                 val bytes = bytesAt(name) ?: continue
                 val target = ws.fileAt(path + gone.name.split("/") +
                     name.removePrefix("$prefix/").split("/"))

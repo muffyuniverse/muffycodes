@@ -385,11 +385,6 @@ class Scenario(
         // once so that what is being tested is the behaviour, not the pause.
         saveDebounceMs = 0,
         signInGitHub = signInGitHub ?: { HttpWho() },
-        // **No housekeeping.** It is a concern of *the app being opened*: a `gc` holds a repository
-        // for seconds to minutes, and a shard builds hundreds of these view models. The pass has its
-        // own tests (`MaintenanceTest`) and its own seam; a feature test that started one would be
-        // measuring a background walk of a temp folder.
-        housekeeping = false,
     )
 
     val login: String get() = AppViewModel.TEST_ACCOUNT
@@ -426,7 +421,6 @@ class Scenario(
         settings = settings,
         saveDebounceMs = 0,
         signInGitHub = { DiskWho(login) },
-        housekeeping = false,
     )
 
     /**
@@ -493,32 +487,20 @@ class Scenario(
         // took the new head as "this change is recorded" went on to read a history that was still
         // growing. Asking the newest version for this file's own text cannot be answered by another
         // file's commit.
-        // **A picture is recorded as a pointer, not as its bytes.** The commit holds 130 bytes
-        // naming the picture by SHA-256, so comparing the tree's text against the file's text would
-        // never match for a picture — it would wait twenty seconds and report a commit that did
-        // happen as one that did not. So for a picture the question is whether the newest version
-        // *names the bytes on disk*, which is what "it is recorded" means once LFS holds them.
-        // **Read inside the wait, not before it.** `createImage` writes through a worker, so the
-        // file may not exist yet when this is called — reading it once up front made the digest a
-        // digest of nothing, and the comparison then failed for ever.
-        val isPicture = Workspace.kindOfPath(file.name) == EntryKind.IMAGE
+        // **Every file is its bytes in the tree**, so one comparison covers text and pictures alike.
+        // A picture used to be a pointer — 130 bytes naming its content by SHA-256 — and waiting for
+        // `fileAt` to equal the file's own text would have waited twenty seconds and then reported a
+        // commit that did happen as one that did not. Nothing stands between the tree and the file
+        // any more (see `docs/REMOVED-…-lfs.md`), so there is no special case left to keep.
+        //
+        // **Read inside the wait, not before it.** `createImage` writes through a worker, so the file
+        // may not exist yet when this is called — reading it once up front made the comparison fail
+        // for ever.
         await("the project's history to record $what", 20_000) {
             val newest = history.head()
             if (newest == null || newest == before) return@await false
             val inTree = history.fileAt(relative, newest) ?: return@await false
-            if (isPicture) {
-                val onDisk = if (file.isFile) file.readBytes() else return@await false
-                val digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(onDisk)
-                    .joinToString("") { "%02x".format(it) }
-                // **Either shape is "recorded".** With the LFS filter registered the tree holds a
-                // pointer naming the digest; a scenario that never registered it holds the picture
-                // whole, which is what every build before LFS did. The question here is whether the
-                // newest version is *this* picture, and both answers say yes.
-                inTree.contains(digest) || inTree == String(onDisk, Charsets.UTF_8)
-            } else {
-                inTree == file.readText()
-            }
+            inTree == String(if (file.isFile) file.readBytes() else return@await false, Charsets.UTF_8)
         }
     }
 
