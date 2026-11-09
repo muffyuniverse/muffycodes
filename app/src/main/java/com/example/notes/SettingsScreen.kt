@@ -97,14 +97,6 @@ fun SettingsScreen(
     /** Asks for the OpenRouter key: a screen that refuses screenshots, like the GitHub one. */
     onSetKey: () -> Unit = {},
     /**
-     * Opens the general scope's model connection — the address, the key, the request shape and the
-     * three numbers, in the same window a project and a branch use.
-     *
-     * **One entry per settings window**, which is the operator's rule: the fields are the same at
-     * every scope, and the scope is which row you pressed.
-     */
-    onModelConnection: () -> Unit = {},
-    /**
      * Opens the vault: the list of named secrets, and the way to add one.
      *
      * **A door rather than a row of fields**, because a secret is written once and then never shown.
@@ -256,27 +248,10 @@ fun SettingsScreen(
             // which opens the window that changes it — and that window is where models are added
             // and removed now, beside the list they change.
             ModelSection(viewModel = viewModel)
-            // **The rest of the request, behind one row.** What a model needs besides its name —
-            // the address, the key, the shape and the three numbers — is the same window a project
-            // and a branch have, opened here at the general scope. One screen for the fields at
-            // every scope is what "one llm request schema button per settings window" means.
-            SettingRow(
-                label = "Model connection",
-                value = hostOfAddress(viewModel.modelConfig.active.baseUrl) + " · tap to change",
-                onTap = onModelConnection,
-            )
-            RowDivider()
-
-            // **The two models that are not the chat model**, and they are here rather than in a
-            // search screen of their own because they are the same kind of fact: a model, a
-            // provider, and one value the model publishes. The operator's instruction: *"dims can
-            // replace effort screen for embedding model"* — so the third row is the dimension, in
-            // the place the effort row sits for the chat model.
-            //
-            // **A row, not a feature switch.** An embedding model is chosen by picking one; there is
-            // no "turn search on", because a model that is chosen is the switch.
-            PickedSection(viewModel = viewModel)
-            RowDivider()
+            // **The chat request is not configured here at all** — no address, no key, no shape, no
+            // numbers. It is a file a worktree names (`Schema`), and the row above opens the folder.
+            // This block used to hold a "Model connection" row for the general scope; that row existed
+            // because the llm settings were fields with an inheritance chain, and a file needs neither.
 
             // ---- how big the working context may get ----
             // Two numbers, and they are different acts. The trigger is a message to the agent —

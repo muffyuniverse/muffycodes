@@ -42,8 +42,14 @@ import java.io.File
  */
 object Schemas {
 
-    /** The folder, as a path from the account root — the same path the browser shows. */
-    const val DIR = "shared/schemas"
+    /**
+     * The folder, as a path from the account root — the same path the browser shows.
+     *
+     * **Derived from the folder's own name rather than typed twice.** It was a literal, and a literal is
+     * how a rename leaves one caller pointing at a folder nothing creates: `shared` is
+     * [Workspace.SYSTEM_PROJECT], and the subfolder is this arc's new name.
+     */
+    val DIR = Workspace.SYSTEM_PROJECT + "/schemas"
 
     /**
      * The exemplar: **locked as a file, so it can be copied and never edited.**

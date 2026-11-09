@@ -65,7 +65,7 @@ fun ModelSection(
         value = when (names.size) {
             0 -> "none yet — tap to add one"
             1 -> "1 template — tap to edit"
-            else -> "$count templates — tap to edit"
+            else -> "${names.size} templates — tap to edit"
         },
         onTap = onOpenTemplates,
     )

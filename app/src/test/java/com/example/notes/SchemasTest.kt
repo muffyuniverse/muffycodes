@@ -37,12 +37,20 @@ class SchemasTest {
     // ---- the folder ------------------------------------------------------------
 
     @Test
-    fun `the schemas live in a folder inside the app's own state, not in a project`() {
-        // **Where it is decides what it is.** Under `.muffy/` a schema is out of every repository, out
-        // of every project list, and out of what an agent may write — which is why a request shape is
-        // not something a commit can change behind a person's back.
-        assertEquals(".muffy/schemas", Schemas.DIR)
-        assertEquals(File(account, ".muffy/schemas"), Schemas.dir(account))
+    fun `the schemas live in the account's shared folder, which no repository holds`() {
+        // **Where it is decides what it is.** `shared/` is outside every project and therefore outside
+        // every repository, so a commit cannot change a request shape behind a person's back — which is
+        // the whole reason the templates are here and not in a project. The operator: *"we can just keep
+        // llm request templates in shared as a system locked subfolder."*
+        assertEquals("shared/schemas", Schemas.DIR)
+        assertEquals(File(account, "shared/schemas"), Schemas.dir(account))
+        // **Derived, not typed twice.** A rename of the account folder must carry the templates with it,
+        // or every pointer would name a folder nothing creates.
+        assertEquals(
+            "the folder's own name, and one subfolder",
+            Workspace.SYSTEM_PROJECT + "/schemas",
+            Schemas.DIR,
+        )
     }
 
     @Test
