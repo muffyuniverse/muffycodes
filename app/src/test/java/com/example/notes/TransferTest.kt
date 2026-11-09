@@ -154,12 +154,10 @@ class TransferTest {
                 git.commit().setMessage("first").setAuthor(author.ident())
                     .setCommitter(author.ident()).call()
             }
-            org.eclipse.jgit.api.Git(it).use { git ->
-                git.remoteAdd()
-                    .setName(org.eclipse.jgit.transport.RemoteConfig.DEFAULT_REMOTE_NAME)
-                    .setUri(org.eclipse.jgit.transport.URIish("https://host/owner/shopping.git"))
-                    .call()
-            }
+            // **`origin` by name**, because that is the name the app reads (`GitService.remoteUrl`) and a
+            // constant from another package would say the same thing less plainly.
+            it.config.setString("remote", "origin", "url", "https://host/owner/shopping.git")
+            it.config.save()
         }
 
         // The other direction is the ordinary one and must still work: an account's project may go
