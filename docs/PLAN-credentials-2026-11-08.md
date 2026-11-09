@@ -445,6 +445,7 @@ sentence, and a wrong choice the app picks is a surprise on a bill.
 **No inheritance and no scopes.** The branch's file is the branch's request; the project and the account
 have none, because they cannot be *sent* anything. The general settings keep an **entry point** — the
 "Model connection" row becomes "Request templates", opening the folder — and nothing else about chat.
+**That row goes as well**: §3.7.5 makes the folder itself the door, reached from a project.
 
 ### The folder is `shared/`, and the lock rule is what makes it ordinary (§3.6.2b)
 
@@ -481,7 +482,7 @@ name and an existence.
   | `shared/` | **system** | renaming or deleting the folder. Its contents are the person's. |
   | `shared/schemas/` | **system** | renaming or deleting it — a template's folder is named by pointers |
   | `shared/schemas/example.json` | **system** | editing, renaming, deleting. **Readable**, so it can be copied. |
-  | `shared/schemas/chat.json` | *none* | nothing. The person may edit it, and so may an agent. |
+  | `shared/schemas/chat.json` | *none* | nothing. The person may edit it — see §3.7.2 for why the code does not yet, and §3.7.5 for the agent's half. |
   | `.muffy/`, `agent/`'s records | **system** | the same, as they already are |
 
   It needs no path rule of its own: the agent reaches it from any worktree as
@@ -539,7 +540,7 @@ general** — the one piece of `wiredFor` worth surviving, because it is the pie
 |---|---|---|
 | **T1** | `Schema` + `Schemas`: the document, the folder, the shipped three, the name rules. | **landed** (`f82658bc`, `bd002dad`): the folder's existence is the flag, and a folder somebody emptied stays empty |
 | **T2** | The catalogue goes: `ModelCatalogue.kt`, `CatalogueKind`, `EndpointInfo`/`ModelInfo`, `ModelChoice`, `providers`/`providersOf`, the five model/provider verbs, `addPicked`, `effortFor`/`effortRank`, `ActiveModel.provider`, `Choice.provider`, and the `modelSees` courtesy check. | **landed** (`04bfa137`): a model is a word in a file; the effort is sent as written; a sentence that wants a word for the place asks `providerOf` |
-| **T0** | `system` → `shared`, and a folder lock stops covering its contents; `shared/` and `shared/schemas/` system locked; `shared/schemas/example.json` held as a *file*. | **landed** (`78ab2190`): `isSystemPath` keeps the folder, `isAgentLocked` drops the prefix test, `appHold` gains the exemplar's path |
+| **T0** | `system` → `shared`, and a folder lock stops covering its contents; `shared/` and `shared/schemas/` system locked; `shared/schemas/example.json` held as a *file*. | **half landed** (`78ab2190`): `isAgentLocked` drops the prefix test and `appHold` gains the exemplar's path — but `isSystemPath` still answers for **every path under `shared`**, so the person's `isLocked` still inherits and nothing in the folder can be written. **F1 in §3.7.2 is that half** |
 | **T3** | The pointer and the send: `Schemas.pointer`/`setPointer` keyed as a session is; `wiredFor` becomes `(project, branch) → Schema + key-by-host`; the branch window picks a file. | **storage landed** (`13336130`) — `.muffy/schemas.json`, one file, atomic. **The resolver and the picker are next**; until they land the runner still reads the connection rows |
 | **T4** | The two vector models reference files: `PickedModel.schema`, the search reading the model id out of the file, the two rows becoming one file list. | **half landed** (`04bfa137`, `ff1aad6a`): the pointer is a name, `SemanticSearch` reads the id from the file and compares ids rather than names; the address and key still come from `model_conf.json`'s `baseUrl` and the vault |
 | **T5** | The general scope holds no chat model: `ModelSection`'s chat rows, `ModelChoice` and the rates line go; `model_conf.json` keeps only the two pointers. | **part done** (`947d1ff5`): the chat rows, the picker and the connection row are gone from Settings, and the templates row is in their place; `model_conf.json`'s `active` is still read by the runner |
@@ -547,6 +548,190 @@ general** — the one piece of `wiredFor` worth surviving, because it is the pie
 
 **Why T2 before T3.** A picker that lists files must not sit beside a list of tags: two ways to name a
 model, one of which is invisible in the file, is the drift this section exists to remove.
+
+## 3.7 First use: a folder, a starter project, and no gate
+
+**The operator, 2026-11-09:**
+
+> *"onboarding now is just a file from a folder that is shown at the first use of the app, it doesnt hide
+> exit button and first users just swipe through the the files from onboarding folder. no extra machinery -
+> that is already how files behave. and last onboarding screen shouldnt ask for sign in - we no longer need
+> such onboarding file."*
+
+and, in the same breath, the question this section answers:
+
+> *"does standard local account with standard local project is supplied with the app? so that user can enter
+> it and make some notes or read some of sysmen files from the shared folder (for example refreshing
+> themselves on onboarding? or adding templates for llm requests - it seems to be an elegant solution, even
+> more elegant than giving access to templates folder via general settings menue)."*
+
+### What is measured today (§3.7.1)
+
+| question | measurement |
+|---|---|
+| does a **local account** ship? | **yes.** `AccountStore.ensureProvisional()` makes `~local` at app start and again whenever the last account is removed. It is a real account folder — projects, repositories, `shared/`, the app's own state in `.muffy/` — and `AppViewModel.PROVISIONAL_AUTHOR` (`Muffy Codes <local@muffy.local>`) gives it commits with no GitHub behind it |
+| does a **local project** ship? | **no.** `Workspace.ensure()` makes the account folder, `shared/` + README + `muffycodes_data/{prompts,dictionary,skills,wiki,mcp}`, and one `shared` link per worktree. **Nothing creates a project**, so a fresh first screen is `.muffy/`, `shared/`, and no folder a person can type in |
+| can a person **read** `shared/` from a project? | **yes** — every worktree holds a `shared` link and the browser follows it. The README *means* to send people there, by a name that no longer exists (§3.7.6) |
+| can a person **write** a template in `shared/schemas/`? | **no — and that is the defect this section turns on.** `Workspace.appHold`'s `isSystemPath(joined)` answers `Hold.APP` for **any** path whose first segment is `shared`, and `isLocked` — the *may anybody write this* question — is `appHold(file) == Hold.APP`. So `Workspace.write(shared/schemas/chat.json)` returns `false`, `createFile` refuses with `lockProblem`, and the editor opens it read-only. The agent is refused separately by `mayWrite` (*"the account's own folder… you may read it"*). **Only the app itself can write a template today**: the shipped three, and nothing else |
+| is the Settings row a door? | it opens `shared/schemas` in the browser — which can **read** the folder and cannot add to it. A display case |
+| is there a locked **exemplar** to copy? | **no.** `Schemas.EXAMPLE = "example.json"` and `Workspace.SCHEMA_EXAMPLE_PATH` both exist, and `appHold` holds that path as a file — but **nothing ever writes it**: `Schemas.ensure` writes `chat.json`, `embedding.json`, `rerank.json` and stops. The operator's *"one system locked example template from which other templates can then be copied"* is a constant and a lock on an absent file, so `shared/schemas/` holds no locked file at all and there is no seed |
+
+So the operator's proposal is one rule away, and it is the rule he already made, applied to the second
+question as well: **a folder lock is a name and an existence, in both directions.**
+
+### `appHold` becomes what §3.6.2b said it was (§3.7.2)
+
+The fix is three lines, not a redesign. `isSystemPath` stops being a subtree test:
+
+```kotlin
+// was: parts[0].equals(SYSTEM_PROJECT, ignoreCase = true)   — the whole project read-only
+joined.equals(SYSTEM_PROJECT, ignoreCase = true) || joined.equals(Schemas.DIR, ignoreCase = true)
+```
+
+with `SCHEMA_EXAMPLE_PATH` already held as a **file** above it, and `isSystemLocked` keeping its two name
+rules — `agent/` and `.muffy/` — **because those are the app's own records: every file inside them was
+written by the app, so the inheritance is the point** (the operator, on `agent/`: *"and remember that whole
+subbranch should inherit them"*). The difference the fix makes is only about a folder whose *contents* are
+the person's:
+
+| path | held | what that stops |
+|---|---|---|
+| `shared/` | app, **folder** | renaming or deleting it |
+| `shared/schemas/` | app, **folder** | renaming or deleting it — a template's folder is named by pointers |
+| `shared/schemas/example.json` | app, **file** | editing, renaming, deleting. **Readable**, so it can be copied |
+| `shared/schemas/chat.json` | nobody | nothing. The person may edit it, copy it, delete it, or make a fourth |
+| `shared/onboarding/01-…md` | nobody | nothing (§3.7.3) |
+| `agent/…`, `.muffy/…` | app, by **name** | writing them, wherever they appear — unchanged |
+
+**The test that encodes the old rule flips with it.** `WorkspaceTest`'s *"the whole shared folder is held,
+and a project's own muffycodes_data is not"* asserts a file three folders down is `Hold.APP`; it becomes
+*"the folder is held, and the file inside it is the person's"*. That is the whole cost of the change, and
+it is the test being honest about a rule that changed.
+
+**What this does not do is give the agent a hand.** `mayWrite` refuses every write outside the worktree —
+including through the `shared` link — with the operator's sentence *"any project's agent gets readonly
+access to account folders outside his project (other projects, including system)"*. So the agent's half of
+the table above is **not implemented and is a ruling to make, not an oversight to fix**: an agent that can
+rewrite its own request body is doing what it was told, or it is editing the brief it is following. The
+person's half is all §3.7.5 needs.
+
+### Onboarding is a folder and one boolean (§3.7.3)
+
+**What it is.** `shared/onboarding/0N-*.md`, seeded **once**, when the folder does not exist — the same
+flag `Schemas.ensure` uses, and for the same reason: a person who deleted a page meant it. After the seed
+they are ordinary files: editable, copyable, deletable, and the editor's swipe moves between them through
+`fileBeside`, which is what it already does for any folder. Past the last page it bounces, because that is
+what the swipe does at either end of every folder.
+
+**The one piece of state is `onboardingShown`.** First launch opens the first page; the flag is set; it
+never opens by itself again. There is no position, no "done", and no count.
+
+**What that deletes** — all of it machinery that existed to make reading a gate:
+
+- the state and its consequences: `AppViewModel.onboarding`, `mustFinishReading`, the hidden Back arrow in
+  `EditorScreen`, `closeEditor`'s refusal, `onboardingReached`, `onboardingIndexOf`;
+- the ending: `finishOnboarding`, `onboardingConnected`, `closeOnboardingIfConnected` and its call sites in
+  `signIn` and `saveModelKey`;
+- the position: `SettingsStore.onboardingAt`/`markOnboardingAt`/`onboardingDone`, replaced by the one flag;
+- the rewriting: `Onboarding.REVISION`, `Workspace.ONBOARDING_STAMP`, the delete-and-rewrite loop in
+  `ensureOnboarding` — `ensureOnboarding` becomes "write the pages if the folder is missing", and
+  `isOnboardingPath` (already dead code) goes;
+- **the CONNECT page, and with it the whole `app:` machinery**: `followLink`'s `app:` branch,
+  `runLinkAction`, `AppViewModel.Connection`, `pendingConnection`, the no-arg `connectionShown`, and the
+  `marks`/tick plumbing in `Markdown` and `EditorScreen`. Every verb in that closed set — `connect-github`,
+  `connect-openrouter`, `use-token` — exists only for that page, so the page is the feature. `followLink`
+  keeps its `http` branch; web links still open.
+- six tests in `AccountsFeatureTest` about onboarding: five assert the gate (*cannot be closed before the
+  last page*, *reached in order*, *finishing leaves the connect page*, *closes on its own*, *a model key
+  alone does not close it*) and one the `app:` link on a locked page, which dies with the page. They are
+  replaced by five that assert the folder:
+  the first launch opens the first page; Back leaves it; swiping visits them in order and bounces at the
+  end; a page is an ordinary file a person may edit; **the last page is not a page that asks to sign in**.
+
+**The cost, said plainly: the app will not rewrite them.** A confusing sentence therefore reaches new
+installs only, and an existing install keeps the words it has. That is the price of "no machinery", and it
+is the opposite of the rule `Onboarding.REVISION` encoded — deliberately, because that rule was itself
+machinery, and the pages are ordinary files now.
+
+**Which pages remain.** 01–05. 02's opening sentence — *"Sign in with GitHub and this app becomes a folder
+in your account"* — is corrected to say the app works before any sign-in (as `README_TEXT` already does),
+because a page that no longer leads to a sign-in must not read like one. **06 is deleted, not rewritten**:
+the operator's word is *"we no longer need such onboarding file"*, and the two connections keep their own
+doors — the account screen and Settings — which onboarding never was the only way to.
+
+### The starter project (§3.7.4)
+
+**The provisional account ships one project: `notes`.** Created when `~local` has **no projects**, through
+`ProjectGit.init` and a first commit by `PROVISIONAL_AUTHOR`, so it is a real project rather than a folder
+with a `.git` in it. It holds one file, `hello.md`: two lines saying what the folder is and how to make
+another — so the first project is not an empty repository, and the editor has something to open.
+
+**Why it is keyed on the provisional account and not on every account.** `AccountStore.adoptProvisional`
+**renames** `~local` to the person's login at the first sign-in, so the project comes with them as their
+own. A second, later account must not be handed a `notes` project it never made, and a fresh `~local` after
+the last account is removed gets its starter back — which is the same rule, read in the other direction.
+
+**What it is for** is the operator's own sentence: enter it, make some notes, and reach `shared/` through
+the link its worktree already holds. That makes the next section a folder away instead of a menu away.
+
+### The templates' door is the folder, not Settings (§3.7.5)
+
+**The operator:** the folder reached from a project *"seems to be an elegant solution, even more elegant
+than giving access to templates folder via general settings menue."* So:
+
+- **`ModelSection`'s "Request templates" row goes.** Settings keeps the two vector rows, because a refusal
+  names them and a person has to be able to see what it names; it keeps nothing about chat.
+- **The door is `notes/shared/schemas/`** — or `shared/schemas/` at the account root, which the browser
+  reaches directly. *Copy* `example.json`, rename the copy, edit it; the branch picker (T3b) then offers it
+  by name. The browser's existing **New file** is the "add a template" verb, and nothing new is written.
+- **`example.json` is the whole tutorial**, which is why it is the only file held: a person learns the
+  format by copying a document that is already correct.
+
+**Blocked on §3.7.2**: without that fix the folder is a display case, and the row that goes was the only
+thing that opened it. **F1 therefore lands before the row is removed**, or the door is removed with the
+handle still locked.
+
+**And the exemplar has to exist, which is a decision rather than a line of code.** Two shapes, and the code
+is presently neither:
+
+- **`example.json` replaces `chat.json`** — one locked chat seed, complete and unusable in place, and the
+  branch picker offers only what is inside the folder, so **copying is how a branch gets a request**. This is
+  the operator's sentence read literally, and it costs a person one copy before their first run.
+- **`example.json` sits beside the shipped three** — `chat.json` stays usable as it is, and the exemplar is
+  a format reference. Nothing is forced, and the folder holds two files whose content is nearly the same.
+
+The measurement above says the current state is the third option — *neither*, with a lock on nothing — which
+is the one outcome that cannot be defended.
+
+### The README is wrong today (§3.7.6)
+
+`Workspace.README_TEXT` is the first file a person reads, and it says two things that are no longer true:
+
+- **`system/`** — the folder is `shared/`. (The rename in `78ab2190` did not reach this string, so the one
+  document that explains the app points at a name that does not exist.)
+- **"It asks before doing anything that cannot be undone."** There is no approval gate; the operator
+  removed it. The sentence promises a confirmation the agent never shows, which is the class of lie this
+  app's plan is otherwise ruthless about.
+
+It also gains the two facts this section creates: where the introduction lives (`shared/onboarding/`, so
+"read all of this again at any time" is true), and that a project called `notes` is already there.
+
+### Steps (§3.7.7)
+
+| step | what | why this order |
+|---|---|---|
+| **F1** | `appHold`: `shared` and `shared/schemas` held as folders, `example.json` as a file, contents ordinary; **and `Schemas.ensure` writes the exemplar, or the lock and the constant go**. The `WorkspaceTest` that asserts the subtree flips | it is the smallest change that makes the folder usable, and everything below assumes a writable `shared/schemas/` with a seed in it |
+| **F2** | The starter project in `~local` + `hello.md`, through `ProjectGit.init`: made on a fresh account, not made for a signed-in account, renamed with the account on adoption, made again when `~local` returns | it owns the `shared` link that F5's door is reached through |
+| **F3** | Onboarding as files: seed once by folder existence, one `onboardingShown`, delete the gate, drop 06 and the `app:` machinery, correct 02's opening sentence, and replace the six tests with the five folder tests | independent of F1/F2, and the largest deletion |
+| **F4** | `README_TEXT` corrected (`shared/`, no approval sentence, where the introduction is, the starter project) | one string, and it should be right before F5 removes the Settings row that the wrong README tells people to use |
+| **F5** | `ModelSection`'s templates row removed | last, because it is the row that currently opens the folder — F1 must be in place first |
+
+**`app:` links die with 06, and that is a ruling worth recording.** They were allowed in any file **exactly
+two levels down** inside `shared/`, because `followLink` derives the folder as `parent.parent.name` and asks
+whether that is the system one — so `shared/onboarding/01.md` and `shared/schemas/chat.json` were pages that
+could act. While `shared/` was read-only for the person that was harmless; with F1 it would mean a note the
+person wrote at `shared/notes/x.md` could carry `app:delete-account`. Deleting the verbs with the page is
+both the simpler and the safer answer, and it leaves nothing to get wrong when the folder becomes writable.
 
 ## 4. Cost is removed
 
