@@ -124,8 +124,8 @@ skill you teach it.
     private val HIDDEN = """
 # Nothing is hidden
 
-Every request the agent makes is recorded — the model, the tokens, what it cost. The table is in this
-app, not in a dashboard somewhere.
+Every request the agent makes is recorded — the model, the tokens, and what came back. The table is in
+this app, not in a dashboard somewhere.
 
 **The key is yours.** You connect your own account, and the work is billed to it. This app never sees
 your password and never holds a key it did not mint with your permission.

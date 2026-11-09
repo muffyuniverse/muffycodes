@@ -1700,11 +1700,13 @@ class AppViewModel @JvmOverloads constructor(
     fun followLink(address: String, base: File?) {
         when {
             address.startsWith("app:") -> {
-                // **The document's own project**, asked of the workspace rather than guessed from
-                // two `parentFile` steps: a page may be at the project root or four folders down,
-                // and `projectOf` is the app's one answer to "which project is this inside".
-                val project = base?.let { workspace?.projectOf(it) }
-                if (project != null && Workspace.isSystem(project)) {
+                // **Asked by name, not by `projectOf`.** The app's folder is not a project and has no
+                // `.git`, so `isProjectFolder` answers false for it and `projectOf` returns null —
+                // which would refuse the app's own pages. The question here is only "is this document
+                // inside `shared/`", and `isSystemPath` is that question: the path from the account
+                // root, whose first component is the name.
+                val path = base?.let { workspace?.relative(it) }?.joinToString("/").orEmpty()
+                if (Workspace.isSystemPath(path)) {
                     runLinkAction(address.removePrefix("app:"))
                 } else {
                     Trace.note("link-refused", "app: outside the system project")

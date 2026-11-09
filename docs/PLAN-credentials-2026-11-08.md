@@ -1199,6 +1199,57 @@ key exists in two shapes at once — a row under `conn_<login>_…` and, for the
   same `secret(name, host)` resolution both already perform, which is what makes one minted key serve the
   chat, an embedding request, a rerank, and a hand-written `http` call without being copied four times.
 
+### The journey the pages teach (§3.11.6)
+
+The operator, 2026-11-09, in their own order:
+
+> *"user reads onboarding, then he adds an account, then he adds projects to that account, then he enters a
+> branch (main for example), then enters a chat, then he encounters a popup that asks him to select a request
+> form and tells where templates and request forms are stored and how a key can be added (via secrets
+> management menu in general settings menu). And as I said in secrets management block there should be a
+> button to mint a new openrouter key, which is then added to secrets and which scope can then be set up in
+> there. That is one of potential workflows, and of course user can enter settings and add his llm keys and
+> then add or edit a request form before that, so that in the chat he could just select a form and proceed
+> with writing to the agent. We can explain how to set up the model in the onboarding so that new operators
+> knew what is where and how it works, one onboarding file at a time."*
+
+**So the onboarding stops being a manifesto and becomes the walkthrough.** One file per step of that
+journey, in the order the steps happen, each naming the place the next act lives. A person can stop reading
+at any point and do the step; the pages are re-readable forever because they are files in `shared/`.
+
+| page | what it says | where it points |
+|---|---|---|
+| `01-what-this-is.md` | a notebook that is a workshop; everything is a file in a git repository | — |
+| `02-an-account.md` | **an account is where your files live** — GitHub's sign-in, or any host by hand | the accounts screen's two doors |
+| `03-a-project.md` | a project is a repository: make one, or clone one that exists | `+ Add` on the account screen |
+| `04-a-branch.md` | `main` is the project's own folder; a branch is a second tree | the branch screen, and why main needs no choosing |
+| `05-the-model.md` | **the agent needs a model, and a request form is a file that says which** — where forms live (`shared/requests/chat/`), and that choosing one is per chat | the chat's template button |
+| `06-a-key.md` | **a key is a secret**: Settings → Secrets, where OpenRouter's mint button is, and what a scope means (branch, project, account, general, or undefined = no agent may use it) | Settings → the Secrets block |
+| `07-nothing-is-hidden.md` | every request is recorded: the model, the tokens, and what happened | the record |
+
+**Two things are deliberately *not* pages**: the popup (it teaches where it interrupts, which is the only
+moment a person needs it) and the minting window (its own fields are its explanation).
+
+**The popup, in full.** It is not "choose a form" — it is the one place a person learns the shape of the
+whole model layer at the moment they need it:
+
+> **This chat needs a request form.**
+> A request form is a file that says which model to ask, how, and which secret to send. Forms for chat live
+> in `shared/requests/chat/`.
+> Pick one below. If the list is empty, the next page explains how to make one — it needs a key, and keys are
+> minted or added in **Settings → Secrets**.
+> [ the forms, by name, with the model id beneath each ]
+
+Three answers in one window: *what this is*, *where it lives*, *what to do if it is not there yet* — and the
+last one is a link-shaped sentence rather than a link, because a settings screen behind a dialog is a
+navigation a person cannot come back from.
+
+**The other workflow is first-class, not a workaround.** Nothing in the design requires the popup to be
+answered before Settings is visited: a person who adds their keys and writes or edits a form first arrives at
+the chat with a list already populated, picks one, and writes. The popup is a *gate*, and a gate that has
+already been opened never appears — that is what "automatically pops up when a particular chat doesn't have a
+template selected" means.
+
 ### Steps (§3.11.5)
 
 | step | what | why here |
@@ -1209,6 +1260,7 @@ key exists in two shapes at once — a row under `conn_<login>_…` and, for the
 | **N3** | Onboarding, now that it has a home: one boolean, the folder read from the app's `shared/`, page 06 and the `app:` machinery deleted (F3's decision, unchanged) | after N1, because the pages were the `~local` account's property |
 | **N4** | The accounts screen is the landing screen: no workspace means the empty state with **two doors — GitHub (device flow) and a manual host** | after N1, so "no workspace" is a state the screen can actually be in |
 | **N5** | The chat's template button + auto-open picker; the branch screen loses the picker | after §3.8's library exists (F6) — before it, there is nothing to list |
+| **N5b** | The popup's three sentences (§3.11.6) and the seven pages, written as one sequence | with N5: the popup and the pages say the same thing about the same folders, and writing them apart is how they drift |
 | **N6** | Minting writes a vault row and asks for its scope; `ConnKind.LLM` and the connection shape for llm go | last, because it removes the machinery N5's pointer was reading through |
 
 **N0 and N1 before N2**, because N2's audit is about doors that only become reachable when the workspace can
