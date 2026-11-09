@@ -61,7 +61,7 @@ class NoAccountFeatureTest : FeatureTest() {
         press("open a changed file") { vm.openChangedFile("notes.md") }
         press("photograph") { vm.photograph("some text") }
         press("save a picture") { vm.savePicture(ByteArray(0)) }
-        press("move a project") { vm.transferProject("notes", "acme", copy = false) }
+        press("move a project") { vm.moveProject("notes", "acme") }
         press("delete a project") { vm.deleteProject("notes") }
         press("tag a release") { vm.tagRelease("1.0") }
         press("remove a branch") { vm.dropBranch("feature") }
