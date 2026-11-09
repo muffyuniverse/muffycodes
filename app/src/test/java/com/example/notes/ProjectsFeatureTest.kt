@@ -566,9 +566,11 @@ class ProjectsFeatureTest : FeatureTest() {
             "and the folder is really there, beside the accounts rather than inside one",
             scene.workspace!!.systemDir.isDirectory,
         )
+        // **And it is not inside the account any more**, which is what makes it one folder rather
+        // than one per identity: the path a person used to find it at is gone.
         assertFalse(
             "not in the account's own folder",
-            scene.workspace!!.systemDir.exists(),
+            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).exists(),
         )
 
         scene.viewModel.message = null
