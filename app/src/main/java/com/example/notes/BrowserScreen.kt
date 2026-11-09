@@ -322,6 +322,26 @@ fun AccountsScreen(
                 text = "An account is a name, a host and a key. Its projects live in a folder of " +
                     "its own, and the agent works in one account at a time — so you can move " +
                     "between them freely without their agents interfering.",
+                // **The two doors, named where the absence is** (§3.11 N4). The `+ Add` in the bar
+                // opens the same menu; this says what is behind it, because a person with no account
+                // has no other screen to learn it from.
+                action = {
+                    Button(
+                        onClick = { Trace.tap("add account"); onAdd() },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Add an account")
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        "A GitHub account's own sign-in fills the name, the host and the key in for " +
+                            "you. A custom account is any host that speaks git — you say the host " +
+                            "and paste a key you made there.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                },
             )
         } else {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -1597,7 +1617,7 @@ private fun SelectionBar(
 }
 
 @Composable
-private fun EmptyState(title: String, text: String) {
+private fun EmptyState(title: String, text: String, action: (@Composable () -> Unit)? = null) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -1611,6 +1631,12 @@ private fun EmptyState(title: String, text: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+        // **A door, when there is one to offer.** An empty state that only explains is a screen a
+        // person leaves to find the button; the button belongs where the absence is.
+        action?.let {
+            Spacer(Modifier.size(16.dp))
+            it()
+        }
     }
 }
 

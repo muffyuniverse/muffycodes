@@ -203,9 +203,17 @@ class AccountsScreenTest {
         // the screen that answers that is this one, with its explanation and its `+ Add`, rather
         // than a workspace belonging to nobody.
         scene.viewModel.removeAccount(scene.login, deleteCopies = true)
-        accounts()
+        val taps = Taps()
+        accounts(taps)
 
         compose.onNodeWithText("No accounts yet").assertIsDisplayed()
         compose.onNodeWithText("+ Add").assertIsDisplayed()
+        // **And a door, not only a sentence** (§3.11 N4). A phone with nothing on it has no other
+        // screen to learn what an account is from, so the empty state offers the act it describes —
+        // and names both ways an account arrives, because the second is not an exception to the first.
+        compose.onNodeWithText("Add an account").assertIsDisplayed().performClick()
+        compose.onNodeWithText("A GitHub account's own sign-in fills the name, the host and the key in for you. A custom account is any host that speaks git — you say the host and paste a key you made there.")
+            .assertIsDisplayed()
+        assertEquals("the empty state's button opens the same menu the bar does", 1, taps.added)
     }
 }
