@@ -231,6 +231,14 @@ class ScriptedDoor(vararg script: Reply) : Door {
  */
 class OpenRouterDoor(
     private val key: () -> String?,
+    /**
+     * **Why the key in force may not be sent**, or null.
+     *
+     * The one refusal the resolver makes: a key written for one host and an address naming another.
+     * It arrives here rather than being thrown where it is found, because the door is what turns "no
+     * key" into a sentence a person reads.
+     */
+    private val keyProblem: () -> String? = { null },
     private val model: String,
     /**
      * **Which upstream answered, for the log and the footer** — not a routing instruction.
@@ -460,6 +468,10 @@ class OpenRouterDoor(
      * still gets its sentence, because the person can act on it.
      */
     private fun token(): String? = if (keyless) null else key() ?: throw IllegalStateException(
+        // **The resolver's own sentence comes first**, because it knows something these do not: that a
+        // key exists and belongs to another host. "No model key yet" would send a person to type one
+        // they already have, in a row that was refused for a reason the sentence never named.
+        keyProblem() ?:
         // **A locked phone is not a missing key.** The agent sends with the screen off, and the
         // store's own key is only usable while it is unlocked — so the ordinary case is a key
         // that exists and cannot be read right now. Said as "no key", it sent a person to type

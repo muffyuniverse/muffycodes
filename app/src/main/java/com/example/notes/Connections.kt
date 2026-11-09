@@ -19,17 +19,35 @@ package com.example.notes
  * - **The choice inherits field by field**, so changing only the model does not mean re-typing the
  *   key — which would put a second copy of a secret on the phone.
  *
- * ### The cap, and the one word that is not a protocol word
+ * ### Inheritance is one field at a time, and an empty field is the inheritance
  *
- * A model id is *a name the server assigns*, and the names disagree: `deepseek/deepseek-v4.1-flash`
- * at one address, `deepseek-chat` at another, whatever `--served-model-name` said on somebody's vLLM.
- * So the choice is inheritable **only as far as the address is**:
- * [choiceScopes] stops at the scope that supplied the pair. A project that sets its own address must
- * set its own model, because no wider scope knows a name that address serves; a project that inherits
- * the account's address may override only the model, which is the case that matters (the same server,
- * a cheaper model on one project).
+ * The operator's rule (2026-11-09): *"keep a rule that empty value means that it is inherited from the
+ * parent, while if lower settings scope defines it, then it overwrites - this way user will be able to
+ * change only what he needs and keep the rest of the fields inherited."*
  *
- * ### Why the general scope is last, and only for embeddings
+ * So **every field is resolved on its own**: the address, the key, the user, each kind's shape, the
+ * model, the effort, and the three compaction numbers. A branch that writes only a model gets the
+ * project's address and key; a project that writes only a shape keeps the account's model. There is no
+ * switch, because a switch is a second thing to keep in step with the text.
+ *
+ * **What this replaces, and why it is a removal rather than a preference.** The old rule made the pair
+ * atomic and *capped* the choice at the scope that supplied the address, on the reasoning that a model
+ * id is a name the server assigns. That cap needed a second concept — a "half-made row", which was a row
+ * whose address had no model and which was therefore silently not in force — and the app twice used
+ * such a row's address after refusing its model. Two rules for one question became one: **what is
+ * written is used, and what is not is inherited.** A model that the new server does not serve is a
+ * request that server refuses in its own words, which is the same feedback every other number now
+ * gets.
+ *
+ * ### The one guard left, and why it is the only one
+ *
+ * **A key follows its host.** A key is written for the server that issued it, and a scope that names a
+ * different host while inheriting an older key would send that key to a machine nobody issued it for.
+ * Every other mistake here is recoverable — a server refuses a wrong model, a typo'd number produces a
+ * refusal — but a key sent to the wrong host cannot be un-sent. So this is not a guard on the person's
+ * numbers; it is the vault's own boundary, which is why it is the only one that survived.
+ *
+### Why the general scope is last, and only for embeddings
  *
  * An embedding model is a fact about the app rather than about a person: there is one vector space per
  * app, and an index built by one identity has to be readable by the next. So `llm` may be stored
@@ -62,8 +80,16 @@ enum class ConnKind {
  * which is exactly what a connection to a compatible server needs.
  */
 data class Connection(
-    val address: String,
-    val secret: String,
+    /**
+     * **Blank means "inherit"**, for this field like every other one.
+     *
+     * It reads oddly for an address, which is a credential's other half — but a scope that writes only
+     * a shape, or only a key, is a real thing to write, and an address written at every row would be a
+     * copy of the parent's that stops following it.
+     */
+    val address: String = "",
+    /** Blank means inherit — except at the widest scope, where there is nothing to inherit. */
+    val secret: String = "",
     val user: String = "",
     val shapes: Map<ShapeKind, Shape> = emptyMap(),
     /**
@@ -80,24 +106,55 @@ data class Connection(
      * models exist without letting it push as them.
      */
     val nameable: Boolean = false,
+    /**
+     * **True when the server wants no key at all** — a model server on this phone or on the local
+     * network — and null when this row says nothing about it.
+     *
+     * **Nullable, because false and unset are different facts.** A blank key used to mean "keyless"
+     * outright, which cannot work once a blank field means "inherit": a project that writes only a
+     * model must keep the account's key, not declare the server keyless. So "wants no key" is a
+     * statement somebody makes, and an unticked box is a statement nobody made.
+     */
+    val keyless: Boolean? = null,
 ) {
-    /** The request shape for [kind]: the server's own when it was recorded, the preset otherwise. */
+    /** The request shape for [kind]: this row's own when it wrote one, the app's preset otherwise. */
     fun shapeFor(kind: ShapeKind): Shape = shapes[kind] ?: Shape.preset(kind)
+
+    /**
+     * True when this row says nothing at all — which is what "inherit" looks like once it is stored.
+     *
+     * The store deletes such a row rather than writing it, so a window that changed nothing leaves the
+     * scope as empty as it found it. Without this, opening a window (which shows the values in force)
+     * and pressing Save would copy the parent's whole credential down and freeze it.
+     */
+    fun wroteNothing(): Boolean =
+        address.isBlank() && secret.isEmpty() && user.isBlank() && shapes.isEmpty() &&
+            !nameable && keyless == null
 }
 
 /**
- * One scope's choice: **the model and how hard it should think**, and the two numbers that come with
- * a model rather than with an address.
+ * One scope's choice: **the model, how hard it should think, and how big its context may get.**
  *
- * [contextLength] and [maxOutput] are here for the reason `ActiveModel` already carries them: the two
- * places that build an agent have no catalogue to ask, so the numbers the picker read are written down
- * beside the choice they belong to.
+ * Every field is written-or-inherited on its own, like [Connection]'s. A scope that writes only the
+ * trim number keeps the parent's model; one that writes only a model keeps the parent's three numbers.
+ *
+ * **[target], [forget] and [trim] are the operator's numbers**, and they live here rather than in the
+ * general settings because they belong to a model: a 32k model and a million-token model want different
+ * sizes, and the same person may use both in one account. Null means "not written", so the value in
+ * force comes from the nearest scope that wrote one — down to the general settings, which are the root.
+ *
+ * **Nothing here is clamped and nothing is derived.** See `ContextBudget`: the app used to hold these
+ * to a ceiling read from the model's window, and a number a person typed is a number they meant.
  */
 data class Choice(
-    val model: String,
+    val model: String = "",
     val effort: String = "",
-    val contextLength: Int? = null,
-    val maxOutput: Int? = null,
+    /** Where both hands aim: the size the context should end up at. */
+    val target: Long? = null,
+    /** Where the agent is asked to clear its context up. */
+    val forget: Long? = null,
+    /** Where the app trims the context itself. */
+    val trim: Long? = null,
     /**
      * The word a sentence uses for where this model comes from, or blank for "name the address".
      *
@@ -108,7 +165,12 @@ data class Choice(
      * read changes; a choice written in a row's window carries none and [providerOf] names the address.
      */
     val provider: String = "",
-)
+) {
+    /** True when this row says nothing, which is the inheritance — see [Connection.wroteNothing]. */
+    fun wroteNothing(): Boolean =
+        model.isBlank() && effort.isBlank() && target == null && forget == null && trim == null &&
+            provider.isBlank()
+}
 
 /**
  * **The word a sentence uses for the place a model came from.**
@@ -190,6 +252,22 @@ fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
 }
 
 /**
+ * **Where a scope is, as a project and a branch** — the inverse of the screen's `scopeOf`.
+ *
+ * A window knows only the scope it is editing, and the resolution needs a place to walk from. The
+ * project scope is `main`, because "this project" in this app means its main worktree: the other
+ * branches are the rows *below* it, which is what makes a branch's own row the narrower one.
+ *
+ * The account is `null to null`, which is how [wiredFor] is told "there is no worktree in this
+ * question" — its chain then starts at the account and invents no branch.
+ */
+fun placeOf(scope: SecretScope): Pair<String?, String?> = when (scope) {
+    is SecretScope.Branch -> scope.project to scope.branch
+    is SecretScope.Project -> scope.name to AgentSession.MAIN
+    SecretScope.Account, SecretScope.General -> null to null
+}
+
+/**
  * The scopes a question about [project] and [branch] may be answered at — **narrowest first**.
  *
  * A branch only exists inside a project, so a branch with no project is not a place a value can live
@@ -219,16 +297,16 @@ fun connectionScope(
  * **What a turn on a worktree is asked with**: the pair's address, the model, the effort — and the
  * scope both came from, which is what says where the key is read.
  *
- * One object rather than three lambdas because the four values travel together by rule (see this file's
- * header): a key is bound to an address and a model name is only meaningful at the address that
- * assigned it. Handing them out separately is how a turn comes to ask one server's model with another
- * server's key, which is the hole [choiceScopes] exists to close.
+ * One object rather than five lambdas because the values are resolved **together and once**: the key is
+ * chosen by the address in force, and the numbers are resolved with the model they belong to. Handing
+ * them out separately is how the screen and the service come to hold a turn to two different sizes, or
+ * how a key stored for one host gets offered to another.
  *
  * The key is a **function**, because a poll that finds nothing due must not decrypt one to discover it
  * has nothing to do — and a phone in a pocket is locked most of the time.
  */
 data class Wired(
-    /** The scope the pair came from: where the key is read, and what the screen can say. */
+    /** The scope the address came from: what the screen names, and where the key is read. */
     val at: SecretScope,
     val active: ActiveModel,
     /** The key, or null when there is none to send. */
@@ -252,6 +330,22 @@ data class Wired(
      * `Authorization` header is absent rather than empty.
      */
     val keyless: Boolean = false,
+    /**
+     * **The three numbers this turn is held to**, resolved with the model: a branch's own, the
+     * project's, the account's, or the general settings' — field by field.
+     *
+     * Here rather than read from `SettingsStore` at the point of use, because the service's poll and
+     * the screen's turn must not be able to disagree about how full the context may get.
+     */
+    val limits: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
+    /**
+     * **The one refusal this resolver makes, in a sentence** — set when a key was written for one host
+     * and the address in force is another.
+     *
+     * The door puts it in place of "no model key yet", which would be the wrong instruction: there *is*
+     * a key, it is simply not for this server.
+     */
+    val keyProblem: String? = null,
 ) {
     companion object {
         /**
@@ -265,108 +359,135 @@ data class Wired(
             keyState: () -> KeyState = { KeyState.NONE },
             keyless: Boolean = false,
             shape: Shape = Shape.CHAT,
-        ): Wired = Wired(at, active, key, keyState, shape, keyless)
+            limits: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
+            keyProblem: String? = null,
+        ): Wired = Wired(at, active, key, keyState, shape, keyless, limits, keyProblem)
     }
 }
 
 /**
- * **Resolves what a turn on [project] at [branch] is asked with**, narrowest first, with the choice
- * capped at the scope that supplied the pair.
+ * **Resolves what a turn on [project] at [branch] is asked with**, one field at a time, narrowest first.
  *
- * [account] is the account's own answer — the model it has chosen and the address it has chosen, which
- * is exactly `model_conf.json`'s `active`. It is deliberately not in the scoped vault: the account is
- * where those two facts already live, and a second copy is what this design avoids everywhere. So
- * [connectionAt] is asked **including** the account and answers null there, and a stored pair at branch
- * or project scope answers instead — which is the whole of "the model is chosen per project and per
- * branch".
+ * The rule is the operator's: an empty field is inherited, a written one overwrites it. So this walks
+ * branch → project → account and takes, for each field independently, the first scope that wrote it;
+ * anything nobody wrote falls through to [account] (the account's own records: `model_key_` and
+ * `model_conf.json`) and, for the three numbers, to [general] — the general settings, which are the root.
  *
  * **[project] may be null for a turn that belongs to no worktree.** The chain then starts at the
  * account, which is the honest answer rather than an invented branch scope.
  *
  * **The chat chain stops at the account.** A general entry is the app-wide embedding key; a chat request
  * is made *as* somebody, so nothing wider may choose its model or answer its key.
+ *
+ * ### What is deliberately not here
+ *
+ * Any check that a written address is accompanied by a written model, or that a model belongs to the
+ * server it is sent to. Both were rules once, and both are the server's to refuse: it knows which names
+ * it serves and says so in its own words. The only composition this still refuses is a key and a host,
+ * because — see this file's header — that is the one mistake that cannot be undone by a refusal.
  */
 fun wiredFor(
     project: String?,
     branch: String?,
     account: ActiveModel,
+    general: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
     connectionAt: (SecretScope) -> Connection? = { null },
     choiceAt: (SecretScope) -> Choice? = { null },
     accountKey: () -> String? = { null },
     accountKeyState: () -> KeyState = { KeyState.NONE },
 ): Wired {
-    val chain = connectionScopes(project, branch).filter { it != SecretScope.General }
-    // **The account is asked like any other scope**, and its records are the floor rather than a
-    // scope of their own: a row there is a person saying "not the account's own pair", and a pair at
-    // branch or project scope says "not either of those". That is one rule with three stopping
-    // points, where a special case for the account would have been a second rule to keep in step.
-    // **A scoped pair is used only when its row is complete**, and the account is the answer otherwise —
-    // so the walk always ends rather than falling off the end into an empty scope. "Complete" is an
-    // address and a model: the address is the credential for this kind (there is no other record of
-    // it), and a model name is only meaningful at the address that assigned it, so a project that
-    // names a server and no model cannot inherit the account's model — that name belongs to another
-    // server. Such a row is a half-made one, and the honest reading is that it is not in force yet.
-    //
-    // **A blank key is complete, though.** A model server on this phone wants no key at all, and that
-    // is a whole credential rather than half of one — see [Wired.keyless].
-    val found = chain.firstOrNull { scope ->
-        val pair = connectionAt(scope) ?: return@firstOrNull false
-        pair.address.isNotBlank() &&
-            choiceScopes(project, branch, scope).firstNotNullOfOrNull(choiceAt) != null
+    // **Read each scope once**, so a field-wise walk cannot see two versions of the same row.
+    val scopes = connectionScopes(project, branch).filter { it != SecretScope.General }
+    val rows = scopes.map { Triple(it, connectionAt(it), choiceAt(it)) }
+
+    fun <T : Any> first(what: (Connection?, Choice?) -> T?): T? =
+        rows.firstNotNullOfOrNull { what(it.second, it.third) }
+
+    fun addressFrom(from: Int): String =
+        rows.drop(from).firstNotNullOfOrNull {
+            it.second?.address?.trim()?.takeIf(String::isNotEmpty)
+        } ?: account.baseUrl
+
+    // The address's own scope is remembered rather than the answer's name: the screen says which scope
+    // supplied the server, and a value that fell through to the account must not be reported as local.
+    val addressAt = rows.indexOfFirst { it.second?.address?.trim()?.isNotEmpty() == true }
+    val address = addressFrom(0)
+
+    /**
+     * **The key, and its host.** The narrowest row that wrote one wins — and it is used only while the
+     * address *that row would send to* (resolved from that scope upward, not the turn's own chain, so a
+     * narrower address cannot make an older key look wrong) names the same host.
+     *
+     * **The account's own key is held to the same rule.** It is not a row in the vault — it is
+     * `model_key_`, and the address it was made for is `model_conf.json`'s — so the chain's last step is
+     * that pair rather than nothing. Without this, a project that pointed at another server and wrote
+     * no key would have sent the account's key to that server, which is the leak the whole rule is for.
+     */
+    val keyVertex = rows.indexOfFirst {
+        it.second?.let { row -> !row.secret.isNullOrEmpty() || row.keyless == true } == true
     }
-    // **Nothing found means the account's own records are the pair**, which is where they live today:
-    // `model_key_` and the address in `model_conf.json`. **The distinction is the found scope and not
-    // the answer's name**: a half-made row at the account is *not* in force (it has no model to go
-    // with its address), so reading `connectionAt(at)` after a failed walk would have used it anyway —
-    // an address from a row whose model was refused, which is the one pairing the cap forbids.
-    val at = found ?: SecretScope.Account
-    val stored = found?.let(connectionAt)
-    val address = stored?.address?.trim()?.takeIf { it.isNotEmpty() } ?: account.baseUrl
-    val choice = choiceScopes(project, branch, at).firstNotNullOfOrNull(choiceAt)
+    val keyRow = if (keyVertex < 0) null else rows[keyVertex].second
+    val keyless = keyRow?.keyless == true
+    val asksHost = hostOfAddress(address)
+    // **The host the key in force belongs to**: the key row's own address, or the account's pair when
+    // no row wrote a key at all.
+    val keyHost = when {
+        keyRow == null -> hostOfAddress(account.baseUrl)
+        else -> hostOfAddress(addressFrom(keyVertex))
+    }
+    val keyHostProblem: String? = when {
+        keyless -> null
+        keyHost == asksHost -> null
+        else ->
+            // **Two hosts are named**, because the fix depends on which one is wrong: the address may be
+            // a typo, or the key may be from another server, or this scope may want its own.
+            "A key is stored for $keyHost, and this address is $asksHost. A key follows the host it " +
+                "was made for, so write this server's key here — or tick \"no key\" if it wants none."
+    }
+
+    val model = first { _, choice -> choice?.model?.takeIf(String::isNotEmpty) } ?: account.model
+    val effort = first { _, choice -> choice?.effort?.takeIf(String::isNotEmpty) } ?: account.effort
 
     return Wired(
-        at = at,
+        at = if (addressAt < 0) SecretScope.Account else scopes[addressAt],
         active = ActiveModel(
-            model = choice?.model ?: account.model,
+            model = model,
             // **The choice's own word, or the address's.** A choice written in a row's window names no
             // provider — the window asks only what the protocol defines — so the host is the honest
             // word for where the request goes, and the account's own choice keeps the word it had.
-            provider = choice?.provider?.takeIf { it.isNotBlank() }
-                ?: if (stored == null) account.provider else providerOf(address),
-            effort = choice?.effort ?: account.effort,
-            contextLength = choice?.contextLength ?: account.contextLength,
-            maxOutput = choice?.maxOutput ?: account.maxOutput,
+            provider = first { _, choice -> choice?.provider?.takeIf(String::isNotBlank) }
+                ?: if (addressAt < 0) account.provider else providerOf(address),
+            effort = effort,
+            contextLength = account.contextLength,
+            maxOutput = account.maxOutput,
             baseUrl = address,
         ),
-        key = if (stored == null) accountKey else ({ stored.secret.takeIf { it.isNotBlank() } }),
-        keyState = if (stored == null) {
+        key = when {
+            keyless -> ({ null })
+            // **A key for another host is not offered at all**, rather than sent and refused: the
+            // refusal would be the server's to make, but the leak would already have happened.
+            keyHostProblem != null -> ({ null })
+            keyRow != null -> ({ keyRow.secret.takeIf(String::isNotEmpty) })
+            else -> accountKey
+        },
+        keyState = if (keyRow == null) {
             accountKeyState
         } else {
             // **A secret the store already decrypted is readable by definition**, and a blank one is
             // nothing to read rather than a phone that would not unlock.
-            ({ if (stored.secret.isBlank()) KeyState.NONE else KeyState.READABLE })
+            ({ if (keyRow.secret.isEmpty()) KeyState.NONE else KeyState.READABLE })
         },
-        keyless = stored != null && stored.secret.isBlank(),
+        keyless = keyless,
         // **The server's own shape, when it recorded one.** A connection that did not is the
         // compatible default, and the preset is field-for-field what the app sent before a shape
         // could be stored — so nothing about an ordinary connection changes here.
-        shape = stored?.shapeFor(ShapeKind.CHAT) ?: Shape.CHAT,
+        shape = first { row, _ -> row?.shapes?.get(ShapeKind.CHAT) } ?: Shape.CHAT,
+        // **Each number on its own**, which is what lets a branch change the trim and keep the rest.
+        limits = ContextBudget.Limits.of(
+            trigger = first { _, choice -> choice?.forget } ?: general.triggerAt,
+            hard = first { _, choice -> choice?.trim } ?: general.hardAt,
+            target = first { _, choice -> choice?.target } ?: general.targetAt,
+        ),
+        keyProblem = keyHostProblem,
     )
-}
-
-/**
- * Where the choice may be read from, given the scope that supplied the connection — **and no wider.**
- *
- * This is the cap: a project that has its own address may not inherit the account's model, because
- * that name was a name for *another* server. The list still runs narrowest first, so a branch may
- * override the model of the project's connection while sharing it.
- */
-fun choiceScopes(project: String?, branch: String?, connectionAt: SecretScope): List<SecretScope> {
-    val all = connectionScopes(project, branch)
-    val at = all.indexOf(connectionAt)
-    // **A scope that is not in this question's chain cannot cap it** — the caller passed an account
-    // scope for a branch that has none, say — so the whole chain is the honest answer rather than an
-    // empty list, which would silently mean "nothing may be chosen".
-    if (at < 0) return all
-    return all.take(at + 1)
 }

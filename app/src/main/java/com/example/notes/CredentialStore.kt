@@ -714,6 +714,9 @@ class CredentialStore(context: Context) : Credentials {
         val stored = prefs.getString(key, null) ?: return null
         val at = stored.indexOf(HOST_SEPARATOR)
         if (at < 0) return null
+        // **The address may be blank**, because a field that is empty is inherited: a scope that writes
+        // only a shape and the key beside it is a row with no address of its own, and refusing to read
+        // it back would make "change one thing" impossible.
         val address = stored.substring(0, at)
         val json = try {
             JSONObject(decrypt(stored.substring(at + HOST_SEPARATOR.length)))
@@ -727,25 +730,37 @@ class CredentialStore(context: Context) : Credentials {
         // git — where a push with no token is a push as nobody. The store keeps the row as written and
         // each reader decides: the git lookup skips a blank secret, and a chat connection with none is
         // [Wired.keyless]. Refusing it here made a keyless server impossible to store at all.
-        val secret = json.optString("secret")
         return Connection(
             address = address,
-            secret = secret,
+            secret = json.optString("secret"),
             user = json.optString("user"),
             shapes = shapesOf(json.optJSONObject("shapes")),
             // **Off unless it was written**, which is the only safe default for a permission: a row
             // stored before the checkmark existed is a row on which it was never given.
             nameable = json.optBoolean("nameable", false),
+            // **Absent is "this row says nothing about it"**, which is not the same as "no": a blank
+            // key means inherit, so a server that wants none has to be a statement somebody made.
+            keyless = if (json.has("keyless")) json.optBoolean("keyless") else null,
         )
     }
 
     override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {
         val key = connKey(activeLogin, scope, kind) ?: return
+        // **A row that says nothing is removed rather than written**, because empty *is* the
+        // inheritance. This is what makes a window that changed nothing leave the scope alone instead
+        // of copying the parent's credential down and freezing it.
+        if (connection.wroteNothing()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
         val json = JSONObject().apply {
-            put("secret", connection.secret)
+            // **Only what was written.** A blank field is not a value to store: storing it would make
+            // the row say "nothing here" for a field it never meant to speak about.
+            if (connection.secret.isNotEmpty()) put("secret", connection.secret)
             if (connection.user.isNotBlank()) put("user", connection.user)
             if (connection.shapes.isNotEmpty()) put("shapes", shapesJson(connection.shapes))
             if (connection.nameable) put("nameable", true)
+            connection.keyless?.let { put("keyless", it) }
         }
         // **The address as written**, not lowercased: it is a base URL, and lowercasing a path is
         // how a connection starts 404ing on a server that is case-sensitive.
@@ -814,17 +829,22 @@ class CredentialStore(context: Context) : Credentials {
         val stored = prefs.getString(key, null) ?: return null
         return try {
             val json = JSONObject(stored)
-            val model = json.optString("model")
-            if (model.isBlank()) null else Choice(
-                model = model,
+            val choice = Choice(
+                model = json.optString("model"),
                 effort = json.optString("effort"),
-                contextLength = json.optInt("contextLength", 0).takeIf { it > 0 },
-                maxOutput = json.optInt("maxOutput", 0).takeIf { it > 0 },
+                // **A number of zero is a number**, not "unset": it is how a person turns one hand off
+                // at this scope while keeping the other two. Absence is the only "inherit".
+                target = if (json.has("target")) json.optLong("target") else null,
+                forget = if (json.has("forget")) json.optLong("forget") else null,
+                trim = if (json.has("trim")) json.optLong("trim") else null,
                 // **A word for a sentence, not a routing instruction** (see [Choice]). Written only
                 // when somebody's window said one, which today is never — the account's own choice
                 // keeps its word in `model_conf.json` and a row's choice names its address instead.
                 provider = json.optString("provider"),
             )
+            // **A row with nothing in it is not a row.** It can only be there from an older version of
+            // this file, and reading it as a choice would let a blank row shadow the parent's model.
+            if (choice.wroteNothing()) null else choice
         } catch (t: Throwable) {
             null
         }
@@ -832,17 +852,19 @@ class CredentialStore(context: Context) : Credentials {
 
     override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
         val key = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
-        // **A blank model removes the row**, which is what "inherit" means: the absence of a local
-        // value is the inheritance, so there is no switch to keep in step with the text.
-        if (choice.model.isBlank()) {
+        // **A row that says nothing removes the row**, which is what "inherit" means: the absence of a
+        // local value is the inheritance, so there is no switch to keep in step with the text. And any
+        // field is enough to keep it — a branch that changes only the trim writes no model at all.
+        if (choice.wroteNothing()) {
             prefs.edit().remove(key).apply()
             return
         }
         val json = JSONObject().apply {
-            put("model", choice.model)
+            if (choice.model.isNotBlank()) put("model", choice.model)
             if (choice.effort.isNotBlank()) put("effort", choice.effort)
-            choice.contextLength?.let { put("contextLength", it) }
-            choice.maxOutput?.let { put("maxOutput", it) }
+            choice.target?.let { put("target", it) }
+            choice.forget?.let { put("forget", it) }
+            choice.trim?.let { put("trim", it) }
             if (choice.provider.isNotBlank()) put("provider", choice.provider)
         }
         prefs.edit().putString(key, json.toString()).apply()

@@ -1745,16 +1745,23 @@ class AppViewModel @JvmOverloads constructor(
                 nameable = own?.nameable == true,
             )
         }
-        val asked = ws?.let { AgentWiring.wiredFor(it, credentials, project, branch) }
-        val choice = credentials.choice(scope, ConnKind.LLM)
-        return ConnectionDraft(
+        val asked = ws?.let { AgentWiring.wiredFor(it, credentials, project, branch, settings) }
+        // **The values in force, not this scope's own.** A window that showed only what the scope wrote
+        // would make a person reconstruct the rest to change one field; showing what *would* happen is
+        // also what makes "leave it alone" mean something — see [ConnectionDraft.changesAgainst].
+        return ConnectionDraft.opening(
             kind = ConnKind.LLM,
-            address = own?.address ?: asked?.active?.baseUrl.orEmpty(),
-            model = choice?.model ?: asked?.active?.model.orEmpty(),
-            effort = choice?.effort ?: asked?.active?.effort.orEmpty(),
-            shapeKind = ShapeKind.CHAT,
-            shapeUrl = own?.shapeFor(ShapeKind.CHAT)?.url.orEmpty(),
-            shapeBody = own?.shapeFor(ShapeKind.CHAT)?.body?.toString().orEmpty(),
+            at = own?.address?.takeIf { it.isNotBlank() } ?: asked?.active?.baseUrl.orEmpty(),
+            // **The scope's own word when it wrote one, else the one in force** — and the resolver is
+            // asked rather than re-walked, because a second walk here would be a second answer to the
+            // question "what would this scope send".
+            model = credentials.choice(scope, ConnKind.LLM)?.model?.takeIf { it.isNotBlank() }
+                ?: asked?.active?.model.orEmpty(),
+            effort = credentials.choice(scope, ConnKind.LLM)?.effort?.takeIf { it.isNotBlank() }
+                ?: asked?.active?.effort.orEmpty(),
+            limits = asked?.limits ?: ContextBudget.Limits.of(trigger = 0, hard = 0),
+            shape = own?.shapes?.get(ShapeKind.CHAT),
+            // **Off unless this scope ticked it**, because a grant is a statement about a row.
             nameable = own?.nameable == true,
         )
     }
@@ -1793,19 +1800,16 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        val pair = draft.connection()
-        if (pair != null) {
-            // **An emptied key box keeps the stored key.** The window cannot show a secret, so an empty
-            // box is the ordinary case rather than an instruction to delete one; the explicit act is
-            // "Forget", which is a different button with a different word.
-            val kept = if (pair.secret.isBlank()) credentials.connection(scope, draft.kind)?.secret else null
-            credentials.setConnection(
-                scope,
-                draft.kind,
-                if (pair.secret.isBlank() && kept != null) pair.copy(secret = kept) else pair,
-            )
-        }
-        draft.choice()?.let { credentials.setChoice(scope, draft.kind, it) }
+        // **Only what changed is written.** The window opened on the values in force, so saving it
+        // unchanged must write nothing — otherwise every field it showed would be pinned at this scope
+        // and stop following the parent. See [ConnectionDraft.changesAgainst].
+        val (project, branch) = placeOf(scope)
+        val inForce = connectionShown(scope, draft.kind, project, branch)
+        val changed = draft.changesAgainst(inForce)
+        // **An empty row removes the row**, which is what "inherit" means; the explicit act of removal
+        // is still "Forget", and the two arrive at the same place on purpose.
+        credentials.setConnection(scope, draft.kind, changed.connection() ?: Connection())
+        credentials.setChoice(scope, draft.kind, changed.choice() ?: Choice())
         Trace.note("connection-saved", "${draft.kind.name.lowercase()} at ${scopeLabel(scope)}")
         connectionSaved++
         onDone(true)
@@ -4441,16 +4445,14 @@ class AppViewModel @JvmOverloads constructor(
         // own wake must be asked with the same model at the same address, or the conversation changes
         // voice depending on who started it.
         val asked = workspace?.let {
-            AgentWiring.wiredFor(it, credentials, project, branch)
+            AgentWiring.wiredFor(it, credentials, project, branch, settings)
         } ?: Wired.of(modelConfig.active)
         val model = asked.active
         val door = doorFor(asked, project)
-        // The two limits, with this pin's ceiling — read once per turn, because the pin does not
-        // change mid-turn and a settings read per request would be the same number twice.
         // **The numbers the worktree carries**, resolved with the model by the same function the
         // service uses — see [wiredFor] — so the screen's turn and a poll cannot be held to two
-        // different sizes.
-        val limits = wired(project, branch).limits
+        // different sizes. Read once per turn, because neither changes mid-turn.
+        val limits = asked.limits
         // **The tick must not wake this session while the person's turn is running.** One request on
         // one conversation at a time: a wake landing beside this turn would write a second ending and
         // a second set of results, and the person would read the mixture of the two.
@@ -4880,6 +4882,7 @@ class AppViewModel @JvmOverloads constructor(
             // project with its own server is asked with the key stored beside that server's address.
             key = { asked.key() },
             keyState = { asked.keyState() },
+            keyProblem = { asked.keyProblem },
             keyless = asked.keyless,
             shape = asked.shape,
             model = asked.active.model,

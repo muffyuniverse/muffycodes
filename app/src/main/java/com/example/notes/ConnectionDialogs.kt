@@ -57,6 +57,12 @@ fun LlmConnectionDialog(
     var secret by remember { mutableStateOf("") }
     var model by remember { mutableStateOf(inForce.model) }
     var effort by remember { mutableStateOf(inForce.effort) }
+    // **The three numbers, as text so that "unchanged" is recognisable.** They open on the values in
+    // force — the scope's own, or the parent's, or the general settings' — which is what makes the
+    // inheritance visible instead of a rule somebody has to be told.
+    var target by remember { mutableStateOf(inForce.target) }
+    var forget by remember { mutableStateOf(inForce.forget) }
+    var trim by remember { mutableStateOf(inForce.trim) }
     var shapeUrl by remember { mutableStateOf(inForce.shapeUrl) }
     var shapeBody by remember { mutableStateOf(inForce.shapeBody) }
     // **Off unless ticked, and it starts off even when the row already has it on**, because a window
@@ -73,6 +79,9 @@ fun LlmConnectionDialog(
         secret = secret,
         model = model,
         effort = effort,
+        target = target,
+        forget = forget,
+        trim = trim,
         shapeUrl = shapeUrl,
         shapeBody = shapeBody,
         nameable = nameable,
@@ -114,15 +123,11 @@ fun LlmConnectionDialog(
                     ),
                     supportingText = {
                         Text(
-                            // **Never filled in, and it says why.** The person has to be able to tell
-                            // "there is one here" from "there is not", because the two mean different
-                            // things about an empty box.
-                            if (inForce.address.isEmpty()) {
-                                "Kept for this connection. Leave it empty to send no key — a server " +
-                                    "on this phone wants none."
-                            } else {
-                                "Leave it empty to keep the key that is here, or to send none."
-                            },
+                            // **Never filled in, and it says what empty means.** An empty box is the
+                            // inheritance, not a decision to delete: the explicit act is "Forget",
+                            // which is a different button with a different word. A server that wants
+                            // no key is said out loud, because a blank box can no longer mean it.
+                            "Leave it empty to use the key this scope inherits.",
                         )
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -144,6 +149,19 @@ fun LlmConnectionDialog(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     supportingText = { Text("none, low, medium, high or max. Blank means the server's own default.") },
                     modifier = Modifier.fillMaxWidth(),
+                )
+                // **The three numbers that decide how full this model's context may get.** They are
+                // here rather than in the general settings because they belong to a model: a 32k model
+                // and a million-token one want different sizes, and one person may use both in one
+                // account. Blank inherits; zero switches that hand off.
+                NumberField(label = "Compaction target", value = target, onValueChange = { target = it })
+                NumberField(label = "Forget compaction at", value = forget, onValueChange = { forget = it })
+                NumberField(label = "Trim compaction at", value = trim, onValueChange = { trim = it })
+                Text(
+                    "Token counts are approximate. Blank inherits the number above; 0 turns that " +
+                        "hand off. Nothing is capped: what you write is what is used.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 // **The grant, and it is a grant rather than a setting.** Off, this key is exactly as
                 // invisible to the agent as it is today; on, `auth: llm` resolves to it for this
@@ -418,5 +436,28 @@ fun ShapeDialog(
                 TextButton(onClick = onUsePreset) { Text("App's own") }
             }
         },
+    )
+}
+
+/**
+ * **A token count a person types, digits only**, or an empty box for "inherit the one above".
+ *
+ * Deliberately not the settings screen's `LengthField`: that one writes a stored `Int` on every
+ * keystroke, and this one writes nothing until the window is saved. What they share is the rule that
+ * matters — a half-typed number passes through 5, 50, 500 while somebody types 50000, and every one of
+ * those is a value this box must accept without complaining.
+ */
+@Composable
+private fun NumberField(label: String, value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { typed -> if (typed.all { it.isDigit() }) onValueChange(typed) },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Next,
+        ),
+        modifier = Modifier.fillMaxWidth(),
     )
 }

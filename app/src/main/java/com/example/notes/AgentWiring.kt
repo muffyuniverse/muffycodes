@@ -34,6 +34,8 @@ object AgentWiring {
                 // compatible server expects the next poll to go there.
                 baseUrl = wired.active.baseUrl,
                 keyState = wired.keyState,
+                // **The one refusal the resolver makes**, in the same door as the key it is about.
+                keyProblem = { wired.keyProblem },
                 keyless = wired.keyless,
                 // **The server's own request shape**, when the connection recorded one. A self-hosted
                 // server that answers at another path, or in another dialect, is asked in its own
@@ -155,7 +157,7 @@ object AgentWiring {
             // **Resolved per worktree, and per poll.** A branch may have a model of its own
             // (`PLAN-credentials` §2.2), and a person who changes one while the service runs expects
             // the next poll of *that* worktree to use it.
-            wired = { project, branch -> wiredFor(ws, credentials, project, branch) },
+            wired = { project, branch -> wiredFor(ws, credentials, project, branch, settings) },
             door = door,
             notify = notify,
             changed = changed,
@@ -217,8 +219,8 @@ object AgentWiring {
      *
      * The one place the account's own records and the scoped vault are put together: the account
      * supplies the model and address it has chosen (or the shipped default when its file will not
-     * parse), the vault supplies a pair stored at branch or project scope when there is one, and
-     * [wiredFor] applies the rule that the two inherit differently.
+     * parse), the vault supplies whatever a branch or project wrote, and [wiredFor] inherits the rest
+     * field by field — with the general settings as the root for the three numbers.
      *
      * **The account's key is a function, not a read**, so a poll with nothing due decrypts nothing.
      */
@@ -227,12 +229,21 @@ object AgentWiring {
         credentials: Credentials,
         project: String?,
         branch: String?,
+        settings: SettingsStore,
     ): Wired {
         val login = credentials.activeLogin
+        // **The general settings are the root of the chain**, and the numbers below them are the
+        // person's own: a branch writes what it wants to change and inherits the rest.
+        val general = ContextBudget.Limits.of(
+            trigger = settings.triggerTokens.toLong(),
+            hard = settings.hardTokens.toLong(),
+            target = settings.targetTokens.toLong(),
+        )
         return wiredFor(
             project = project,
             branch = branch,
             account = ModelConfigFile.load(ws.accountDir).getOrNull()?.active ?: DEFAULT_MODEL,
+            general = general,
             connectionAt = { scope -> credentials.connection(scope, ConnKind.LLM) },
             choiceAt = { scope -> credentials.choice(scope, ConnKind.LLM) },
             accountKey = { login?.let { credentials.modelKey(it) } },

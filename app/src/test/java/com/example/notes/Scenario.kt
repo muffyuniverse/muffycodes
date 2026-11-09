@@ -202,7 +202,10 @@ open class MemoryCredentials : Credentials {
         connKey(scope, kind)?.let { connections[it] }
 
     override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {
-        connKey(scope, kind)?.let { connections[it] = connection }
+        val key = connKey(scope, kind) ?: return
+        // **A row that says nothing is removed**, the same rule the store follows: empty is the
+        // inheritance, and a fake that kept an empty row would pass a test where the phone inherits.
+        if (connection.wroteNothing()) connections.remove(key) else connections[key] = connection
     }
 
     override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
@@ -232,7 +235,9 @@ open class MemoryCredentials : Credentials {
 
     override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
         val key = connKey(scope, kind) ?: return
-        if (choice.model.isBlank()) choices.remove(key) else choices[key] = choice
+        // **Any field keeps the row**, including one that writes no model at all: a branch that changes
+        // only the trim writes a choice with three fields, two of them absent.
+        if (choice.wroteNothing()) choices.remove(key) else choices[key] = choice
     }
 
     override fun generalSecret(name: String, host: String): String? {

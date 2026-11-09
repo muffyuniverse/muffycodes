@@ -52,57 +52,141 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `a scope may override the model of the connection it inherits`() {
-        // **The case that makes scopes worth having**: one server, the cheap model on one project.
-        // The project has no address of its own, so the choice may be read at the project and at
-        // anything narrower - a branch may even choose differently inside the same project.
-        assertEquals(
-            "the branch, the project and the account may all say what model to ask for",
-            listOf(
-                SecretScope.Branch("acme", "feature"),
-                SecretScope.Project("acme"),
-                SecretScope.Account,
+    fun `each field is inherited on its own, so one scope can change one thing`() {
+        // **The operator's rule** (2026-11-09): an empty field is the inheritance and a written one
+        // overwrites it — *"this way user will be able to change only what he needs and keep the rest
+        // of the fields inherited"*. The branch writes a model and nothing else, so its address, key,
+        // effort and numbers all come from the scopes above it.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection(
+                    address = "https://models.example.org/v1",
+                    secret = "sk-the-project-key",
+                ),
             ),
-            choiceScopes("acme", "feature", SecretScope.Account),
+            choices = mapOf(
+                SecretScope.Project("acme") to Choice(model = "llama3.3:70b", effort = "low"),
+                SecretScope.Branch("acme", "feature") to Choice(model = "qwen3:32b"),
+            ),
         )
-        // **And the general scope is not among them, which is the same cap doing a second job.** A
-        // general entry is the app-wide embedding key; a chat request is made *as* somebody, so no
-        // wider scope than the account may choose its model - even when the account's address was the
-        // one inherited, because the account is where the chain ends.
+
+        assertEquals("the branch's model", "qwen3:32b", wired.active.model)
+        assertEquals("the project's effort", "low", wired.active.effort)
+        assertEquals("the project's address", "https://models.example.org/v1", wired.active.baseUrl)
+        assertEquals("and the project's key", "sk-the-project-key", wired.key())
+    }
+
+    @Test
+    fun `an address with an inherited model is sent, and the server refuses it`() {
+        // **The cap is gone.** A model id is a name the server assigns, so pointing a project at
+        // another server while inheriting OpenRouter's model name is a request that server refuses —
+        // naming the model it does not have. That is a better answer than a window that would not
+        // close, and it is the same feedback every number in this app now gets.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection("https://models.example.org/v1", "sk-p"),
+            ),
+        )
+
+        assertEquals("the project's address", "https://models.example.org/v1", wired.active.baseUrl)
+        assertEquals("and the account's model, as written", account.model, wired.active.model)
+        assertEquals("with the project's own key", "sk-p", wired.key())
+        assertNull("and nothing to complain about", wired.keyProblem)
+    }
+
+    @Test
+    fun `the numbers are inherited one at a time, down to the general settings`() {
+        // **A 32k model and a million-token model in one account**: the sizes belong to the model, so
+        // they are chosen where the model is chosen. Each of the three is resolved on its own, and the
+        // general settings are the root — the value a scope with no row of its own inherits.
+        val general = ContextBudget.Limits.of(trigger = 100_000, hard = 250_000, target = 60_000)
+        val wired = asked(
+            general = general,
+            choices = mapOf(
+                // The project changes the clear-up point and nothing else.
+                SecretScope.Project("acme") to Choice(forget = 40_000),
+                // The branch changes only the trim.
+                SecretScope.Branch("acme", "feature") to Choice(trim = 0),
+            ),
+        )
+
+        assertEquals("the project's clear-up point", 40_000L, wired.limits.triggerAt)
+        assertEquals("the branch's trim, which is off", 0L, wired.limits.hardAt)
+        assertEquals("and the general target", 60_000L, wired.limits.targetAt)
+    }
+
+    @Test
+    fun `a key written for one host is not offered to another`() {
+        // **The one composition the resolver still refuses, and the only one that cannot be undone by
+        // a refusal.** The project names a server of its own and inherits the account's key, which was
+        // made for openrouter.ai. Sending it would hand that key to a machine nobody issued it for —
+        // every other mistake here produces an error from a server, and this one is already spent by
+        // the time anybody could read the error.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection("https://elsewhere.example/v1"),
+            ),
+        )
+
+        assertEquals("the address is the project's", "https://elsewhere.example/v1", wired.active.baseUrl)
+        assertNull("but the account's key is not offered", wired.key())
+        assertNotNull("and the refusal is a sentence", wired.keyProblem)
         assertTrue(
-            "the general scope is never a chat choice",
-            SecretScope.General !in choiceScopes("acme", "feature", SecretScope.Account),
+            "naming both hosts: ${wired.keyProblem}",
+            wired.keyProblem!!.contains("elsewhere.example") &&
+                wired.keyProblem!!.contains("openrouter.ai"),
         )
     }
 
     @Test
-    fun `a scope with its own address may not inherit a model from a wider one`() {
-        // **The cap, and the reason for it is measured rather than cautious.** A model id is a name
-        // the server assigns: `deepseek/deepseek-v4.1-flash` at one address, `deepseek-chat` at
-        // another, whatever `--served-model-name` said on somebody's vLLM. A project that points at
-        // its own server must therefore name its own model, because no wider scope knows a name that
-        // server serves.
-        assertEquals(
-            "the project's own connection caps the choice at the project",
-            listOf(SecretScope.Branch("acme", "feature"), SecretScope.Project("acme")),
-            choiceScopes("acme", "feature", SecretScope.Project("acme")),
+    fun `a key and an address in the same row are for the same host by construction`() {
+        // The ordinary case, asserted so the refusal above cannot spread: a row that writes both is
+        // coherent, whatever the row above it says.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection(
+                    address = "https://elsewhere.example/v1",
+                    secret = "sk-elsewhere",
+                ),
+            ),
         )
-        assertEquals(
-            "a branch that points elsewhere is capped at the branch",
-            listOf(SecretScope.Branch("acme", "feature")),
-            choiceScopes("acme", "feature", SecretScope.Branch("acme", "feature")),
-        )
+
+        assertEquals("sk-elsewhere", wired.key())
+        assertNull(wired.keyProblem)
     }
 
     @Test
-    fun `a cap from outside this question does not empty the list`() {
-        // A caller that passes an account scope for a question with no project is asking about the
-        // whole chain; answering "nothing may be chosen" would silently refuse every model.
-        assertEquals(
-            "the chain it does have",
-            connectionScopes(null, null),
-            choiceScopes(null, null, SecretScope.Project("somewhere")),
+    fun `a branch that moves elsewhere must bring its own key`() {
+        // **The key follows the host it was made for, not the turn's own address.** The project holds a
+        // key for openrouter.ai and no address; the branch points somewhere else. The branch is the
+        // scope that changed the server, so the branch is the scope that has to supply a key — the
+        // project's is refused rather than quietly sent to the new host.
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection(secret = "sk-openrouter"),
+                SecretScope.Branch("acme", "feature") to Connection("https://elsewhere.example/v1"),
+            ),
         )
+
+        assertEquals("the branch's address", "https://elsewhere.example/v1", wired.active.baseUrl)
+        assertNull("the project's key is for another host", wired.key())
+        assertNotNull("and the sentence says so", wired.keyProblem)
+    }
+
+    @Test
+    fun `a branch may move to another host when it writes that host's key too`() {
+        val wired = asked(
+            connections = mapOf(
+                SecretScope.Project("acme") to Connection(secret = "sk-openrouter"),
+                SecretScope.Branch("acme", "feature") to Connection(
+                    address = "https://elsewhere.example/v1",
+                    secret = "sk-elsewhere",
+                ),
+            ),
+        )
+
+        assertEquals("sk-elsewhere", wired.key())
+        assertNull(wired.keyProblem)
     }
 
     // ---- which host a key may be offered to ---------------------------------------------
@@ -255,6 +339,7 @@ class ConnectionsTest {
         effort = "high",
         contextLength = 163_840,
         maxOutput = 65_536,
+        baseUrl = "https://openrouter.ai/api/v1",
     )
 
     /** The resolution, with the account's key and a vault that answers what a test says. */
@@ -264,10 +349,12 @@ class ConnectionsTest {
         connections: Map<SecretScope, Connection> = emptyMap(),
         choices: Map<SecretScope, Choice> = emptyMap(),
         key: String? = "sk-the-account-key",
+        general: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
     ): Wired = wiredFor(
         project = project,
         branch = branch,
         account = account,
+        general = general,
         connectionAt = { connections[it] },
         choiceAt = { choices[it] },
         accountKey = { key },
@@ -339,31 +426,18 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `a scope that names an address and no model inherits nothing, because it cannot`() {
-        // **The cap, at the one place it can do harm.** A model id is a name the server assigns, and
-        // `deepseek/deepseek-v4.1-flash` is OpenRouter's name for its model — sending it to somebody
-        // else's server asks for something that is not there. A half-made row is therefore not in
-        // force: the account's whole answer is, which is the same answer as before the row existed.
-        val wired = asked(
-            connections = mapOf(
-                SecretScope.Project("acme") to Connection("https://models.example.org/v1", "sk-p"),
-            ),
-        )
-
-        assertEquals(SecretScope.Account, wired.at)
-        assertEquals(account.model, wired.active.model)
-        assertEquals(account.baseUrl, wired.active.baseUrl)
-        assertEquals("sk-the-account-key", wired.key())
-    }
-
-    @Test
     fun `a pair with no key is a server that wants none`() {
         // **Not the same fact as a key that is not stored.** A model server on this phone needs no
         // key, and telling its owner to type one is telling them to look for something that does not
         // exist. The request carries no Authorization header at all (see `Door.headers`).
+        // **"Wants no key" is a statement somebody made**, because a blank key now means "inherit the
+        // one above" — so the row says so with `keyless`, and an unticked box says nothing at all.
         val wired = asked(
             connections = mapOf(
-                SecretScope.Project("acme") to Connection("http://127.0.0.1:11434/v1", ""),
+                SecretScope.Project("acme") to Connection(
+                    address = "http://127.0.0.1:11434/v1",
+                    keyless = true,
+                ),
             ),
             choices = mapOf(SecretScope.Project("acme") to Choice("llama3")),
         )
