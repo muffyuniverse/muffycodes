@@ -4447,20 +4447,10 @@ class AppViewModel @JvmOverloads constructor(
         val door = doorFor(asked, project)
         // The two limits, with this pin's ceiling — read once per turn, because the pin does not
         // change mid-turn and a settings read per request would be the same number twice.
-        //
-        // **The ceiling is the model's own window, which the choice stores** (see [ActiveModel]).
-        // Asking for the pin alone used to reach a 96,000-token floor for every endpoint the table
-        // did not name, so a million-token model was trimmed at 96k while the screen promised its
-        // real size.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = settings.triggerTokens.toLong(),
-            hardAsked = settings.hardTokens.toLong(),
-            targetAsked = settings.targetTokens.toLong(),
-            ceiling = ContextBudget.ceiling(model.provider, model.contextLength, model.maxOutput),
-        )
-        // One result may not be bigger than the model's input window: bigger than that cannot be
-        // sent at all, so the ask is clamped and the settings row says which number is in force.
-        val resultLimit = ContextBudget.resultLimit(settings.maxResult, model.contextLength)
+        // **The numbers the worktree carries**, resolved with the model by the same function the
+        // service uses — see [wiredFor] — so the screen's turn and a poll cannot be held to two
+        // different sizes.
+        val limits = wired(project, branch).limits
         // **The tick must not wake this session while the person's turn is running.** One request on
         // one conversation at a time: a wake landing beside this turn would write a second ending and
         // a second set of results, and the person would read the mixture of the two.
@@ -4473,9 +4463,8 @@ class AppViewModel @JvmOverloads constructor(
                 val log = AgentLog.open(ws.treeOf(project, branch))
                 val agent = Agent(
                     ws.accountDir, project, ws, g, log, door, model,
-                    // How much of one result may enter the conversation, clamped by the model's input
-                    // window — a result larger than that cannot be sent, so it would be filed for ever.
-                    maxResult = resultLimit.inForce.toInt(),
+                    // How much of one result may enter the conversation, as the person wrote it.
+                    maxResult = settings.maxResult,
                     limits = limits,
                     // **The same registry the polls use.** A `background` command started while
                     // somebody is typing keeps running beside the turn and lands its result in a file on
@@ -4489,20 +4478,10 @@ class AppViewModel @JvmOverloads constructor(
                     // number that applies is the one in force when the call arrives - not the one
                     // that was in force when the chat screen was opened.
                     triggerTokens = {
-                        // **The same numbers the settings screen shows**, resolved the same way:
-                        // the trigger and hard limit as asked for, clamped by this pin's own window.
-                        // A second derivation here would be a second answer to "how full is the
-                        // context allowed to be", and the two could disagree.
-                        ContextBudget.Limits.of(
-                            triggerAsked = settings.triggerTokens.toLong(),
-                            hardAsked = settings.hardTokens.toLong(),
-                            targetAsked = settings.targetTokens.toLong(),
-                            ceiling = ContextBudget.ceiling(
-                                pin = model.provider,
-                                contextLength = modelInfo?.contextLength,
-                                maxOutput = modelInfo?.maxOutput,
-                            ),
-                        ).triggerAt
+                        // **The same numbers this turn was built with**, read per call because
+                        // `forget` refuses under the trigger that applies when the call arrives
+                        // rather than the one in force when the screen was opened.
+                        limits.triggerAt
                     },
                     sessionTokens = settings.sessionLimit,
                     // Read at every boundary rather than captured: the person may speak or stop while

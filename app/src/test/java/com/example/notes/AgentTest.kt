@@ -74,7 +74,7 @@ class AgentTest {
         model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high"),
         // No limits means the defaults: no trigger, no trim, which is what most of these tests
         // want — a request that behaves as if the context had all the room in the world.
-        limits = limits ?: ContextBudget.Limits.of(0, 0, ContextBudget.UNKNOWN_CEILING),
+        limits = limits ?: ContextBudget.Limits.of(trigger = 0, hard = 0),
         foregroundMs = foregroundMs,
         bg = bg,
         clock = clock,
@@ -3535,12 +3535,7 @@ class AgentTest {
         // it, so no target can be derived and the line honestly says "cut what does not serve the
         // task" instead of naming a size. That path is worth its own test; this one is about the
         // sentence that names three numbers, so it needs a trigger that can have a target.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 100,
-            hardAsked = 0,
-            targetAsked = 40,
-            ceiling = 100_000,
-        )
+        val limits = ContextBudget.Limits.of(trigger = 100, hard = 0, target = 40)
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -3555,7 +3550,13 @@ class AgentTest {
         assertTrue("where it is now", sent.contains("Your context is about"))
         assertTrue("and that it is over", sent.contains("over the"))
         assertTrue("the point it stops asking at", sent.contains("-token point where the app"))
-        assertTrue("and the wall behind it", sent.contains("takes 100k tokens of input"))
+        // **And no wall behind it any more.** The sentence used to add "this endpoint takes 100k
+        // tokens of input", a number the app had derived and clamped to. There is no such number
+        // now, and telling the model one would be telling it about a limit the app does not honour.
+        assertFalse(
+            "no endpoint limit is named: $sent",
+            sent.contains("tokens of input"),
+        )
         // **And one call, in bulk.** A model that forgets a row per request spends a request per row
         // at exactly the moment the context is largest, and every one of those requests carries the
         // context it is trying to shrink. Report: "it should list all ids and id spans in one request
@@ -3699,7 +3700,7 @@ class AgentTest {
         // message in the array, so a size that changed per request would break the prefix the poll
         // and the cache depend on — on every request of the turn that contains the warning, which
         // is the turn where a re-read is most expensive.
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val limits = ContextBudget.Limits.of(trigger = 1, hard = 0)
         val door = ScriptedDoor(
             Reply("", listOf(call("c1", "search", """{}"""))),
             Reply("", listOf(call("c2", "read", """{"path":"milk.txt"}"""))),
@@ -3732,12 +3733,7 @@ class AgentTest {
         // compaction must cut at least to 'target' size with more if information is not directly
         // related to his current task". A floor, not a ceiling: exactly at the target is the least
         // that counts, and cutting further is what is wanted when rows do not serve the task.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 100,
-            hardAsked = 0,
-            targetAsked = 40,
-            ceiling = 100_000,
-        )
+        val limits = ContextBudget.Limits.of(trigger = 100, hard = 0, target = 40)
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -3763,7 +3759,7 @@ class AgentTest {
         // would be a sentence about nothing. A real operator's number is thousands, so this is the
         // test-sized edge rather than the normal path - but it is the path a scripted door takes,
         // and a sentence that reads as nonsense there is still a sentence the model is charged for.
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val limits = ContextBudget.Limits.of(trigger = 1, hard = 0)
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -3787,7 +3783,7 @@ class AgentTest {
         // One big row: a result carrying a file's worth of text.
         (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
         log.got("read", "0\n" + "x".repeat(4_000), answers = lastCall)
-        val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
+        val limits = ContextBudget.Limits.of(trigger = 100, hard = 0, target = 40)
         val door = ScriptedDoor(Reply("done"))
 
         agent(door, limits).burst("clear up please")
@@ -3842,10 +3838,9 @@ class AgentTest {
         // A trigger of one token, so the turn is told about the target whatever the measurement —
         // the assertion is about the rule, not about the app's arithmetic.
         val limits = ContextBudget.Limits.of(
-            triggerAsked = 100,
-            hardAsked = 0,
-            targetAsked = 40,
-            ceiling = 1_000_000,
+            trigger = 100,
+            hard = 0,
+            target = 40,
         )
         val first = log.rows().first { it.kind == AgentLog.TOLD }
         val door = ScriptedDoor(
@@ -3884,9 +3879,8 @@ class AgentTest {
         // than the rule. A thousand tokens of headroom is more than a line of operator text costs.
         val now = agent.size()
         val lenient = ContextBudget.Limits.of(
-            triggerAsked = now + 1_000,
-            hardAsked = 0,
-            ceiling = 1_000_000,
+            trigger = now + 1_000,
+            hard = 0,
         )
         val afterDoor = ScriptedDoor(Reply("ok"))
         agent(afterDoor, lenient).burst("again")
@@ -3901,7 +3895,7 @@ class AgentTest {
 
     @Test
     fun `under the trigger nothing is said about the context at all`() {
-        val limits = ContextBudget.Limits.of(triggerAsked = 900_000, hardAsked = 0, ceiling = 917_504)
+        val limits = ContextBudget.Limits.of(trigger = 900_000, hard = 0)
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -3924,10 +3918,9 @@ class AgentTest {
         // above it, and both aim at a target below them. The content is a few hundred tokens, so the
         // trim point is crossed and the pass runs.
         val limits = ContextBudget.Limits.of(
-            triggerAsked = 100,
-            hardAsked = 140,
-            targetAsked = 40,
-            ceiling = 100_000,
+            trigger = 100,
+            hard = 140,
+            target = 40,
         )
         val door = ScriptedDoor(Reply("done"))
         val before = Trace.report().lines.toSet()
@@ -3973,10 +3966,9 @@ class AgentTest {
         // The target is below what the instructions and specs alone cost, so `target - fixed` is
         // negative. That is the case the guard used to refuse outright.
         val limits = ContextBudget.Limits.of(
-            triggerAsked = 100,
-            hardAsked = 140,
-            targetAsked = 40,
-            ceiling = 100_000,
+            trigger = 100,
+            hard = 140,
+            target = 40,
         )
         val door = ScriptedDoor(Reply("done"))
         val agent = Agent(account, "shopping", ws, git, log, door, model(), limits = limits)

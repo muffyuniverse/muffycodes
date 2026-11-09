@@ -78,7 +78,7 @@ class LookToolTest {
         log = log,
         door = ScriptedDoor(),
         model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high"),
-        limits = ContextBudget.Limits.of(0, 0, ContextBudget.UNKNOWN_CEILING),
+        limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
     )
 
     private fun look(vararg paths: String): String = tools().run(

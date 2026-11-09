@@ -93,38 +93,14 @@ fun ModelSection(viewModel: AppViewModel) {
         TextButton(onClick = { viewModel.resetModelConfig() }) { Text("Reset") }
     }
 
-    // **What this provider exposes, in one line, under the choice it belongs to.** Reported from
-    // the live log, twice: "context 900k of 1000k — what does that mean? I somehow have the context
-    // full?" and then "is it what provider can take out of what model can?". The second question is
-    // the right reading of the old line, and it should not have needed asking.
-    //
-    // Three numbers, named: the window the model holds, the room the provider keeps for its reply,
-    // and what is left for the conversation. They are read from the endpoint in use rather than
-    // from the model, because the reply reserve is a fact about the endpoint — `cloudflare` keeps
-    // 943,718 of the same 1,048,576 window that `deepinfra` keeps 131,072 of.
-    //
-    // There is no button. The catalogue is read on arrival and whenever the model or provider
-    // changes, which are the only moments the numbers can change; a second way to ask was a second
-    // thing to explain. A read that fails says so in the same place, because a line of numbers with
-    // no word about being stale is the floor pretending to be a measurement.
-    val info = viewModel.modelInfo
+    // **The line that read "Context: 1.05M · reply 943k · input 105k" is gone**, with the ceiling it
+    // was computed from. On the operator's instruction: *"we don't need to know or display context
+    // and reply ceiling of a model because they don't affect anything"*. It was written because the
+    // screen and the agent used to be held to the same clamped number and could disagree about it;
+    // nothing is clamped now, so there is no number to agree on. The window and the reply reserve are
+    // still in the catalogue, on the endpoint rows, where they are what a person compares a provider
+    // by — beside its price and its throughput rather than as a limit the app enforces.
     val endpoint = viewModel.modelEndpoints.firstOrNull { it.tag == config.active.provider }
-    val window = endpoint?.contextLength ?: info?.contextLength
-    val reply = endpoint?.maxOutput ?: info?.maxOutput
-    // **The clamp is asked the same question the agent asks it.** The measured pins in the table win
-    // first (`max_prompt_tokens` is null for every endpoint of this model, so a table entry is the
-    // only number that was ever checked); everything else comes from the endpoint in use. Passing
-    // the model's numbers here instead would have reported `deepinfra`'s reserve on `cloudflare`,
-    // which is the disagreement this line exists to prevent.
-    val input = ContextBudget.ceiling(config.active.provider, window, reply)
-    Text(
-        text = when {
-            window == null || reply == null -> "Context: not read yet"
-            else -> "Context: ${tokens(window)} · reply ${tokens(reply)} · input ${tokens(input)}"
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
     // ---- what this endpoint charges ----
     //
     // **Moved here from the statistics table, on the operator's instruction**: "remove this cost

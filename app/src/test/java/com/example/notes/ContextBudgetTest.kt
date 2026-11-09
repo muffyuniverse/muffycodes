@@ -6,107 +6,90 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two limits, and the one thing §2.3 says they must never do.
+ * **The three numbers are the person's, and the estimate errs early.**
  *
- * The design's numbers are facts about the pinned endpoints — `cloudflare` allows a 943,718-token
- * reply out of a 1,048,576 window, so its input ceiling is a tenth of `deepinfra/fp8`'s. The
- * ceiling therefore belongs to the **pin**, and the tests here are mostly about the boundary
- * between "the number somebody typed" and "the number the agent is held to".
+ * This file used to test a clamp: a ceiling per pinned endpoint, a ladder that derived one from a
+ * model's window, and a repair that kept a target below the point that fired. All of that is gone.
+ * What is left is one rule — *what was written is what is used* — and one estimate, which is the
+ * only number the app derives.
  */
 class ContextBudgetTest {
 
-    // ---- the ceiling belongs to the pin -------------------------------------
-
     @Test
-    fun `the five measured pins have the ceilings the design measured`() {
-        assertEquals(917_504L, ContextBudget.ceiling("deepinfra/fp8"))
-        assertEquals(917_504L, ContextBudget.ceiling("deepinfra/fp8/flex"))
-        assertEquals(786_432L, ContextBudget.ceiling("decart/fp4"))
-        assertEquals(655_360L, ContextBudget.ceiling("deepseek"))
-        assertEquals(104_858L, ContextBudget.ceiling("cloudflare"))
+    fun `each number is used exactly as it was written`() {
+        val limits = ContextBudget.Limits.of(trigger = 100_000, hard = 250_000, target = 60_000)
+        assertEquals("the clear-up point", 100_000L, limits.triggerAt)
+        assertEquals("the trim point", 250_000L, limits.hardAt)
+        assertEquals("the destination", 60_000L, limits.targetAt)
+    }
+
+    /**
+     * **A number bigger than any window is not clamped.** This is the whole change, and the number
+     * is absurd on purpose: a person who types it gets it, and the server that refuses the request
+     * says why. Before this, 500,000 against a 104,858-token pin became 104,858 and the screen said
+     * so — a number the person did not write, standing in for the one they did.
+     */
+    @Test
+    fun `a number bigger than any window is used anyway`() {
+        val limits = ContextBudget.Limits.of(trigger = 500_000, hard = 900_000, target = 400_000)
+        assertEquals(500_000L, limits.triggerAt)
+        assertEquals(900_000L, limits.hardAt)
+        assertEquals(400_000L, limits.targetAt)
     }
 
     @Test
-    fun `a measured pin is not second-guessed by live numbers`() {
-        // The table is what was measured; the API reports `max_prompt_tokens` as null for every
-        // endpoint of this model, so a live number that disagrees is the one to distrust.
-        assertEquals(
-            104_858L,
-            ContextBudget.ceiling("cloudflare", contextLength = 1_000_000, maxOutput = 1_000),
-        )
+    fun `zero means that hand is off, and stays zero`() {
+        val nothing = ContextBudget.Limits.of(trigger = 0, hard = 0, target = 0)
+        assertEquals("no ask", 0L, nothing.triggerAt)
+        assertEquals("no trim", 0L, nothing.hardAt)
+        // **Not "a quarter of a ceiling"** any more: there is no ceiling to take a quarter of, and a
+        // derived trigger was the one number that appeared without anybody typing it.
+        assertEquals("no target", 0L, nothing.targetAt)
+
+        val trimOnly = ContextBudget.Limits.of(trigger = 0, hard = 50_000, target = 20_000)
+        assertEquals("the app alone, when only the trim is set", 0L, trimOnly.triggerAt)
+        assertEquals(50_000L, trimOnly.hardAt)
+    }
+
+    /**
+     * **A target above the trigger is used too, and is not repaired.**
+     *
+     * The old class threw here, from inside a composable, which is an app that will not open — one
+     * typed digit, four relaunches, and the number saved. What the app does now is keep asking until
+     * the context is under the trigger, which is a loop a person can see and fix; a crash is not.
+     */
+    @Test
+    fun `a target above the thing that fires is used, not repaired`() {
+        val limits = ContextBudget.Limits.of(trigger = 10_000, hard = 0, target = 90_000)
+        assertEquals("as written", 90_000L, limits.targetAt)
     }
 
     @Test
-    fun `a pin nobody measured falls back through the numbers that are known`() {
-        assertEquals(
-            "the pin's own window minus the reply it promises",
-            800_000L,
-            ContextBudget.ceiling("someone/new", contextLength = 1_000_000, maxOutput = 200_000),
-        )
-        assertEquals(
-            "three quarters of a window when no reply size is known",
-            750_000L,
-            ContextBudget.ceiling("someone/new", contextLength = 1_000_000),
-        )
-        assertEquals(
-            "and a floor when nothing at all is known",
-            ContextBudget.UNKNOWN_CEILING,
-            ContextBudget.ceiling("someone/new"),
-        )
-    }
-
-    @Test
-    fun `a base slug is not a tag, so it is not in the table`() {
-        // `deepseek` is the tag. A bare `deepinfra` routes among that provider's endpoints, so it
-        // has no single ceiling — and answering with one would be the app inventing a pin.
-        assertEquals(ContextBudget.UNKNOWN_CEILING, ContextBudget.ceiling("deepinfra"))
-    }
-
-    @Test
-    fun `a pin the table does not name is held to the model's window, not to the floor`() {
-        // **The bug this exists for.** The runner used to ask for the ceiling with the pin alone, so
-        // every endpoint the table did not name got the 96,000 floor — and a person whose model holds
-        // a million tokens watched it trimmed at 96k. The window travels with the choice now, and this
-        // is the arithmetic that says the floor is no longer reached when it is known.
-        assertEquals(
-            "an unmeasured pin with a model window of a million",
-            800_000L,
-            ContextBudget.ceiling("someone/new", contextLength = 1_000_000, maxOutput = 200_000),
-        )
-        assertTrue(
-            "which is not the floor: the whole point",
-            ContextBudget.ceiling("someone/new", contextLength = 1_000_000, maxOutput = 200_000) >
-                ContextBudget.UNKNOWN_CEILING,
-        )
-        assertEquals(
-            "and the floor is still what a model nobody knows gets",
-            ContextBudget.UNKNOWN_CEILING,
-            ContextBudget.ceiling("someone/new", contextLength = null, maxOutput = null),
-        )
-    }
-
-    // ---- one result's own limit ----------------------------------------------
-
-    @Test
-    fun `a result may not be bigger than the input window`() {
-        // **Both numbers in tokens.** They used to be two units — the row in characters, the wall in
-        // tokens — so the clamp multiplied by an estimate and the text it produced named the wrong
-        // unit. A result bigger than the window cannot be sent at all, so an ask past it is not a
-        // bigger allowance.
-        val limit = ContextBudget.resultLimit(asked = 40_000, contextLength = 8_000)
-
-        assertEquals("the window itself", 8_000L, limit.ceiling)
-        assertEquals("so that is what is in force", 8_000L, limit.inForce)
-        assertEquals("while the ask is kept as typed", 40_000L, limit.asked)
-        assertTrue("and the row can say it was clamped", limit.clamped)
-    }
-
-    @Test
-    fun `a result limit on a model nobody measured is the number the operator typed`() {
-        val limit = ContextBudget.resultLimit(asked = 40_000, contextLength = null)
-
-        assertEquals("nothing to clamp against", 40_000L, limit.inForce)
-        assertFalse("so the row says nothing", limit.clamped)
+    fun `no three numbers a person can type will throw`() {
+        // The settings screen builds these on **every keystroke**, so anything thrown here does not
+        // show an error — it kills the app, and it kills it again on the next launch because the
+        // numbers are already saved. This walks the range a person plausibly types, including the
+        // intermediate values of typing a long number one digit at a time.
+        val interesting = listOf(0L, 1L, 2L, 5L, 50L, 500L, 5_000L, 12_000L, 24_000L, 50_000L,
+            96_000L, 200_000L, 1_000_000L)
+        for (trigger in interesting) {
+            for (hard in interesting) {
+                for (target in interesting) {
+                    val limits = runCatching {
+                        ContextBudget.Limits.of(trigger = trigger, hard = hard, target = target)
+                    }.getOrElse { error ->
+                        throw AssertionError(
+                            "trigger=$trigger hard=$hard target=$target threw " +
+                                "${error::class.simpleName}: ${error.message}",
+                        )
+                    }
+                    // And nothing was quietly changed on the way through.
+                    assertEquals("trigger=$trigger", trigger, limits.triggerAt)
+                    assertEquals("hard=$hard", hard, limits.hardAt)
+                    assertEquals("target=$target", target, limits.targetAt)
+                }
+            }
+        }
     }
 
     @Test
@@ -116,159 +99,6 @@ class ContextBudgetTest {
         // **The session limit is in tokens now, and it is a plain number.** It used to be megabytes
         // converted here; the operator asked for one field in the unit the model is billed in, so
         // there is nothing to convert and nothing for this test to get wrong.
-    }
-
-    // ---- the clamp must not eat the number ----------------------------------
-
-    @Test
-    fun `a big number on a small pin is clamped in force and kept as asked`() {
-        // §2.3's trap: a clamp that writes back means looking at a small model once destroys the
-        // number you set for a big one.
-        val limit = ContextBudget.Limit(asked = 200_000L, ceiling = 104_858L)
-
-        assertEquals("held to the ceiling", 104_858L, limit.inForce)
-        assertEquals("and the number you typed is still 200,000", 200_000L, limit.asked)
-        assertTrue("which the row says out loud", limit.clamped)
-        assertEquals("and the row says which is which", true, limit.said().contains("asked · "))
-        assertEquals("naming the ceiling it was clamped against", true, limit.said().contains("allows 105k"))
-    }
-
-    @Test
-    fun `the same number is in force again when the pin grows`() {
-        val asked = 200_000L
-        val small = ContextBudget.Limit(asked, ceiling = ContextBudget.ceiling("cloudflare"))
-        val big = ContextBudget.Limit(asked, ceiling = ContextBudget.ceiling("deepinfra/fp8"))
-
-        assertEquals("clamped on the small pin", 104_858L, small.inForce)
-        assertEquals("untouched on the big one", 200_000L, big.inForce)
-        assertEquals("because the number never changed", asked, big.asked)
-    }
-
-    @Test
-    fun `a number under the ceiling is not called clamped`() {
-        val limit = ContextBudget.Limit(asked = 50_000L, ceiling = 917_504L)
-        assertEquals(50_000L, limit.inForce)
-        assertFalse(limit.clamped)
-        assertEquals(
-            "one number, and the room it has",
-            "50k (this pin allows 918k)",
-            limit.said(),
-        )
-    }
-
-    // ---- the hard limit is the reserved one --------------------------------
-
-    @Test
-    fun `a trim below the forget point is a mode, not a mistake`() {
-        // **The operator's correction, 2026-10-29**: "trim compaction actually can be set below
-        // forget and then it is only the app that handles the compaction (a feature, not a bug)
-        // because forget is just never triggered."
-        //
-        // This used to be repaired - a hard limit under the trigger was raised to it - because the
-        // design at the time treated the app's trim as a last resort that must never fire first.
-        // With one shared target there is no contradiction to repair: a person who would rather the
-        // app do the cutting than have the agent choose says so by putting the trim first, and the
-        // agent is simply never asked. The number is honoured as typed.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 50_000,
-            hardAsked = 10_000,
-            targetAsked = 4_000,
-            ceiling = 917_504,
-        )
-
-        assertEquals("the agent's point is where it was put", 50_000L, limits.triggerAt)
-        assertEquals("and the trim fires before it, as asked", 10_000L, limits.hardAt)
-        assertEquals("with nothing rewritten", 10_000L, limits.hard.asked)
-        assertEquals("and both aim at the one target", 4_000L, limits.targetAt)
-    }
-
-    @Test
-    fun `the target is repaired to below both points that fire, rather than refused`() {
-        // **The only ordering the three numbers need.** A target at or above a point that fires
-        // means the act there removes nothing: the context is already under the number it is being
-        // asked to reach. So the target sits strictly below each point that fires.
-        //
-        // **It used to be refused, and refusing was the crash.** These numbers are typed into
-        // fields, and the settings screen builds `Limits` on every keystroke inside a composable -
-        // so a `require` here does not show an error, it kills the app, and a saved number kills it
-        // again on the next launch. The rule is now the one the two limits already follow: what was
-        // typed stays in `asked` for the field to show, and what is enforced is made to work.
-        //
-        // The invariant is asserted on the *result* instead of on the input, which is the same
-        // claim with the throw moved out of the way.
-        val atForget = ContextBudget.Limits.of(
-            triggerAsked = 10_000, hardAsked = 0, targetAsked = 10_000, ceiling = 917_504,
-        )
-        assertEquals("the number typed is kept for the field", 10_000L, atForget.target.asked)
-        assertTrue("and the one enforced is below the forget point", atForget.targetAt < atForget.triggerAt)
-
-        val atTrim = ContextBudget.Limits.of(
-            triggerAsked = 50_000, hardAsked = 20_000, targetAsked = 20_000, ceiling = 917_504,
-        )
-        assertEquals("the same for a target at the trim point", 20_000L, atTrim.target.asked)
-        assertTrue("which is repaired below the trim", atTrim.targetAt < atTrim.hardAt)
-
-        // Below both, and it is kept as typed - which is the normal shape: forget early, trim
-        // later, both aiming at the same smaller number. A repair that moved a valid number would
-        // be a worse bug than the one it replaced.
-        val fine = ContextBudget.Limits.of(
-            triggerAsked = 50_000,
-            hardAsked = 90_000,
-            targetAsked = 24_000,
-            ceiling = 917_504,
-        )
-        assertEquals("forget fires first", 50_000L, fine.triggerAt)
-        assertEquals("the trim waits", 90_000L, fine.hardAt)
-        assertEquals("and both aim at the same target", 24_000L, fine.targetAt)
-    }
-
-    @Test
-    fun `a target of zero is half the forget point, so the ask buys headroom`() {
-        // A default that landed ON the trigger would ask the agent to cut to exactly the number
-        // that asked it - so the next row to arrive would cross the trigger again and the ask would
-        // repeat. Half is the floor that makes one clear-up buy real quiet.
-        val limits = ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 0, ceiling = 917_504)
-        assertEquals("half of where the ask fires", 25_000L, limits.targetAt)
-        assertTrue("which is below it, so the rule holds", limits.targetAt < limits.triggerAt)
-    }
-
-    @Test
-    fun `a hard limit above the endpoint's window is no limit at all`() {
-        // "below max context length for selected model": above it the request is refused before
-        // anything is trimmed, so the number is clamped by the same ceiling the trigger uses.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 50_000,
-            hardAsked = 900_000,
-            ceiling = ContextBudget.ceiling("cloudflare"),
-        )
-
-        assertEquals("held to what the pin takes", 104_858L, limits.hardAt)
-        assertTrue("and the row can say it was clamped", limits.hard.clamped)
-        assertEquals("while the typed number survives", 900_000L, limits.hard.asked)
-    }
-
-    // ---- what zero means, and it means two different things ------------------
-
-    @Test
-    fun `a trigger of zero follows the pin instead of switching the warning off`() {
-        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 0, ceiling = 400_000)
-        assertEquals("a quarter of what the pin allows", 100_000L, limits.triggerAt)
-        assertEquals("and the hard limit is off", 0L, limits.hardAt)
-    }
-
-    @Test
-    fun `a hard limit of zero is never, not a default size`() {
-        val limits = ContextBudget.Limits.of(triggerAsked = 10_000, hardAsked = 0, ceiling = 400_000)
-        assertEquals("nothing is trimmed", 0L, limits.hardAt)
-        assertEquals("but the warning still happens", 10_000L, limits.triggerAt)
-    }
-
-    @Test
-    fun `zero stays zero when it is not a share`() {
-        // The ceiling of nothing is not a ceiling; a trigger of a quarter of zero must not become
-        // "always over" or "never warn", it must stay off.
-        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 0, ceiling = 0)
-        assertEquals(0L, limits.triggerAt)
     }
 
     // ---- the estimate, and which way it errs --------------------------------
@@ -333,123 +163,29 @@ class ContextBudgetTest {
     fun `a count reads as a scale, not a quantity`() {
         assertEquals("96k", ContextBudget.short(96_000))
         assertEquals("918k", ContextBudget.short(917_504))
-        assertEquals("and a pin's ceiling is the design's own example", "105k", ContextBudget.short(104_858))
+        assertEquals("and a measured pin's ceiling, from the design", "105k", ContextBudget.short(104_858))
         assertEquals("off", ContextBudget.short(0))
         assertEquals("999", ContextBudget.short(999))
     }
+    /**
+     * **The crash that this redesign removes rather than fixes.**
+     *
+     * The trace was `trim-compaction 5` and then four relaunches, each dying on the settings screen:
+     * `require(targetAt < hardAt)` threw `IllegalArgumentException` **from inside a composable**, and
+     * because the digit was already saved it died again on every launch. Every keystroke is its own
+     * state, so typing 50000 passed through 5, 50, 500 and 5000 — the first of those fatal.
+     *
+     * There is no repair to test any more, and that is the point: the three numbers are stored as
+     * written, so a half-typed number is a half-typed number and nothing is computed from it until a
+     * request is made.
+     */
     @Test
-    fun `a trim typed below the target does not throw, because typing is one digit at a time`() {
-        // **The crash**: "app is crushing after I tried to set trim compaction field in settings".
-        //
-        // The trace shows `trim-compaction 5` and then four relaunches in a row, each dying at the
-        // settings screen - because 5 was already saved, so the screen rebuilt the same numbers and
-        // threw in the same place. **One typed digit was an app that would not open.**
-        //
-        // The arithmetic: nothing else typed means the trigger resolves to a quarter of the ceiling
-        // (24k) and the target to half of that (12k), so a trim of 5 put the target above the point
-        // the trim fires at. `require(targetAt < hardAt)` threw `IllegalArgumentException` **from
-        // inside a composable**, which is not a caught error, it is a dead app.
-        //
-        // **Every keystroke is its own state**, which is why this is not an edge case: typing 50000
-        // passes through 5, 50, 500 and 5000, and the first of those was fatal. So the table below
-        // is not four variations, it is what one person doing one thing produced.
-        for (typed in listOf(5, 50, 500, 5_000, 50_000)) {
-            val limits = ContextBudget.Limits.of(
-                triggerAsked = 0,
-                hardAsked = typed.toLong(),
-                ceiling = ContextBudget.UNKNOWN_CEILING,
-            )
-            assertTrue(
-                "typing $typed must not throw, and must aim below where it trims",
-                limits.targetAt < limits.hardAt,
-            )
-        }
-    }
-
-    @Test
-    fun `the derived target is below the trim when the trim is the earlier of the two`() {
-        // The same bug asked as a question about the number rather than about the crash: **the
-        // target must sit below whichever point fires first**, and that is not always the trigger.
-        //
-        // A trim below the clear-up point is a real choice - the app cuts and the agent is never
-        // asked - so the trigger cannot be the only ceiling on where the target may be.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 0,
-            hardAsked = 5_000,
-            ceiling = ContextBudget.UNKNOWN_CEILING,
-        )
-        assertEquals("the trim is where it was typed", 5_000L, limits.hardAt)
-        assertEquals("so the target is half of the trim, not half of the trigger", 2_500L, limits.targetAt)
-    }
-
-    @Test
-    fun `a typed target above the trim is repaired rather than obeyed`() {
-        // **The second way into the same crash**, and it needs no unusual number: the target is a
-        // field a person can type into, and a target above the trim is exactly what a person typing
-        // three numbers in a hurry will produce.
-        //
-        // Repaired rather than refused, which is the rule the two limits already follow: what was
-        // typed stays in `asked` where the screen can show it, and what is enforced is made to work.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = 50_000,
-            hardAsked = 10_000,
-            targetAsked = 40_000,
-            ceiling = 917_504,
-        )
-        assertEquals("the typed number is kept for the field", 40_000L, limits.target.asked)
-        assertTrue("and the number in force is below the trim", limits.targetAt < limits.hardAt)
-    }
-
-    @Test
-    fun `no three numbers a person can type will throw`() {
-        // **The crash was reachable by typing, so the fix is only done when typing cannot reach it.**
-        //
-        // The settings screen builds `Limits` on **every keystroke**, inside a composable. Anything
-        // that throws there does not show an error, it kills the app - and because the numbers are
-        // saved, it kills the app again on the next launch. That is what happened: one digit, four
-        // relaunches.
-        //
-        // So this is not a test of one case. It walks every combination of the three fields across
-        // the range a person plausibly types - including the intermediate values of typing a large
-        // number one digit at a time - and requires that constructing the limits either succeeds
-        // with a coherent answer or fails as an ordinary refusal. Nothing may throw.
-        val interesting = listOf(
-            0, 1, 2, 5, 50, 500, 5_000, 12_000, 24_000, 50_000, 96_000, 200_000,
-        )
-        for (trigger in interesting) {
-            for (hard in interesting) {
-                for (target in interesting) {
-                    val limits = runCatching {
-                        ContextBudget.Limits.of(
-                            triggerAsked = trigger.toLong(),
-                            hardAsked = hard.toLong(),
-                            targetAsked = target.toLong(),
-                            ceiling = ContextBudget.UNKNOWN_CEILING,
-                        )
-                    }.getOrElse { error ->
-                        throw AssertionError(
-                            "trigger=$trigger hard=$hard target=$target threw " +
-                                "${error::class.simpleName}: ${error.message}",
-                        )
-                    }
-                    // And the answer is coherent, not merely non-throwing: a target that is on or
-                    // above a point that fires would ask for a size the context already has.
-                    if (limits.targetAt > 0L && limits.triggerAt > 0L) {
-                        assertTrue(
-                            "trigger=$trigger hard=$hard target=$target: " +
-                                "target ${limits.targetAt} must be below trigger ${limits.triggerAt}",
-                            limits.targetAt < limits.triggerAt,
-                        )
-                    }
-                    if (limits.targetAt > 0L && limits.hardAt > 0L) {
-                        assertTrue(
-                            "trigger=$trigger hard=$hard target=$target: " +
-                                "target ${limits.targetAt} must be below trim ${limits.hardAt}",
-                            limits.targetAt < limits.hardAt,
-                        )
-                    }
-                }
-            }
+    fun `a half-typed number is stored as it is, and computes nothing`() {
+        for (typed in listOf(0L, 1L, 5L, 50L, 500L, 5_000L, 50_000L)) {
+            val limits = ContextBudget.Limits.of(trigger = 0, hard = typed, target = 0)
+            assertEquals("typing $typed is the trim", typed, limits.hardAt)
+            assertEquals("and the ask is off", 0L, limits.triggerAt)
+            assertEquals("and there is no destination", 0L, limits.targetAt)
         }
     }
 

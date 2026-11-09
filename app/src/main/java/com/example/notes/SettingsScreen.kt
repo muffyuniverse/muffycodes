@@ -284,21 +284,23 @@ fun SettingsScreen(
             // should END UP; the two triggers are where each hand starts working. One destination
             // means whichever acts, the context lands in the same place.
             //
-            // **Forget first, trim second, and the target above them** - the order the numbers
-            // must satisfy, so a person reading the screen sees the rule rather than discovering it
-            // in an error. A trim set BELOW the forget point is a mode rather than a mistake: the
-            // agent is never asked, so the app does all the compacting, which is what somebody who
-            // would rather the app decide is choosing.
+            // **Forget first, trim second, and the target below them** - written in the order the
+            // two hands act, and **not an order the app enforces any more**. The numbers are used
+            // as they are typed; a target above a trigger asks for something the trigger already
+            // passed, and the app keeps asking until the context is under the trigger. A trim set
+            // BELOW the forget point is a mode rather than a mistake: the agent is never asked, so
+            // the app does all the compacting, which is what somebody who would rather the app
+            // decide is choosing.
             LengthField(
                 label = "Compaction target",
                 value = settings.targetTokens,
-                placeholder = "half the clear-up point",
+                placeholder = "60000",
                 onValueChange = { settings.keepTarget(it) },
             )
             LengthField(
                 label = "Forget compaction at",
                 value = settings.triggerTokens,
-                placeholder = "a quarter",
+                placeholder = "100000",
                 onValueChange = { settings.keepTrigger(it) },
             )
             LengthField(
@@ -307,36 +309,19 @@ fun SettingsScreen(
                 placeholder = "never",
                 onValueChange = { settings.keepHard(it) },
             )
-            // **The pin's real ceiling**, read from what the catalogue said about the active
-            // model — the same number the runner builds its limits from. This line used to pass
-            // the floor on purpose ("no model is being named here"), and the result was a screen
-            // that told a person their million-token model would be trimmed at 96k.
-            val catalogue = viewModel.modelInfo
-            val limit = ContextBudget.Limits.of(
-                triggerAsked = settings.triggerTokens.toLong(),
-                hardAsked = settings.hardTokens.toLong(),
-                targetAsked = settings.targetTokens.toLong(),
-                ceiling = ContextBudget.ceiling(
-                    pin = viewModel.modelConfig.active.provider,
-                    contextLength = catalogue?.contextLength,
-                    maxOutput = catalogue?.maxOutput,
-                ),
-            )
-            // **What the three numbers resolve to**, in the order the two hands act. The arrow is
-            // the target rather than decoration: it is where the context ends up whichever hand
-            // takes it there.
-            Text(
-                "forget at ${ContextBudget.short(limit.triggerAt)} · " +
-                    "trim at ${ContextBudget.short(limit.hardAt)} · " +
-                    "both to ${ContextBudget.short(limit.targetAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            // **The line that resolved the three numbers is gone**, and so is the clamp it showed.
+            // It existed to say "you asked for 500k and this pin allows 105k, so 105k is what is
+            // used"; nothing is clamped now, so the three numbers above *are* the three numbers.
+            // A line repeating them in a second unit would be decoration.
             // **Said out loud when the trim comes first**, because it is a legitimate choice that
             // looks like a mistake: with the trim below the forget point the agent is never asked,
             // so the app does all the compacting. Somebody who meant it should be told it is
             // working as intended; somebody who did not should see it immediately.
-            if (limit.hardAt > 0 && limit.hardAt <= limit.triggerAt) {
+            // **Read as written**, because that is the only reading left: `hard <= trigger` is a
+            // comparison of the person's two numbers, not of two numbers the app derived.
+            val hardAt = settings.hardTokens.toLong()
+            val triggerAt = settings.triggerTokens.toLong()
+            if (hardAt > 0 && triggerAt > 0 && hardAt <= triggerAt) {
                 Text(
                     "The app trims before the agent is ever asked, so the agent never compacts. " +
                         "That is what these numbers say; raise the trim to let the agent go first.",
@@ -485,21 +470,9 @@ fun SettingsScreen(
                 placeholder = "6000",
                 onValueChange = { settings.keepMaxResult(it) },
             )
-            // **The clamp says which number is in force.** A result bigger than the model's input
-            // window cannot be sent at all, so a bigger ask is not a bigger allowance — and a row
-            // that showed only the ask would be the same "96k" mistake in a second unit.
-            val resultLimit = ContextBudget.resultLimit(
-                settings.maxResult,
-                viewModel.modelInfo?.contextLength,
-            )
-            if (resultLimit.clamped) {
-                Text(
-                    "This model's input window is ${resultLimit.ceiling} tokens, so that is " +
-                        "what is used.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            // **No clamp line any more.** A result bigger than the model's window used to be
+            // reduced to that window and said so; the number is now used as written, and a server
+            // that will not take it says so itself at the request that carries it.
             RowDivider()
 
             // ---- how much of the record is kept ----

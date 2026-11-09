@@ -1,105 +1,44 @@
 package com.example.notes
 
 /**
- * How big the working context may get, in the operator's numbers and the pin's ceiling.
+ * How big the working context may get: **three numbers the operator typed**, and an estimate of how
+ * much text costs.
  *
- * Round 5's §1.8: **two limits, both token counts, both the operator's.** `trigger` is when the
- * agent is told to clear its context up; `hard` is when the app trims it. `hard` is off by
- * default, because an app that silently cuts a conversation is an app that loses the thing the
- * person was working on — and the agent is the one supposed to be choosing what to forget.
+ * ### There is no ceiling, and this file used to have one
  *
- * ### The clamp, and the number it must not eat
+ * It carried a table of five measured pins, a four-step ladder that derived a ceiling from a model's
+ * window and the reply it reserved, and a clamp that held each number to `min(asked, ceiling)`. All of
+ * that is gone, on the operator's instruction: *"no need for capping or using relative size numbers —
+ * what user wrote is what must be used. And this way we don't need to know or display context and
+ * reply ceiling of a model because they don't affect anything"*.
  *
- * A ceiling depends on the **pinned endpoint**, not on the model: `cloudflare` allows a 943,718
- * token reply out of a 1,048,576 window, so its input ceiling is 104,858, while `deepinfra/fp8`
- * allows 917,504. Switching a pin can move the ceiling by six times — which is why [asked] and
- * [inForce] are two different numbers:
+ * The reason it was there was arithmetic the app could not do well: a window is input plus the reply
+ * it reserves, and the app had to guess the split. The reason it is gone is that the guess was never
+ * the app's to make — a person setting up a model knows its window, types numbers that fit inside it,
+ * and if they are wrong the server says so in its own words at the first request that is too long.
+ * **A refusal a person can read is better than a clamp they cannot see.**
  *
- * - [asked] is what the operator typed, and is never written back;
- * - [inForce] is `min(asked, ceiling)`, what the agent is actually held to.
+ * What that deletes is worth naming, because it was not only a guard: the pin table, the ladder, the
+ * clamp, the two fields that fed it (`ActiveModel.contextLength`/`maxOutput`), the learning of a
+ * window from a catalogue after a model is chosen, the "this pin allows 105k" line on the settings
+ * screen, and the sentence the app put in the agent's own prompt — *"this endpoint takes 918k tokens
+ * of input"* — which told the model a number the app no longer enforces.
  *
- * A clamp that wrote back would mean that looking at a small model once destroys the number you
- * set for a big one, and §2.3 of the design calls that out as a trap rather than a detail.
+ * ### The two hands, and the numbers they use
  *
- * ### Why the ceiling is a table
+ * [Limits] is three numbers: `forget` is when the agent is asked to clear its context up, `trim` is
+ * when the app cuts it, and `target` is where both aim. **Each is used exactly as written.** Zero
+ * means that number is not set — the hand is off — and there is no derivation from anything, because
+ * there is nothing to derive from and no share of it to take.
  *
- * The API cannot answer this. `/endpoints` reports `max_prompt_tokens: null` for every endpoint
- * of the model this app ships with, so a ceiling derived only from live data would be a number
- * nobody has. The five pins the design measured are therefore written down, and anything else
- * falls through to the catalogue's own numbers, then to a share of the window, then to a floor —
- * a ladder that always produces a number and never pretends to more certainty than it has.
+ * ### The estimate, which is the only number this file derives
+ *
+ * [tokens] is an estimate and every place it is shown says so. It exists because something has to
+ * decide *when* a context is over a number, and the app cannot tokenize: a tokenizer is a model's
+ * vocabulary, it is not in this APK, and downloading one would be a second failure mode in the path
+ * that has to work on a train.
  */
 object ContextBudget {
-
-    /**
-     * The pins the design measured, as their input ceiling.
-     *
-     * `1,048,576 − max output`, per §1.8's table. Written out as the answer rather than as the
-     * subtraction, so a reader can compare this with the design without doing arithmetic.
-     */
-    val CEILINGS = mapOf(
-        "deepinfra/fp8" to 917_504L,
-        "deepinfra/fp8/flex" to 917_504L,
-        "decart/fp4" to 786_432L,
-        "deepseek" to 655_360L,
-        "cloudflare" to 104_858L,
-    )
-
-    /** The floor for a pin nobody measured: below this no agent conversation fits. */
-    const val UNKNOWN_CEILING = 96_000L
-
-    /** How much of a window the fallback assumes a reply needs. */
-    private const val REPLY_SHARE = 4
-
-    /**
-     * The input ceiling for [pin], given the model's own window.
-     *
-     * Four steps, most certain first: **the measured pin** (a fact about that endpoint, which is
-     * deliberately allowed to be tighter than the model's own window — `cloudflare` is), then the
-     * pin's own live numbers (window minus the largest reply it promises), then three quarters of a
-     * known window, then the floor. Each step is only reached when the one above it has nothing to
-     * say.
-     *
-     * **The floor is the last resort and must stay rare.** It is reached only when the pin is not
-     * measured *and* the model's window is unknown — and it used to be reached for every pin the
-     * table did not name, because nobody passed a window: a million-token model was trimmed at
-     * 96,000 while the screen promised its real size. The window now travels with the choice
-     * ([ActiveModel.contextLength]) so both callers can pass it.
-     */
-    fun ceiling(pin: String, contextLength: Int? = null, maxOutput: Int? = null): Long {
-        CEILINGS[pin]?.let { return it }
-        if (contextLength != null && maxOutput != null && maxOutput < contextLength) {
-            return (contextLength - maxOutput).toLong()
-        }
-        if (contextLength != null && contextLength > 0) {
-            return contextLength.toLong() / REPLY_SHARE * (REPLY_SHARE - 1)
-        }
-        return UNKNOWN_CEILING
-    }
-
-    /**
-     * How much of one result may enter the conversation, in characters — asked, and in force.
-     *
-     * **The input window, in the unit the field is typed in** — and it is typed in **tokens**, the
-     * same unit as every limit beside it. It used to be characters, which made the row a person
-     * types in one unit and the wall it is clamped by a second: the text had to convert 20,000
-     * characters to "5.7k tokens" in its head every time, and the clamp was `window × 4` bytes of a
-     * different thing again. A result is a token count now, and the clamp is the window itself.
-     *
-     * A window nobody knows clamps nothing: the ask is the limit, which is what the app did before
-     * this number had a ceiling.
-     */
-    fun resultLimit(asked: Int, contextLength: Int?): Limit = Limit(
-        asked = asked.toLong(),
-        ceiling = if (contextLength != null && contextLength > 0) {
-            contextLength.toLong()
-        } else {
-            Long.MAX_VALUE
-        },
-    )
-
-    /** How many tokens one result may carry, as the setting is stored: 20k by default. */
-    fun resultTokens(asked: Int): Long = asked.toLong()
 
     /**
      * What one text costs, estimated in tokens.
@@ -222,160 +161,27 @@ object ContextBudget {
     const val PICTURE_PER_TILE = 170L
 
     /**
-     * A limit as the operator asked for it and as it is in force.
+     * **The three numbers, exactly as the operator wrote them.**
      *
-     * [asked] is stored; [inForce] is derived, every time, from the pin that is active now.
+     * No `asked`/`inForce` pair, because there is nothing to clamp them against any more; no
+     * derivation, because a derived number is one the person did not write and cannot predict; and
+     * no `require`, which is the part worth saying out loud. The old class refused a target above
+     * either trigger by throwing from its own constructor — and its constructor ran inside a
+     * composable, so **one digit typed into a settings field was an app that would not open**, and
+     * it died again on every relaunch because the digit was already saved.
+     *
+     * What replaces the refusal is the thing the operator asked for: a number that is wrong is used,
+     * the request it produces is refused by the server, and the sentence that comes back says why.
+     *
+     * **Zero means "not set".** For a trigger or a trim that is the hand being off. For the target it
+     * is "no size to name": the ask is then simply *cut what does not serve the task*, and a trim
+     * with no target keeps only the newest burst — both of which are things the app already did when
+     * there was no number, so neither is a new meaning.
      */
-    data class Limit(val asked: Long, val ceiling: Long) {
-        /** What the agent is held to. Never written back over [asked]. */
-        val inForce: Long get() = if (asked <= 0L) 0L else minOf(asked, ceiling)
-
-        /** True when the pin is smaller than the number asked for, so the UI can say why. */
-        val clamped: Boolean get() = asked > 0L && asked > ceiling
-
-        /** `96k asked · 88k in force` — the two numbers, never one pretending to be the other. */
-        fun said(): String = when {
-            asked <= 0L -> "off"
-            !clamped -> "${short(asked)} (this pin allows ${short(ceiling)})"
-            else -> "${short(asked)} asked · ${short(inForce)} in force " +
-                "(this pin allows ${short(ceiling)})"
-        }
-    }
-
-    /**
-     * The two limits in force for one pin.
-     *
-     * **`trigger` of zero means a quarter of the ceiling**, not "off": an agent with no warning
-     * point would be told to clear up only when the app was about to trim, which is the app
-     * deciding. A quarter is §2.2's own share, and it is derived from the pin rather than typed,
-     * so a small pin gets a small trigger without anybody having to remember to change it.
-     */
-    /**
-     * The three numbers: where both hands aim, and where each of them fires.
-     *
-     * **One target, two triggers** — the operator's correction, 2026-10-29: "both forget and trim
-     * compactions should have same target but different triggers (so that forget triggers much
-     * earlier)". Two independent numbers would let the app trim to a size the agent was never asked
-     * to reach, or ask the agent to reach a size the app had already given up on.
-     *
-     * **The target is below both triggers, and that is the only ordering required.** A target at or
-     * above a trigger would mean the act that fires there removes nothing: the context is already
-     * under the number it is being asked to reach. So the target sits strictly below each trigger
-     * that is on, and one clear-up buys real headroom rather than landing exactly on the point that
-     * asked for it.
-     *
-     * **A trim below the clear-up point is a mode, not a mistake.** The operator: "trim compaction
-     * actually can be set below forget and then it is only the app that handles the compaction (a
-     * feature, not a bug) because forget is just never triggered." A person who would rather the app
-     * do the cutting than have the agent choose gets exactly that by putting the trim first — the
-     * agent is never asked, so it never acts, and the two hands never compete. What is still
-     * refused is a trim so low that it fires without the agent ever being able to reach the target
-     * first... which is that same mode, so nothing is refused for it. The ordering rule is only
-     * about the target.
-     */
-    data class Limits(val trigger: Limit, val hard: Limit, val target: Limit) {
-
-        init {
-            // **The target must be reachable, so it is below each trigger that is on.** A trigger
-            // of zero is "the app has no opinion" and is resolved from the ceiling, so it is
-            // compared as the resolved number rather than as the zero.
-            // **A trigger of zero is resolved from the ceiling, not "off"**, so it is never an
-            // escape from this rule: `triggerAt` is a quarter of the ceiling whenever nothing was
-            // typed. The check therefore has no exemption - only a pin with no window at all gives
-            // a zero, and there is no target to reach against no window.
-            // **Zero is "there is no derivable target"**, which happens only for a trigger of one -
-            // the smallest size there is, with no positive integer below it. That is a test-sized
-            // number rather than an operator's, and refusing it would make the ordering rule a rule
-            // about arithmetic rather than about the design.
-            if (triggerAt > 0L && targetAt > 0L) {
-                require(targetAt < triggerAt) {
-                    "the clear-up target (${targetAt}) must be below the point that asks for it " +
-                        "(${triggerAt}), or the ask would have nothing left to remove"
-                }
-            }
-            require(hardAt == 0L || targetAt < hardAt) {
-                "the clear-up target (${targetAt}) must be below the trim point ($hardAt), or the " +
-                    "trim would fire on a context that already fits"
-            }
-        }
-
-        /** The trigger in force, resolved from the ceiling when the operator left it at zero. */
-        val triggerAt: Long get() = if (trigger.inForce == 0L) trigger.ceiling / 4 else trigger.inForce
-
-        /**
-         * The hard limit in force, or zero for "never".
-         *
-         * **Not raised to the trigger, and the comment here used to say it was.** A trim typed
-         * below the clear-up point is a real choice: the app does the cutting and the agent is
-         * never asked, which the settings screen says out loud rather than silently overriding.
-         * `the trim may fire before the ask, and then the agent is never asked` pins that, so a
-         * comment promising a raise described code that does not exist - and the code was right.
-         */
-        val hardAt: Long get() = if (hard.inForce == 0L) 0L else hard.inForce
-
-        /**
-         * Where both hands aim.
-         *
-         * **A target of zero means "half of where the clear-up is asked for"**, and it is derived
-         * from [triggerAt] rather than from the ceiling for one reason: the whole value of a
-         * separate target is the headroom between the two, and a default that landed on the trigger
-         * would ask the agent to cut to exactly the number that asked it - so the next row to arrive
-         * would cross the trigger again and the ask would repeat. Half is a floor nobody has to
-         * tune: an ask at 49k aims at 24k, and one forget buys 25k of quiet.
-         */
-        val targetAt: Long
-            get() {
-                // **Below whichever point fires first, which is not always the trigger.**
-                //
-                // This derived from the trigger alone, and the crash that caused is worth writing
-                // down: with the trim set to 5 and nothing else typed, the trigger resolved to
-                // 24,000 and the target to 12,000 - so the target sat above the point the trim
-                // fires at, `require` below threw `IllegalArgumentException` **from inside a
-                // composable**, and the app died. It died again on every relaunch, because 5 was
-                // already saved: the settings screen built the same numbers and threw in the same
-                // place. One typed digit was an app that would not open.
-                //
-                // A trim below the trigger is legitimate (see [hardAt]), so the trigger is not the
-                // only ceiling on where the target may be. It must be under **both** points that
-                // fire, and when there is only one, that one.
-                val at = minOf(triggerAt, hardAt.takeIf { it > 0L } ?: Long.MAX_VALUE)
-                // **Half, and strictly below it.** `at / 2` alone gives 0 for a point of 1 - which
-                // is not "no target", it is "a target of nothing" - so the floor is applied to the
-                // answer rather than to the share, and only where the point is big enough to have a
-                // smaller positive number under it.
-                //
-                // A point of 1 therefore has no derivable target: there is no positive integer
-                // below 1. That is a test-sized number rather than a real one, and the ordering
-                // rule below skips the check when there is nothing to reach, which is the honest
-                // answer - the app cannot ask for a size below the smallest size there is.
-                val derived = if (at <= 1L) 0L else at / 2
-                // **A typed target is repaired, not obeyed into a crash.** It is a number a person
-                // can get wrong - and the same repair rule already governs the two limits, where
-                // what was typed stays in `asked` and what is enforced is made to work.
-                if (target.inForce > 0L) return if (target.inForce < at) target.inForce else derived
-                return derived
-            }
-
+    data class Limits(val triggerAt: Long, val hardAt: Long, val targetAt: Long) {
         companion object {
-            /**
-             * Both from the operator's stored numbers and one pin's ceiling.
-             *
-             * **The clamp is `min(asked, ceiling)` for each, and the order is repaired rather than
-             * refused**: a hard limit typed below the trigger is raised to the trigger, because the
-             * alternative is an app whose last resort fires first and whose agent is never asked to
-             * clear up at all. What is repaired is the effective number; what was typed stays in
-             * [Limit.asked], which is what makes the screen able to say so.
-             */
-            fun of(
-                triggerAsked: Long,
-                hardAsked: Long,
-                ceiling: Long,
-                targetAsked: Long = 0L,
-            ): Limits = Limits(
-                Limit(triggerAsked, ceiling),
-                Limit(hardAsked, ceiling),
-                Limit(targetAsked, ceiling),
-            )
+            fun of(trigger: Long, hard: Long, target: Long = 0L): Limits =
+                Limits(triggerAt = trigger, hardAt = hard, targetAt = target)
         }
     }
 

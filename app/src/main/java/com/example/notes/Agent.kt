@@ -44,11 +44,7 @@ class Agent(
      * change mid-turn — and because a test that had to build a `SettingsStore` to reach a size
      * limit would be testing the store instead.
      */
-    private val limits: ContextBudget.Limits = ContextBudget.Limits.of(
-        triggerAsked = 0,
-        hardAsked = 0,
-        ceiling = ContextBudget.UNKNOWN_CEILING,
-    ),
+    private val limits: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
     /**
      * Why the turn should stop now, or null to go on.
      *
@@ -1068,7 +1064,7 @@ class Agent(
                 "agent-clear-up",
                 "$project · ${ContextBudget.short(size)} over ${ContextBudget.short(trigger)}",
             )
-            clearUpLine(size, trigger, limits.targetAt, limits.trigger.ceiling, opening.biggest)
+            clearUpLine(size, trigger, limits.targetAt, opening.biggest)
         } else {
             null
         }
@@ -1120,7 +1116,6 @@ class Agent(
         size: Long,
         trigger: Long,
         target: Long,
-        ceiling: Long,
         biggest: List<RowCost>,
     ): String =
         buildString {
@@ -1135,7 +1130,12 @@ class Agent(
             // agent acted on it.
             append("Your context is about ${ContextBudget.short(size)} tokens, over the ")
             append("${ContextBudget.short(trigger)}-token point where the app asks you to clear up. ")
-            append("This endpoint takes ${ContextBudget.short(ceiling)} tokens of input. ")
+            // **The endpoint's own limit is not named any more**, because the app no longer holds a
+            // number for it. The sentence used to say "this endpoint takes 918k tokens of input",
+            // which was a fact about the pin and a figure the request was clamped to; with no clamp
+            // it would be a number the model could reason about and the app would not honour, which
+            // is worse than saying nothing. What the request is actually held to is the number
+            // above, and it is the operator's.
             // **By id, and that is the whole command.** `forget` names rows; it cannot carry text,
             // so compaction cannot change what the record says — which is what makes the context
             // auditable afterwards rather than a claim the model made about it.

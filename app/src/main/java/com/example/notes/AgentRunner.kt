@@ -375,15 +375,10 @@ class AgentRunner(
         )
         val asked = wired(project, branch)
         val active = asked.active
-        // **The model's own window, read from the choice rather than guessed.** A poll builds the
-        // same limits a turn does, and a ceiling the screen and the runner disagree about is a trim
-        // nobody can explain.
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = settings.triggerTokens.toLong(),
-            hardAsked = settings.hardTokens.toLong(),
-            targetAsked = settings.targetTokens.toLong(),
-            ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
-        )
+        // **The numbers this worktree carries**, resolved with the model rather than read from the
+        // general settings: a poll builds the same limits a turn does, and a trim the screen and the
+        // runner disagree about is a trim nobody can explain.
+        val limits = asked.limits
         // **The project goes with it**, so a request row is filed under the worktree it was made for
         // rather than under an empty name — which is the same defect as the model, one field across.
         val doorFor = door(asked, project)
@@ -400,8 +395,7 @@ class AgentRunner(
                     log,
                     doorFor,
                     active,
-                    maxResult = ContextBudget.resultLimit(settings.maxResult, active.contextLength)
-                        .inForce.toInt(),
+                    maxResult = settings.maxResult,
                     limits = limits,
                     // The ladder's position, so a repeated failure is not written down again.
                     retrying = session.retries > 0,

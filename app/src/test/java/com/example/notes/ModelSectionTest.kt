@@ -378,16 +378,12 @@ class ModelSectionTest {
             contextLength = 1_048_576, maxOutput = 943_718,
         )
 
-        assertEquals("the new reserve", 943_718, scene.viewModel.modelConfig.active.maxOutput)
-        assertEquals(
-            "and the clamp follows it",
-            104_858L,
-            ContextBudget.ceiling(
-                scene.viewModel.modelConfig.active.provider,
-                scene.viewModel.modelConfig.active.contextLength,
-                scene.viewModel.modelConfig.active.maxOutput,
-            ),
-        )
+        assertEquals("the new provider", "cloudflare", scene.viewModel.modelConfig.active.provider)
+        // **The reserve stopped mattering.** It is still read from the catalogue and stored beside
+        // the choice at this point, but nothing clamps to it any more — the numbers that decide how
+        // big a context may get are the operator's three, and the endpoint's reply reserve is a fact
+        // about the market rather than a limit the app enforces.
+        assertEquals("and it travelled with the choice", 943_718, scene.viewModel.modelConfig.active.maxOutput)
     }
 
     /** One endpoint, with only the two numbers this file's tests care about. */
@@ -504,24 +500,22 @@ class ModelSectionTest {
     }
 
     @Test
-    fun `the context line names the window, the reply and what is left for input`() {
-        // **Reported from the live log, twice.** "context 900k of 1000k — what does that mean? I
-        // somehow have the context full or what?" and then, after a rewording, "is it what provider
-        // can take out of what model can?". The second question was the right reading, and a line
-        // that needs it asked twice is a line that does not say what its numbers are.
+    fun `the context line is gone, with the ceiling it was computed from`() {
+        // **Reported from the live log, twice**, and answered by deleting the thing rather than
+        // rewording it: "context 900k of 1000k — what does that mean? I somehow have the context
+        // full or what?" then "is it what provider can take out of what model can?".
         //
-        // Three numbers now, each named: the model's window, the room this endpoint keeps for its
-        // reply, and the input that is left. The middle one is the whole difference between the
-        // other two, so it is on the line rather than left to be subtracted in a person's head.
+        // The line was written because the screen and the agent were held to the *same clamped
+        // number* and could disagree about it. Nothing is clamped now — the operator's numbers are
+        // used as written — so there is no number for the screen and the agent to agree on, and a
+        // line of three derived figures would be decoration over a budget the app no longer keeps.
         scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
 
         scene.await("the catalogue", 5_000) { scene.viewModel.modelInfo != null }
 
-        // 1,048,576 window, 393,216 kept by the model — the deepseek pin is 655,360.
-        compose.onNodeWithText("Context: 1.0M", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("reply 393k", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("input 655k", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Context:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("input", substring = true).assertDoesNotExist()
     }
 
     @Test
