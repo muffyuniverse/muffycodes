@@ -119,10 +119,12 @@ Checked and left alone, so a later reader does not re-open them:
 
 ## 5. What is still open, ranked by what it costs if it stays
 
-1. **§13e — Downloads as a folder, via SAF.** Not started. The three verbs (`download`, `uploads`,
-   `downloads`) are still on the agent's surface, so the surface is larger than the plan's target.
-2. **`MediaStore` has never run on a device**, and no SAF code exists to run. The one part of this app
-   that touches the phone's real storage is the part with no observation behind it.
+1. ~~**§13e — Downloads as a folder, via SAF.**~~ **REVERSED 2026-11-09 — the opposite is happening:**
+   the three verbs and `PhoneDownloads` are being **removed** rather than made true, because the
+   `MediaStore` read they depend on only ever answers the app's own rows (see
+   `PLAN-universal-2026-11-06` §13e.3). `DownloadsSink` — the app writing its own `trace.log` — stays.
+2. **`MediaStore` has never run on a device.** Still true, and it is now only the trace log. `save-picture`
+   and the export/import buttons are the other untested-on-a-device paths.
 3. **`push`/`pull` have never run against a real remote.** Every test uses `DiskGitHub`, which is real
    git on disk — the JGit code is exercised, the network and the key are not.
 4. **§13b.6 token separation** needs a GitHub App registration; it cannot be built from inside.

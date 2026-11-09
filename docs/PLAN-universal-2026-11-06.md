@@ -2136,7 +2136,52 @@ file the person can see with their eyes is exactly the failure this codebase kee
 no-op that reports success. The first draft of this plan recommended `MediaStore`; asking whether it
 would carry a file *between apps* is what showed the recommendation was wrong.
 
-### 13e.3 The decision: one folder, `Download/Muffy/`, granted once, via SAF
+### 13e.3 REVERSED 2026-11-09 — the tools are removed, not made true
+
+**The operator, 2026-11-09:** *"I don't see it as critical functionality and we already have upload and
+download + button options for the user."*
+
+**They are right, and the measurements above are the argument.** Everything in 13e.3–13e.6 is the cost of
+making the three verbs *honest*, and the reason they needed making honest is that they were built on a read
+that does not work: a `MediaStore` query with no storage permission answers **only the app's own rows**
+(13e.2), so today `downloads` lists the app's own trace logs and **silently omits the screenshot the person
+just saved from Chrome**. A tool whose answer is a lie about a folder the person can see with their eyes is
+the exact failure this codebase keeps removing. The choice was therefore never "keep it cheap" — it was
+"spend a permission prompt, a SAF copy-in/copy-out layer, a virtual second root in the path rules and a
+cross-project channel (13e.5) to make a convenience true, **or remove the convenience**".
+
+**The decision: remove it.** What goes:
+
+| removed | where |
+|---|---|
+| `PhoneDownloads` + `MediaStoreDownloads` | `Downloads.kt` (202 lines) |
+| `downloads`, `download`, `upload` | `AgentTools.kt` — the three verbs, their spec entries and their refusals (~200 lines) |
+| the `phone:` parameter and its two wirings | `Agent` → `AgentRunner` → `AgentTools`, `AgentWiring` |
+| `DownloadsTest` | 315 lines |
+| **all of 13e.3–13e.6** | the SAF grant, the first-run prompt, the virtual `Downloads` root, the cross-project channel |
+
+**What stays, and why the name is not the same thing:** `DownloadsSink` writes **the app's own**
+`trace.log` through `MediaStore`, and it works *because* the app owns the rows it writes — the same
+ownership rule that makes reading other apps' files impossible. It is how every trace log this project has
+been diagnosed from arrives, and it is not an agent capability at all. `Export.kt` and `Imports.kt` — the
+person's copy-out and bring-in, behind buttons — are likewise untouched: they are the person's acts, and
+they are the replacement for the one capability that is genuinely lost.
+
+**The one real loss, and its replacement.** An agent can no longer read a log another app wrote. The person
+brings it in with the button that already exists (`Imports`), and from then on every tool reads it, `grep`
+searches it, and `move`/`commit` work on it. The capability does not disappear; it moves to the person, who
+is the one who knows which file should cross the boundary — which is also the rule the rest of the app
+follows for anything outside the account.
+
+**`Download/Muffy/` is not made.** No SAF grant is ever asked for, so §13e.6's "grant prompt is a new
+first-run step" and "the app must work with the grant refused" both stop existing rather than being solved.
+A folder in every worktree that project A's agent and project B's agent can both read (13e.5) is a real
+channel bought for a convenience nothing measured a need for.
+
+**Nothing is commented out.** The verbs are deleted; git holds them. `git revert` of the removal commit is
+the honest "attach it back later", and it cannot rot the way a commented-out call site does.
+
+### 13e.3 (as it was) The decision: one folder, `Download/Muffy/`, granted once, via SAF
 
 **A `DocumentFile` tree, not a `MediaStore` cursor.** The person picks `Download/Muffy/` once (the root
 is blocked, the subfolder is not), the grant is persisted, and from then on the app holds a real
