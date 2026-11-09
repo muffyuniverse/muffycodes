@@ -804,6 +804,13 @@ class Workspace(val accountDir: File) {
      */
     fun appHold(file: File): Hold {
         if (isAppFlag(file) || looksSecret(file.name)) return Hold.APP
+        // **The template exemplar is held as a file**, which is the one thing inside `shared/` the app
+        // must not let anybody change: it is the seed every other template is copied from, so a copy
+        // that was edited is fine and the seed that was edited is a bug report.
+        //
+        // A *path* rather than a lock-list flag, because a flag can be cleared and this must not be able
+        // to be: the operator's rule is that a system lock binds the person too.
+        if (relative(file)?.joinToString("/") == SCHEMA_EXAMPLE_PATH) return Hold.APP
         // **The whole branch inherits, not just the folder.** The operator, looking at `agent/`:
         // "and remember that whole subbranch should inherit them".
         //
@@ -1572,6 +1579,19 @@ class Workspace(val accountDir: File) {
     fun isAgentLocked(file: File): Boolean {
         if (isLocked(file)) return true
         val path = relative(file)?.let(::pathString) ?: return false
+        // **A folder lock is not a subtree lock.** The operator, 2026-11-09: *"we just need to change
+        // how lock works, so that locking a folder doesnt lock its content but just blocks it from being
+        // deleted or renamed."* So this tests the path itself and nothing above it: a file is locked
+        // because somebody locked that file, and a folder is locked because somebody wants it to keep
+        // existing and keep its name.
+        //
+        // **That is what makes the templates work.** `shared/` and `shared/schemas/` are system locked —
+        // the app's functionality depends on them — while `chat.json` inside stays a file both the
+        // person and an agent may edit. One lock stack, two levels, and a folder is not a permission.
+        //
+        // It reverses Report 9's prefix rule deliberately: that rule was a workaround for a folder lock
+        // meaning "read-only subtree", and the workaround is what needed the folder to be a permission.
+        //
         // **`assets/` is the person's, and it is a folder rule rather than a lock.**
         //
         // It is the one folder whose contents cost money to store — LFS bandwidth and quota are
@@ -1588,10 +1608,7 @@ class Workspace(val accountDir: File) {
         // which is what makes it a rule about a folder rather than about a string: `assets-old/` is
         // not `assets/`, and a project *named* `assets` is not a folder inside one.
         if (insideAssets(file)) return true
-        val locked = locked()
-        if (locked.isEmpty()) return false
-        if (path in locked) return true
-        return locked.any { it.isNotEmpty() && path.startsWith("$it/") }
+        return path in locked()
     }
 
     /**
@@ -1823,20 +1840,40 @@ class Workspace(val accountDir: File) {
         const val STATE_DIR = ".muffy"
 
         /**
-         * The one project the person cannot delete, rename or sync away.
+         * Where the exemplar template lives, account-relative.
          *
-         * **A project, not a hidden folder.** It holds the settings that belong to the whole
-         * account rather than to any one project — the system prompt, and whatever else grows a
-         * scope wider than a project — and the report that asked for it said the right thing:
-         * "system prompt is outdated. Another reason why it should be an editable file inside
-         * system project instead of a hidden one". A hidden file is one nobody edits, and a prompt
-         * nobody edits goes stale and stays stale.
-         *
-         * It is a **local** project: no remote, so nothing it holds is ever pushed. The guards
-         * that keep it are in [isSystem], and they are case-insensitive because a filesystem that
-         * folds case would otherwise offer a second `System` that can be deleted.
+         * Beside [SYSTEM_PROJECT] rather than in `Schemas`, because this is the *lock* rule and
+         * `Workspace` is where locks live — the folder's own code must not be able to disagree with the
+         * thing that protects it.
          */
-        const val SYSTEM_PROJECT = "system"
+        const val SCHEMA_EXAMPLE_PATH = "shared/schemas/example.json"
+
+        /**
+         * **The folder the app keeps its own files in, and it is `shared` rather than `system`.**
+         *
+         * The operator, 2026-11-09: *"we can actually rename system into shared, and make it an ordinary
+         * folder with some system locked files."* The name was never the rule — [isSystemPath] is — so
+         * the rename costs nothing and removes a second meaning of the word "system" from a codebase
+         * that also talks about the phone's system screens and the app's own system locks.
+         *
+         * It is still system locked: the app's functionality depends on this folder being where it is,
+         * which is the operator's own reason. What changed is what a *folder* lock means — see
+         * [isAgentLocked].
+         */
+        /**
+         * The folder the person cannot delete, rename or sync away.
+         *
+         * **A folder, not a hidden one.** It holds what belongs to the whole account rather than to any
+         * one project — the system prompt, the request templates, and whatever else grows a scope wider
+         * than a project — and the report that asked for it said the right thing: *"system prompt is
+         * outdated. Another reason why it should be an editable file inside system project instead of a
+         * hidden one"*. A hidden file is one nobody edits, and a prompt nobody edits goes stale.
+         *
+         * It is **not a project**: no repository, no remote, and nothing it holds is ever pushed. The
+         * guards that keep it are in [isSystemPath], and they are case-insensitive because a filesystem
+         * that folds case would otherwise offer a second `Shared` that can be deleted.
+         */
+        const val SYSTEM_PROJECT = "shared"
 
         /**
          * How deep a branch's folder can be below `.muffy/worktrees/`.

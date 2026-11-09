@@ -33,24 +33,24 @@ class WorkspaceTest {
         root.deleteRecursively()
     }
 
-    // ---- the system folder is not a project (§13f) ----------------------------
+    // ---- the shared folder is not a project (§13f) ----------------------------
 
     @Test
-    fun `the system folder is not a project, even when it holds a repository`() {
+    fun `the shared folder is not a project, even when it holds a repository`() {
         // **Both halves, because the second is the one that can regress.** An account made before this
-        // change can hold `system/.git` - the old rule made the folder a project, so saving a file in it
+        // change can hold `shared/.git` - the old rule made the folder a project, so saving a file in it
         // made a repository. `isProjectFolder` states the rule rather than inferring it from the folder's
         // contents, or the leftover would turn it back into the "dangling" row the operator reported.
         workspace.ensure()
-        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
-        assertTrue("the folder is made by ensure()", system.isDirectory)
-        assertFalse("and it is not in the project list", workspace.projectNames().contains("system"))
-        assertFalse("nor a project by the predicate", workspace.isProjectFolder(system))
+        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        assertTrue("the folder is made by ensure()", shared.isDirectory)
+        assertFalse("and it is not in the project list", workspace.projectNames().contains("shared"))
+        assertFalse("nor a project by the predicate", workspace.isProjectFolder(shared))
 
         // A repository inside it changes nothing, because the name decides.
-        File(system, ".git").mkdirs()
-        assertFalse("still not a project with a .git", workspace.isProjectFolder(system))
-        assertNull("and a path through it belongs to no project", workspace.projectOf(File(system, "README.md")))
+        File(shared, ".git").mkdirs()
+        assertFalse("still not a project with a .git", workspace.isProjectFolder(shared))
+        assertNull("and a path through it belongs to no project", workspace.projectOf(File(shared, "README.md")))
     }
 
     @Test
@@ -82,14 +82,14 @@ class WorkspaceTest {
         val lines = File(proj, ".git/info/exclude").readLines()
         assertEquals(
             "and the line for it was added once, after the ones already there",
-            listOf("agent/", ".muffy/", "requests/", "system"),
+            listOf("agent/", ".muffy/", "requests/", "shared"),
             lines,
         )
         // **Idempotent**, because this runs on every refresh: a second pass must not append again.
         workspace.linkSystem(proj)
         assertEquals(
             "a second refresh adds nothing",
-            listOf("agent/", ".muffy/", "requests/", "system"),
+            listOf("agent/", ".muffy/", "requests/", "shared"),
             File(proj, ".git/info/exclude").readLines(),
         )
     }
@@ -140,7 +140,7 @@ class WorkspaceTest {
     @Test
     fun `every tree gets the link, including a folder a person already made`() {
         workspace.ensure()
-        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
         val proj = workspace.projectDir("Shopping")
         proj.mkdirs()
         File(proj, ".git").mkdirs()
@@ -211,12 +211,12 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `deleting a project does not empty the system folder it links to`() {
+    fun `deleting a project does not empty the shared folder it links to`() {
         // **The defect the link would have introduced.** `File.deleteRecursively()` follows a symlink, so
-        // deleting a project would walk into the account's system folder and delete its contents first.
+        // deleting a project would walk into the account's shared folder and delete its contents first.
         workspace.ensure()
-        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
-        val readme = File(system, Workspace.README)
+        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val readme = File(shared, Workspace.README)
         assertTrue("the folder has something in it", readme.isFile)
         val proj = workspace.projectDir("Shopping")
         proj.mkdirs()
@@ -228,8 +228,8 @@ class WorkspaceTest {
 
         assertTrue("the project went: $deleted", deleted.isSuccess)
         assertFalse("its folder is gone", proj.exists())
-        assertTrue("and the system folder's readme survived", readme.isFile)
-        assertTrue("the folder itself survived", system.isDirectory)
+        assertTrue("and the shared folder's readme survived", readme.isFile)
+        assertTrue("the folder itself survived", shared.isDirectory)
     }
 
     // ---- which branch a path is on (§13d) ------------------------------------
@@ -280,7 +280,7 @@ class WorkspaceTest {
     private fun onboardingDir() = File(File(workspace.accountDir, Workspace.SYSTEM_PROJECT), Onboarding.DIR)
 
     @Test
-    fun `the onboarding pages are written into the system project`() {
+    fun `the onboarding pages are written into the shared folder`() {
         workspace.ensure()
 
         val dir = onboardingDir()
@@ -721,7 +721,7 @@ class WorkspaceTest {
             // the account's own folder (§13f) - and `system/` would match nothing, because a symlink
             // is not a directory. Measured: with the slash the link stayed untracked.
             "the app's own lines, and nothing else",
-            listOf("agent/", ".muffy/", "requests/", "system"),
+            listOf("agent/", ".muffy/", "requests/", "shared"),
             File(project, ".git/info/exclude")
                 .readLines()
                 .filter { it.isNotBlank() && !it.startsWith("#") },
@@ -794,30 +794,25 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `a lock on a folder covers what is inside it`() {
-        // The bug this is for: locking a folder protected the folder and nothing in it, so
-        // the files a person had just frozen were all still editable.
+    fun `a lock on a folder protects the folder, and its contents stay editable`() {
+        // **The rule changed on purpose.** It used to say a folder lock covered everything inside it, and
+        // that was a workaround: the same rule is what stopped `shared/` being an ordinary folder, because
+        // a system-locked folder would have made every template in it read-only.
+        //
+        // The operator, 2026-11-09: *"locking a folder doesnt lock its content but just blocks it from
+        // being deleted or renamed."* So a folder is an existence, not a permission — and the files a
+        // person wants frozen are the files they lock.
         val folder = File(workspace.accountDir, "drafts")
         folder.mkdirs()
         val inside = File(folder, "milk.txt")
         workspace.write(inside, "two litres")
         lock("drafts")
 
-        // **A person's lock binds the agent, not the person** - the operator's rule: "system locks
-        // restrict both users and agents, and user locks restrict agents (not users themselves!)".
-        // So `isAgentLocked` is true (the agent may not touch it) and `isLocked` is false (the person
-        // may, which is how they can still edit and unlock what they locked).
-        assertTrue("the file inside is held against the agent", workspace.isAgentLocked(inside))
-        assertFalse("but not against the person who set the lock", workspace.isLocked(inside))
-        // The agent's funnel refuses, and that is the rule that matters here.
-        assertEquals(
-            "the agent is told why",
-            "\"milk.txt\" is locked, so it cannot be changed",
-            workspace.agentLockProblem(inside),
-        )
-        // The person can still write it, because a lock they set is an instruction to the agent.
-        assertTrue("the person may still write it", workspace.write(inside, "three litres"))
-        assertEquals("and the text changed", "three litres", inside.readText())
+        // **The folder itself is held against the agent**: it may not delete it or move it.
+        assertTrue("the folder is held", workspace.isAgentLocked(folder))
+        // **And what is inside is not.** A person who wants a file frozen locks the file.
+        assertFalse("the file inside is not covered", workspace.isAgentLocked(inside))
+        assertEquals("so the agent may write it", null, workspace.agentLockProblem(inside))
     }
 
     @Test
@@ -1005,8 +1000,8 @@ class WorkspaceTest {
         // one project", and the obvious candidate — the folder `muffycodes_data` — is exactly the
         // one that must NOT be locked, because every project has one and the agent writes its notes
         // there. So the rule is the first path segment, which is the project.
-        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT).apply { mkdirs() }
-        val deep = File(File(File(system, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
+        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT).apply { mkdirs() }
+        val deep = File(File(File(shared, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
             parentFile.mkdirs()
             writeText("you are an agent\n")
         }

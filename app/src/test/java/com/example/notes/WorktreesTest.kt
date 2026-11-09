@@ -138,7 +138,7 @@ class WorktreesTest {
         )
         assertTrue(
             "and the project list does not see it: ${workspace.projectNames()}",
-            workspace.projectNames() == listOf("Shopping") || workspace.projectNames() == listOf("Shopping", "system"),
+            workspace.projectNames() == listOf("Shopping") || workspace.projectNames() == listOf("Shopping", "shared"),
         )
     }
 

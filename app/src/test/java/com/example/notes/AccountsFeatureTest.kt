@@ -115,7 +115,7 @@ class AccountsFeatureTest : FeatureTest() {
         // project, because that is where the system prompt is written and a prompt with nowhere to
         // live is one nobody can edit — and `.muffy/`, the app's own flags, which report 28 asked to
         // stop hiding. Folders sort by lowercase name, so the dot comes first.
-        assertEquals("and no project of their own yet", listOf(".muffy", "system"), scene.names())
+        assertEquals("and no project of their own yet", listOf(".muffy", "shared"), scene.names())
     }
 
     @Test

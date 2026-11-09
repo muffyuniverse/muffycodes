@@ -34,7 +34,7 @@ class VisibilityFeatureTest : FeatureTest() {
         // Folders sort before files, then by name, so it lands after `Shopping`.
         // **`.muffy` is a folder at the root now**, because report 28 asked for the app's own things
         // to be visible and locked rather than hidden. Folders sort first by lowercase name.
-        assertEquals(listOf(".muffy", "loose", "Shopping", "system", "notes.txt"), scene.names())
+        assertEquals(listOf(".muffy", "loose", "Shopping", "shared", "notes.txt"), scene.names())
     }
 
     @Test
@@ -58,7 +58,7 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.viewModel.refresh()
 
         // Folders first, then files, each by lowercase name - so `.muffy` comes before `system`.
-        assertEquals(listOf(".muffy", "system", ".anything", "shown.txt"), scene.names())
+        assertEquals(listOf(".muffy", "shared", ".anything", "shown.txt"), scene.names())
     }
 
     @Test
@@ -133,7 +133,7 @@ class VisibilityFeatureTest : FeatureTest() {
 
         // **Sorted case-insensitively, which is the ordering rule** — and the names keep their
         // capitals now, because the app no longer lowercases what a person typed.
-        assertEquals(listOf(".muffy", "system", "zebra", "apple.txt", "Milk.txt"), scene.names())
+        assertEquals(listOf(".muffy", "shared", "zebra", "apple.txt", "Milk.txt"), scene.names())
     }
 
     @Test

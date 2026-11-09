@@ -40,7 +40,7 @@ class McpTestTools {
     fun setUp() {
         ws = Workspace(temp.root)
         ws.projectDir("shopping").mkdirs()
-        ws.projectDir("system").mkdirs()
+        ws.projectDir("notes").mkdirs()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         log = AgentLog.open(ws.projectDir("shopping"))
         credentials = MemoryCredentials()
@@ -107,10 +107,10 @@ class McpTestTools {
     fun `a server is found in the system project when the project has no article`() {
         // **The system project is the shared set.** A person writes a server article once and every project
         // can use it, which is the whole reason `mcp/` exists in both places.
-        article("system", "shared")
+        article("notes", "notes")
         fake.tools = listOf(Mcp.Tool("ping", "Answers pong", null))
 
-        val answer = tools().run(call("""{"server":"shared"}"""))
+        val answer = tools().run(call("""{"server":"notes"}"""))
 
         assertTrue(answer, answer.startsWith("0\n"))
         assertTrue(answer, answer.contains("system/mcp/shared.md"))
@@ -120,7 +120,7 @@ class McpTestTools {
     fun `the project's own article wins over the system's`() {
         // **The nearer file applies**, the same rule the prompt layering follows. A project that describes a
         // server differently — a test account, a local endpoint — must not have to edit the shared article.
-        article("system", "linear", url = "https://shared.example.com/mcp")
+        article("notes", "linear", url = "https://notes.example.com/mcp")
         article("shopping", "linear", url = "https://mine.example.com/mcp")
         fake.tools = listOf(Mcp.Tool("list_issues", "List", null))
 
@@ -135,7 +135,7 @@ class McpTestTools {
         // **A list rather than a hunt.** "No such server" alone leaves a person guessing whether they spelled
         // it wrong or wrote the file in the wrong project.
         article("shopping", "linear")
-        article("system", "sentry")
+        article("notes", "sentry")
 
         val answer = tools().run(call("""{"server":"linearr"}"""))
 

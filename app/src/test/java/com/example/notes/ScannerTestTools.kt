@@ -37,7 +37,7 @@ class ScannerTestTools {
     fun setUp() {
         ws = Workspace(temp.root)
         ws.projectDir("shopping").mkdirs()
-        ws.projectDir("system").mkdirs()
+        ws.projectDir("notes").mkdirs()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         log = AgentLog.open(ws.projectDir("shopping"))
     }

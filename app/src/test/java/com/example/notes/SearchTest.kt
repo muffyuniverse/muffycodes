@@ -77,15 +77,16 @@ class SearchTest {
     }
 
     @Test
-    fun `the system project is searched too, because the core articles live there`() {
-        // The system project is a project like any other to a walk of the account, which is what
-        // makes the core `wiki/` findable without a second rule saying so.
+    fun `the shared folder is searched too, because the core articles live there`() {
+        // **`shared/` is a folder like any other to a walk of the account**, which is what makes the core
+        // `wiki/` findable without a second rule saying so — and that is the operator's point about
+        // making it an ordinary folder: the search does not need to know it is special.
         write("shopping", "notes.txt", "milk\n")
-        write("system", "muffycodes_data/wiki/retries.md", "exponential backoff, capped at 90 s\n")
+        write("shared", "muffycodes_data/wiki/retries.md", "exponential backoff, capped at 90 s\n")
 
         val answer = tools().run(call("""{"query":"exponential backoff"}"""))
 
-        assertTrue("found: $answer", answer.contains("system/muffycodes_data/wiki/retries.md"))
+        assertTrue("found: $answer", answer.contains("shared/muffycodes_data/wiki/retries.md"))
     }
 
     // ---- `scope` is a pattern over the path ---------------------------------

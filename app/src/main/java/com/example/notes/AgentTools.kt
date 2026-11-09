@@ -3202,13 +3202,20 @@ class AgentTools(
         )
     }
 
-    /** Where articles are looked for, nearest first: this project, then the system project. */
+    /**
+     * Where articles are looked for, nearest first: this project, then the account's shared folder.
+     *
+     * **`projectDir` on the shared name, which is still how the folder is addressed.** It is not a
+     * project any more — `projectAt` answers null for it — but `projectDir` is the one function that
+     * names a top-level folder of the account, and inventing a second one for `shared/` would be two
+     * ways to say the same path.
+     */
     private fun articleDirs(): List<File> {
-        val system = ws.projectDir(Workspace.SYSTEM_PROJECT)
+        val shared = ws.projectDir(Workspace.SYSTEM_PROJECT)
         return if (project.equals(Workspace.SYSTEM_PROJECT, ignoreCase = true)) {
             listOf(projectDir)
         } else {
-            listOf(projectDir, system)
+            listOf(projectDir, shared)
         }
     }
 

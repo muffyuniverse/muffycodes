@@ -561,15 +561,15 @@ class ProjectsFeatureTest : FeatureTest() {
         // no repository, so the row promised a history, a status and a remote that did not exist - a
         // dangling row. It is a folder at the account root, it is listed as an entry there, and every
         // project can reach it through a link.
-        assertFalse("no project row", scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) })
-        assertTrue("but it is a folder in the root listing", scene.names().contains("system"))
+        assertFalse("no project row", scene.viewModel.projectNames.any { it.equals("shared", ignoreCase = true) })
+        assertTrue("but it is a folder in the root listing", scene.names().contains("shared"))
         assertTrue(
             "and the folder is really there",
             File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
         )
 
         scene.viewModel.message = null
-        scene.viewModel.deleteProject("system")
+        scene.viewModel.deleteProject("shared")
         assertTrue("and it cannot be deleted", scene.viewModel.message != null)
         assertTrue(
             "the folder is still there",

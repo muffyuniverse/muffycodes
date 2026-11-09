@@ -155,7 +155,7 @@ data class Choice(
     val forget: Long? = null,
     /** Where the app trims the context itself. */
     val trim: Long? = null,
-
+) {
     /** True when this row says nothing, which is the inheritance — see [Connection.wroteNothing]. */
     fun wroteNothing(): Boolean =
         model.isBlank() && effort.isBlank() && target == null && forget == null && trim == null
