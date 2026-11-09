@@ -565,26 +565,15 @@ class SettingsStore(context: Context, name: String = "settings") {
      * would kill working requests at the busiest moment. The cost of waiting too long is a slow
      * failure; the cost of not waiting long enough is refusing an answer that was about to begin.
      *
-     * **The two old numbers are migrated, not dropped.** A person who had set the connection wait to
-     * 5 minutes and the gap to 30 seconds gets the larger of the two, because either one alone would
-     * be a number that stops something their own setting allowed: taking the gap would kill the
-     * first packet early, and taking the ack would cut a slow stream that used to be fine.
+     * **One setting and one key.** It used to be two, and a build that carried the two old numbers
+     * forward was a build with a reader for a format nothing writes any more — which is what "no
+     * migration" forbids. A phone finds its own key or the default, and either answer is a number a
+     * person can read on the row and change.
      */
     var responseSeconds: Int by mutableStateOf(
-        prefs.getInt(KEY_RESPONSE, migratedResponseSeconds())
+        prefs.getInt(KEY_RESPONSE, DEFAULT_RESPONSE_SECONDS)
     )
         private set
-
-    /**
-     * The number a phone that had the two old settings should start with.
-     *
-     * **The larger of the two, and the literals are the old defaults on purpose.** They are not
-     * `DEFAULT_*` constants any more because those constants describe a setting that no longer
-     * exists; what this needs is the number a phone without them would have had, which is history
-     * rather than configuration. Taking the smaller would narrow a setting the person had widened.
-     */
-    private fun migratedResponseSeconds(): Int =
-        maxOf(prefs.getInt(KEY_ACK, 90), prefs.getInt(KEY_GAP, 120))
 
     /** Sets the response wait, clamped. */
     fun keepResponse(seconds: Int) {
@@ -611,12 +600,10 @@ class SettingsStore(context: Context, name: String = "settings") {
      *
      * **In tokens**, the same unit as every limit beside it. It was characters, which made the row a
      * person types and the wall it is clamped by two different units — 20,000 characters had to be
-     * converted in the head to compare with a 128k window. A number from before this change is
-     * converted once, so nobody's setting changes meaning underneath them.
+     * converted in the head to compare with a 128k window. The key changed with the unit, so a stored
+     * character count is never read as a token count: it has no reader at all.
      */
-    var maxResult: Int by mutableStateOf(
-        prefs.getInt(KEY_MAX_RESULT_TOKENS, -1).takeIf { it > 0 } ?: migratedResult(),
-    )
+    var maxResult: Int by mutableStateOf(prefs.getInt(KEY_MAX_RESULT_TOKENS, DEFAULT_MAX_RESULT))
         private set
 
     /** Sets the longest result, in tokens. Never zero: a tool that answers with nothing is a hang. */
@@ -626,19 +613,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         maxResult = clean
         prefs.edit().putInt(KEY_MAX_RESULT_TOKENS, clean).apply()
         Trace.said("one result may carry about $clean tokens")
-    }
-
-    /**
-     * The result limit a build before tokens stored, as tokens.
-     *
-     * The old key held **characters**, so reading it as tokens would multiply every allowance by
-     * 3.5 in one upgrade — a person's 20,000 became a 70,000-character result entering the
-     * conversation. Dividing by the estimate's own ratio keeps the number they chose.
-     */
-    private fun migratedResult(): Int {
-        val old = prefs.getInt(KEY_MAX_RESULT, 0)
-        if (old <= 0) return DEFAULT_MAX_RESULT
-        return (old / ContextBudget.BYTES_PER_TOKEN).toInt().coerceIn(MIN_MAX_RESULT, MAX_MAX_RESULT)
     }
 
     /**
@@ -776,46 +750,17 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_HARD = "agent_hard_tokens"
     const val KEY_TARGET = "agent_target_tokens"
 
-    /** How long one answer may take, in minutes, and how much one result may carry. */
-    /**
-     * **The key is renamed with the unit, and that is the whole migration.**
-     *
-     * The value used to be minutes under `agent_timeout_minutes`. Reading that number as seconds
-     * would turn a stored 4 into a four-second wait - a phone that retried a long turn for ever,
-     * which is the failure the setting exists to prevent. A new key means the old number is never
-     * read as the new unit: this build finds no value under its own key and writes the default.
-     *
-     * That is not compatibility machinery. Nothing here reads the old key, nothing migrates, and
-     * no code path knows a previous release existed. It is one key that was renamed because the
-     * thing it stores changed meaning.
-     */
-
-    /**
-     * The two clocks streaming made out of one.
-     *
-     * **New keys rather than a migration.** Nothing runs an older build of this app, so a key that
-     * only an older build wrote is a key with no reader — and the defaults below are what a person
-     * who has never set either should get.
-     */
+    /** How tall one chat bubble may be, in lines. `0` is "no cap". */
     const val KEY_BUBBLE_LINES = "chat_bubble_lines"
     const val DEFAULT_BUBBLE_LINES = 0
     const val MAX_BUBBLE_LINES = 200
 
-    /**
-     * **The two old keys are still read**, by the migration in [responseSeconds], and never written
-     * again. They stay here so a phone that had them set keeps its number: a setting that silently
-     * reverted to a default on upgrade is the app changing a person's mind for them.
-     */
-    const val KEY_ACK = "agent_ack_seconds"
-    const val KEY_GAP = "agent_gap_seconds"
     const val KEY_RESPONSE = "agent_response_seconds"
 
-    /** Long enough for a queue and a buffered first delta; see [responseSeconds]. */
     /**
-     * **The default is the old gap, not the old ack**, and the reason is what the number now does:
-     * it also bounds the gaps *inside* an answer, so a ninety-second default would cut a model that
-     * paused for a minute and a half mid-sentence - which the old split allowed. Two minutes keeps
-     * every answer the old settings allowed and still catches a dead connection quickly.
+     * **Two minutes.** It bounds the first packet and every gap after it, so it must be wide enough
+     * for an upstream that is queueing and a model that pauses mid-sentence — and still narrow
+     * enough that a dead connection is caught. See [responseSeconds].
      */
     /** A page: long enough for a slow site, short enough that a turn is not lost to one. */
     const val DEFAULT_BROWSE_SECONDS = 30
@@ -882,22 +827,11 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_POLL = "agent_poll_seconds"
     const val KEY_FOREGROUND = "agent_foreground_seconds"
     const val KEY_BACKGROUND = "agent_background_seconds"
-    /** Characters, from a build before the row was in tokens. Read once, by [migratedResult]. */
-    const val KEY_MAX_RESULT = "agent_max_result"
 
     /** The result limit in tokens: the number the row shows and the agent is held to. */
     const val KEY_MAX_RESULT_TOKENS = "agent_max_result_tokens"
     const val KEY_SESSION_TOKENS = "agent_session_tokens"
 
-    /**
-     * The key an older build wrote, read once for the migration.
-     *
-     * It held megabytes, and the new limit is tokens. There is no honest conversion - a megabyte of
-     * this file is a number of tokens that depends on what was written - so a person who had set a
-     * limit gets the default rather than a figure the app invented. Keeping it would be a limit
-     * nobody chose, which is worse than the default that was asked for.
-     */
-    const val KEY_SESSION_MB = "agent_session_mb"
 
     /**
      * A million tokens. Past this the number is larger than any window this app can be pointed at,
@@ -986,8 +920,6 @@ class SettingsStore(context: Context, name: String = "settings") {
 
         /** A week. Past this a reminder is a message from the past. */
         const val MAX_REMIND_MINUTES = 10_080
-
-        /** The two keys older builds wrote; read once, then ignored. */
 
         /** The number a typed field means. */
         fun parseLength(text: String): Int = text.trim().toIntOrNull()?.coerceAtLeast(0) ?: 0

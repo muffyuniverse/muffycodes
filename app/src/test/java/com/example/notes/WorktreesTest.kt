@@ -115,7 +115,7 @@ class WorktreesTest {
     fun `main has no folder of its own, because the project root is its tree`() {
         // **A fact about git, not a shortcut.** `git worktree list` always lists the main tree, there is
         // no verb to relocate it, and making the root bare stops it being a tree at all — so main stays
-        // where it is and no existing project needs migrating.
+        // where it is.
         val dir = projectWithBranch()
 
         assertEquals("main is the project folder", dir, trees.dirOf("Shopping", "main"))

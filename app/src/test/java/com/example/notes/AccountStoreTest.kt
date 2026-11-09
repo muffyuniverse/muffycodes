@@ -179,10 +179,10 @@ class AccountStoreTest {
     }
 
     @Test
-    fun `an account written before there were hosts is a GitHub account`() {
-        // **A default, not a migration.** Every account that existed before this field was made by
-        // GitHub's door, so a file with no `host` key describes a GitHub account — reading it as
-        // "unknown" would refuse the key that signed it in.
+    fun `an account with no host is a GitHub account`() {
+        // **The default, and it is a statement of fact rather than a guess.** GitHub is the one host
+        // this phone signs in to without being given an address, so a file with no `host` key
+        // describes that account. Reading it as "unknown" would refuse the key that signed it in.
         store.save(Account("muffyuniverse", "M", "m@example.com"))
         val details = File(store.stateDir("muffyuniverse"), "account.json")
         details.writeText("""{"login":"muffyuniverse","commitName":"M","commitEmail":"m@example.com"}""")

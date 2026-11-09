@@ -28,11 +28,11 @@ class ModelConfigTest {
     }
 
     /**
-     * A file with a tag list and a provider in it — **what the previous build wrote, byte for byte.**
+     * A file with keys this build does not know: a `provider` word and a list of endpoints.
      *
-     * Kept as the fixture for the rule that matters now: both keys are read and dropped. A file on
-     * somebody's phone still says `"provider": "deepinfra/fp8"` and still lists its endpoints, and the app
-     * has to load it without a migration and without believing either word.
+     * Kept as the fixture for the rule that matters: they are **not read and not refused**. A hand-edited
+     * file may carry anything, and a config the app cannot open is worse than one with a word in it that
+     * nothing routes by.
      */
     private fun shipped(): String = """
         {
@@ -53,9 +53,8 @@ class ModelConfigTest {
 
         assertEquals("the model", ModelConfigFile.DEFAULT_MODEL, parsed.active.model)
         assertEquals("effort", "high", parsed.active.effort)
-        // **The tag list and the provider word are read and dropped.** They are OpenRouter's routing, the
-        // address is the upstream now, and a file the previous build wrote has to keep loading — a
-        // migration for a word nobody routes by would be work spent on nothing. So the whole parsed
+        // **The tag list and the provider word are neither read nor refused.** The address is the
+        // upstream, and a word nothing routes by is not worth refusing a file over. So the whole parsed
         // model is compared with the three fields that exist: anything the reader had kept would show up
         // as a difference here rather than as a silent extra.
         assertEquals(
@@ -120,30 +119,6 @@ class ModelConfigTest {
         val problem = ModelConfigFile.parse(text).exceptionOrNull()?.message.orEmpty()
         assertTrue("it names the field: $problem", problem.contains("baseUrl"))
         assertTrue("and the shape: $problem", problem.contains("https://"))
-    }
-
-    @Test
-    fun `a file that still carries a model's window is read, and the number is ignored`() {
-        // **The keys are gone from what the app writes**, because nothing clamps to them any more
-        // (see `ContextBudget`). A file the previous build wrote still has them, and the honest
-        // treatment is to read the rest of it and drop the two: a migration for a number nobody uses
-        // would be work spent on a value that has no reader.
-        val withWindow = ModelConfigFile.default().let { config ->
-            config.copy(active = config.active)
-        }
-        ModelConfigFile.write(account, withWindow)
-        val written = ModelConfigFile.file(account).readText()
-        assertFalse("the app writes no window", written.contains("contextLength"))
-        assertFalse("nor a reply reserve", written.contains("maxOutput"))
-
-        // And a file that has them — this one was written by hand — still loads.
-        ModelConfigFile.file(account).writeText(
-            written.replace("\"effort\"", "\"contextLength\": 1048576, \"maxOutput\": 393216, \"effort\""),
-        )
-        val old = ModelConfigFile.load(account).getOrThrow()
-
-        assertEquals("the model it names", withWindow.active.model, old.active.model)
-        assertEquals("and the effort", withWindow.active.effort, old.active.effort)
     }
 
     @Test

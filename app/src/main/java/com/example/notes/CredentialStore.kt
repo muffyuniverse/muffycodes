@@ -837,13 +837,12 @@ class CredentialStore(context: Context) : Credentials {
                 target = if (json.has("target")) json.optLong("target") else null,
                 forget = if (json.has("forget")) json.optLong("forget") else null,
                 trim = if (json.has("trim")) json.optLong("trim") else null,
-                // **`provider` is read and dropped when present**, like the tag lists in
-                // `model_conf.json`: a row written by the previous build still loads, and the word it
-                // carries is no longer a routing instruction the app can honour — the address is the
-                // upstream, and a sentence that wants the word asks `providerOf`.
+                // `provider` is not among the fields read: the address is the upstream now, and a
+                // sentence that wants the word asks `providerOf`. A row carrying one still loads.
             )
-            // **A row with nothing in it is not a row.** It can only be there from an older version of
-            // this file, and reading it as a choice would let a blank row shadow the parent's model.
+            // **A row with nothing in it is not a row.** Reading it as a choice would let a blank row
+            // shadow the parent's model, and a person would see "nothing chosen" above a model they did
+            // choose.
             if (choice.wroteNothing()) null else choice
         } catch (t: Throwable) {
             null

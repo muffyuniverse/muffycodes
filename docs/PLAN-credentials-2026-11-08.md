@@ -1013,6 +1013,65 @@ that has signed in now lists **`~local` as a row too**, which is the rule workin
 **L1 and L2 before L3**, because the transfer has to refuse a connected project entering `~local`, and that
 rule is L2's. **L3 before L4**, so the menu has something to call.
 
+## 3.10 The chat reads paths: pictures draw, links open
+
+The operator, 2026-11-09:
+
+> *"and dont kill app links altogether. I want for agent to give me path links to open files in editor right
+> from the chat messages"* … *"And I want for agent to be able to insert pictures in his messages by using
+> their file paths. Agent's messages are rendered in markdown so it should probably work - add this to the
+> plan as well"*
+
+### What is true today, measured (§3.10.1)
+
+- **`MarkdownBody` already draws `![alt](address)`** and resolves it against a `baseDir`: a relative address
+  is a file beside the document, an absolute one and a `file://` one are taken as given, and an `http(s)` one
+  is refused by name (`resolvePicture`, `Markdown.kt:707`). A picture that cannot be read says so in words.
+- **`PageBody` passes neither `baseDir` nor `onLink`** (`AgentChatScreen.kt:1207`), so every picture in an
+  agent's message reads *"could not be read here"* today, and every `[words](address)` in one is plain text.
+  The renderer is ready; the chat is not wired to it.
+- **The agent already produces exactly that address.** `shot` writes a PNG to `agent/browser/shot-<t>.png`
+  and its answer is the path **relative to the worktree** (`file.relativeTo(projectDir)`); `look` reads paths
+  the same way. So the shape a picture needs is already the shape the tools answer with.
+- **A path in a document does nothing**: `followLink`'s third branch is `Trace.note("link-ignored")`.
+- **`Workspace.relative` answers null outside the account** (`Workspace.kt:949`), and `openEditor` assigns it
+  straight to `editingPath` — so opening a path outside the account would close the editor silently, which is
+  the one failure this app does not do.
+- **Neither the editor nor the chat draws `viewModel.message`** — only the browser does. A refusal raised
+  while the chat is on screen has nowhere to land.
+
+### The rulings (§3.10.2)
+
+1. **`app:` links go; links do not.** F3 (§3.7.3) deletes `runLinkAction`, its three verbs,
+   `pendingConnection`, `Connection` and page 06 — machinery that existed for onboarding's two connection
+   pages, and nothing else. `followLink` itself stays and gains a branch. **A link in a document is not
+   onboarding's.**
+2. **A path is an address.** `[words](notes.md)` opens that file in the editor;
+   `![what it is](pictures/cat.png)` draws it in place. Both resolve against the **branch's worktree** —
+   the same `projectDir` every tool composes paths from (`AgentTools.projectDir` = `ws.treeOf(project,
+   branch)`), so the address the agent was *given* is the address the person can *press*, with no
+   translation between them and no chance of the two disagreeing.
+3. **A path that leaves the account is refused in words**, naming it. The editor cannot show what the
+   workspace cannot name, and a silent close is worse than a sentence.
+4. **`http(s)` pictures stay refused.** A paragraph must not open a socket, and the alt text plus the address
+   is the honest answer — already the renderer's behaviour.
+5. **`app:` is honoured only in a document the app wrote.** A chat message is never that, so an `app:` verb in
+   one is refused, however it got there. The agent can write `app:connect-github` into a reply; it must not
+   act.
+6. **The agent is told the shape once, and again where it bites.** One short section in the system prompt
+   (`WHAT THE PERSON SEES`), and `shot`'s own answer ends with the line that shows its picture — teaching it
+   at the moment the path exists, which is the only moment it is needed.
+
+### Steps (§3.10.3)
+
+| step | what |
+|---|---|
+| **C1** | `PageBody` takes `base: File?` and `onLink`; `MessageRow` and the fullscreen reader pass them; the chat resolves `base` as `ws.treeOf(project, chatBranch)` |
+| **C2** | `AppViewModel.followLink(address, base)` — the third branch resolves the address against `base` and opens it; outside the account refuses by name. `followChatLink(address)` refuses `app:` and resolves against the worktree |
+| **C3** | The chat draws `viewModel.message` above the composer, and `openChat`/`closeChat` clear it, so a sentence raised while the chat is open is visible and nothing stale follows the person in |
+| **C4** | The prompt's `WHAT THE PERSON SEES`; `shot`'s answer names the markdown to write |
+| **C5** | Tests: a `shot` path in an agent message draws; a picture that is missing says so; a path link opens the editor on the branch's file; `../..` and an outside absolute path are refused by name; `app:` in a message is refused; `http(s)` is not fetched |
+
 ## 4. Cost is removed
 
 `usage.cost` and the per-endpoint prices are OpenRouter's extension; the OpenAI protocol has no money in it.

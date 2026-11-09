@@ -48,11 +48,9 @@ object ProjectTree {
      * first" that needs no setting, no metadata and no explaining — and it survives being copied,
      * renamed and committed by tools that know nothing about this app.
      *
-     * **There is nothing to migrate, and that is worth stating.** The single `project_prompt.txt` this
-     * replaced lived at `muffycodes_data/prompts/project_prompt.txt` — *inside this very folder*. So
-     * every project made before the change already has its brief where the folder read looks, and
-     * this function picks it up as one more document. A migration step would have been a second path
-     * to the same text, which is the thing this file's own rules keep refusing.
+     * **A file's name is the whole of its order**, which is why there is no index and no manifest: a
+     * document is in the prompt because it is in the folder, and renaming it to `00-…` is how a person
+     * moves it to the front.
      */
     fun prompt(projectDir: File): String {
         val dir = promptsDir(projectDir)

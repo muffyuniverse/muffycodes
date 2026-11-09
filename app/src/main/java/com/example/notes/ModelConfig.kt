@@ -238,9 +238,6 @@ object ModelConfigFile {
         put("active", JSONObject().apply {
             put("model", config.active.model)
             put("effort", config.active.effort)
-            // **Nothing about the model's size is written any more.** A file that still has those
-            // keys is read without them, which is why the reader ignores them rather than failing:
-            // the app stopped clamping, so a number nobody uses is not worth a migration.
         })
         // **Only when chosen.** A null written as `{}` would read back as a model with no id, and
         // the difference between "no embedding model" and "an empty one" is the difference between
@@ -291,9 +288,9 @@ object ModelConfigFile {
         // already removes a key whose placeholder is blank, so a model that refuses
         // `reasoning_effort` is served by leaving this empty — which is a statement, not a gap.
         //
-        // **`provider` is read and dropped when present**, like the window and the reply reserve: a
-        // file the previous build wrote still names one, the address is the upstream now, and a
-        // migration for a word nobody routes by would be work spent on nothing.
+        // **A key this build does not know is not an error.** The reader takes the fields it has and
+        // says nothing about the rest, so a file edited by hand (a comment, a leftover name) loads
+        // instead of refusing — refusing would make the file unopenable by the app that wrote it.
 
         // **The two optional blocks, read only when present.** A block that is there and wrong is a
         // refusal like any other, because a config that silently dropped a model the person chose

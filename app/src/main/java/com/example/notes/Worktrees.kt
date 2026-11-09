@@ -28,8 +28,7 @@ import java.io.File
  *
  * `main` **has no folder of its own**: a project's root *is* main's working tree, and git cannot move
  * it (`git worktree list` always lists it, and making the root bare stops it being a tree at all). So
- * [dirOf] answers the project folder for `main` and a state folder for everything else, and no existing
- * project needs migrating.
+ * [dirOf] answers the project folder for `main` and a state folder for everything else.
  */
 class Worktrees(private val workspace: Workspace) {
 

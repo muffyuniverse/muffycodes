@@ -22,8 +22,7 @@ data class Account(
      *
      * A credential may only be sent to the host it was made for, so an account has to say which host
      * that is; that is what `GitCredentials.forRemote` reads instead of assuming GitHub. The default is
-     * not a compatibility shim: every account that existed before this field was made by GitHub's door,
-     * so `github.com` is a statement of fact about those files.
+     * GitHub because that is the one host this phone can sign in to without being told an address.
      */
     val host: String = GITHUB_HOST,
     /**
@@ -185,9 +184,8 @@ class AccountStore(private val filesDir: File) {
             commitName = text(json, "commitName"),
             commitEmail = text(json, "commitEmail"),
             dev = json.optBoolean("dev"),
-            // **`ifBlank` rather than a null check.** A file written before the field existed has no
-            // `host` key at all, and the account it describes was made by GitHub's door - so the
-            // default is what that file means, and it is read rather than migrated.
+            // **`ifBlank` rather than a null check.** A file with no host describes the account a
+            // sign-in makes, which is a GitHub one.
             host = text(json, "host").ifBlank { GITHUB_HOST },
             gitUser = text(json, "gitUser"),
         )

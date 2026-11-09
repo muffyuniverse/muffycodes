@@ -812,28 +812,6 @@ class AgentRunnerTest {
     }
 
     @Test
-    fun `a phone that had the two old timeouts keeps the wider one`() {
-        // **The migration, and why it takes the larger.** The connection wait and the stalling wait
-        // were merged into one response timeout. A phone that had them set has two numbers and needs
-        // one, and either choice alone would narrow something the person had widened: taking the ack
-        // would kill a first packet the old gap allowed, and taking the gap would cut a slow stream
-        // the old ack allowed. The larger of the two is the only answer that takes nothing away.
-        // The old keys are written into the same preferences file the store reads, then the store is
-        // built: that is exactly the order a phone upgrades in.
-        val name = "migration-probe-${System.nanoTime()}"
-        app.getSharedPreferences(name, android.content.Context.MODE_PRIVATE).edit()
-            .putInt(SettingsStore.KEY_ACK, 300)
-            .putInt(SettingsStore.KEY_GAP, 45)
-            .apply()
-
-        assertEquals(
-            "the wider of the two becomes the one number",
-            300,
-            SettingsStore(app, name).responseSeconds,
-        )
-    }
-
-    @Test
     fun `the timeout and the result length are the person's numbers, clamped to what works`() {
         // Both were constants before the audit: two minutes for an answer and twenty thousand
         // characters for a result. The brief asked for them as fields, and the clamps are the part

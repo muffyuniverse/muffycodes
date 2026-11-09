@@ -58,15 +58,15 @@ class SearchIndexTest {
     }
 
     @Test
-    fun `an index made before the size column existed gains it, and keeps its rows`() {
-        // **The phone that has been used is the one this breaks.** `CREATE TABLE IF NOT EXISTS` is a
-        // no-op on a table that already exists, so the `files` table written by an earlier build has
-        // no `size` column - and every `note()` names it, so every indexing pass on that phone would
-        // throw. The migration is asked for on open, and a row that was there before must survive it
-        // rather than be dropped: dropping it would re-embed every file in the project.
+    fun `an index written by another shape is thrown away and built again`() {
+        // **An index is derived data, so there is nothing in it worth carrying.** Every row is
+        // computed from the tree — the chunks are its text, the vectors are embeddings of that text,
+        // and the file rows are what a walk found — so a file whose schema this build did not write
+        // is deleted rather than patched. A patch would be a reader for a format nothing writes any
+        // more, and it would have to guess what an old column meant.
         //
         // **Its own folder**, so no open handle is left pointing at a deleted file: this test writes
-        // a database with the *old* schema by hand, because the point is one this code did not make.
+        // a database this code did not make, which is the case being answered.
         val old = File(temp.root, "already-used")
         val file = File(File(old, AgentLog.DIR), SearchIndex.FILE)
         file.parentFile?.mkdirs()
@@ -91,15 +91,12 @@ class SearchIndexTest {
             db.close()
         }
 
-        // Opening it is the migration, and the row from before is still there with the default size.
+        // Opening it is the whole of the rule: the old file goes, and what answers is a new one.
         val reopened = SearchIndex.open(old)
         try {
-            assertEquals(
-                "the old row survived, with its size unknown rather than zero",
-                7L to -1L,
-                reopened.seen("milk.txt"),
-            )
-            // **And the insert that used to throw now works**, which is the actual failure.
+            assertNull("the row this build did not write is gone", reopened.seen("milk.txt"))
+            // **And a write that names every column works**, which is what a kept-along schema would
+            // have broken: the old `files` table has no `size`, and `note()` names it.
             reopened.note("bread.txt", 9L, SearchIndex.INDEXED, size = 12L)
             assertEquals("the new row", 9L to 12L, reopened.seen("bread.txt"))
         } finally {
@@ -409,40 +406,6 @@ class SearchIndexTest {
         val hits = index.nearest(big, paths = 5, history = false).getOrThrow()
         assertEquals("the file it came from", "a.txt", hits.first().path)
         assertTrue("and it is close to itself: ${hits.first().score}", hits.first().score > 0.99)
-    }
-
-    @Test
-    fun `a vector written before quantisation is still read as floats`() {
-        // **The migration, and the reason `scale` exists.** A row written by an earlier build holds
-        // little-endian float32 and has no scale. The size alone cannot tell the two forms apart - a
-        // 4-dimension float32 vector and a 16-dimension int8 vector are both 16 bytes - so `0` is the
-        // only honest signal. Without it an old index would read its floats as one byte per dimension
-        // and answer with noise.
-        built(4)
-        // The legacy row, written by hand into the database this class owns, because the point is a
-        // row this code did not write.
-        val file = File(File(project, AgentLog.DIR), SearchIndex.FILE)
-        val db = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null)
-        try {
-            val raw = java.nio.ByteBuffer.allocate(16)
-                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            for (value in floatArrayOf(1f, 0f, 0f, 0f)) raw.putFloat(value)
-            db.execSQL(
-                "INSERT INTO vectors(hash, vector, scale) VALUES(?, ?, 0)",
-                arrayOf("legacy-hash", raw.array()),
-            )
-            db.execSQL(
-                "INSERT INTO chunks(path, version, hash, start, end) VALUES('old.txt', '', ?, 0, 1)",
-                arrayOf("legacy-hash"),
-            )
-        } finally {
-            db.close()
-        }
-
-        val hits = index.nearest(axis(4, 0), paths = 5, history = false).getOrThrow()
-
-        assertEquals("the old row answers", "old.txt", hits.first().path)
-        assertEquals("with the score its floats give", 1.0, hits.first().score, 0.0001)
     }
 
     // ---- the empty index ---------------------------------------------------

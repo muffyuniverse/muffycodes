@@ -106,18 +106,16 @@ class ProjectTreeTest {
     }
 
     @Test
-    fun `the old single file is read, because it was always in this folder`() {
-        // **There is no migration, and this is why.** The `project_prompt.txt` this replaced lived at
-        // `muffycodes_data/prompts/project_prompt.txt` — inside the very folder the read walks. So
-        // every existing project's brief is picked up as one more document, and a migration step
-        // would have been a second path to the same text.
+    fun `a file the prompt has always named is read as one more document`() {
+        // **`project_prompt.txt` is not special and never was** — it sits in the folder the read
+        // walks, so it is in the prompt for the same reason `how-we-work.md` is: it is a file there.
         val dir = project()
-        val old = AgentPrompt.projectFile(dir)
-        old.parentFile?.mkdirs()
-        old.writeText("The old brief, still true.")
+        val named = AgentPrompt.projectFile(dir)
+        named.parentFile?.mkdirs()
+        named.writeText("The project's own brief.")
         assertTrue(
-            "the old file is in the prompt: ${ProjectTree.prompt(dir)}",
-            ProjectTree.prompt(dir).contains("The old brief, still true."),
+            "the file is in the prompt: ${ProjectTree.prompt(dir)}",
+            ProjectTree.prompt(dir).contains("The project's own brief."),
         )
     }
 

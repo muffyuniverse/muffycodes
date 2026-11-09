@@ -423,8 +423,8 @@ class BranchesScreenTest {
 
     @Test
     fun `main has no worktree folder, because the project root is already its tree`() {
-        // Picking `main` must be the path every screen took before branches existed — no folder made, no
-        // migration, nothing to migrate.
+        // **`main` is the project's own folder**, so picking it makes nothing: the path every screen
+        // took before branches existed is still the path `main` takes.
         scene.project("Shopping")
 
         scene.viewModel.openBranches("Shopping")

@@ -333,7 +333,7 @@ class SearchIndex private constructor(
      * index" and "this file is not in the index *and here is why*" are different answers to a person
      * wondering why their search misses.
      */
-    fun note(path: String, mtime: Long, state: Int, error: String? = null, size: Long = -1L) {
+    fun note(path: String, mtime: Long, state: Int, error: String? = null, size: Long) {
         db.insertWithOnConflict(
             "files",
             null,
@@ -536,23 +536,14 @@ class SearchIndex private constructor(
     }
 
     /**
-     * A stored vector as floats, **whichever form it is in**.
+     * A stored vector as floats: one byte per dimension, times the row's own scale.
      *
-     * **Two forms, and the scale says which.** A row written before quantisation has `scale = 0` and
-     * holds little-endian float32; a row written since holds one byte per dimension and its scale.
-     * The size alone cannot tell them apart — a 4-dimension float32 vector is 16 bytes and a
-     * 16-dimension int8 vector is also 16 — so the column is the only honest signal, and an index
-     * converts as files are touched rather than in one rewrite nobody asked for.
+     * **One form, because there is one writer.** A second form would be a reader for rows nothing
+     * writes — and this index is derived data, so a shape it no longer writes is a file it throws
+     * away rather than a format it keeps alive ([open]).
      */
     private fun floats(raw: ByteArray?, scale: Float): FloatArray {
         if (raw == null) return FloatArray(0)
-        if (scale == 0f) {
-            if (raw.size % 4 != 0) return FloatArray(0)
-            val buffer = java.nio.ByteBuffer.wrap(raw).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            val out = FloatArray(raw.size / 4)
-            for (i in out.indices) out[i] = buffer.getFloat()
-            return out
-        }
         val out = FloatArray(raw.size)
         for (i in out.indices) out[i] = raw[i] * scale
         return out
@@ -561,6 +552,14 @@ class SearchIndex private constructor(
     companion object {
         /** The database file's name, inside a project's `agent/`. */
         const val FILE = "search.db"
+
+        /**
+         * The shape of the tables this build writes, in the file's `user_version`.
+         *
+         * **Bumped whenever the schema changes**, and the only consumer is [open]: a file with another
+         * number is deleted, because it holds nothing the tree cannot answer again.
+         */
+        private const val SCHEMA = 1
 
         /** [note]'s `state` for a file whose text is in the index. */
         const val INDEXED = 0
@@ -588,19 +587,41 @@ class SearchIndex private constructor(
             val dir = File(projectDir, AgentLog.DIR)
             dir.mkdirs()
             val file = File(dir, FILE)
-            val db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            // **An index is derived data, so another shape is a rebuild rather than a migration.**
+            // Everything in the file is computed from the tree: the chunks are text, the vectors are
+            // embeddings of that text, and the file rows are what a walk found. A file whose schema
+            // this build did not write is therefore deleted — a migration would be a reader for a
+            // format nothing writes any more, and a `CREATE TABLE IF NOT EXISTS` would silently keep
+            // the old columns and fail on the first write that names a new one.
+            val existed = file.isFile
+            var db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            if (existed && version(db) != SCHEMA) {
+                db.close()
+                discard(file)
+                db = SQLiteDatabase.openOrCreateDatabase(file, null)
+            }
             db.enableWriteAheadLogging()
             create(db)
             return SearchIndex(db, file)
         }
 
+        /** The schema number the file says it was written with; `0` for a file with no tables. */
+        private fun version(db: SQLiteDatabase): Int =
+            db.rawQuery("PRAGMA user_version", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+
+        /** Removes the database and the two journals WAL may have left beside it. */
+        private fun discard(file: File) {
+            for (suffix in listOf("", "-wal", "-shm")) File(file.path + suffix).delete()
+        }
+
+        /**
+         * The tables, and the number that says which shape this build writes.
+         *
+         * **No `ALTER TABLE`, no default that means "written by an older build".** [open] deletes a
+         * file with another number, so every column here is one this build itself wrote — which is
+         * the only reason a `NOT NULL` without a default can be honest.
+         */
         private fun create(db: SQLiteDatabase) {
-            // **A column added to a table that already exists is not added by `CREATE TABLE IF NOT
-            // EXISTS`.** That statement is a no-op on an existing table, so a phone that indexed
-            // before `size` existed keeps a `files` table without it - and then every `note()`, which
-            // names the column, throws. The pass would fail on the one device that has been used.
-            // This is the whole of the migration: there is nothing to compute, because a row with no
-            // size is a row that must be re-read once, and `-1` says exactly that.
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS chunks(
@@ -634,9 +655,8 @@ class SearchIndex private constructor(
                   vector  BLOB NOT NULL,
                   -- **Per vector, not per index**, because models do not normalise: the largest
                   -- absolute component is what 127 has to mean, and it differs from vector to
-                  -- vector. 0 means "stored as float32", which is what a row written before this
-                  -- column existed is - see [floats].
-                  scale   REAL NOT NULL DEFAULT 0
+                  -- vector. See [floats].
+                  scale   REAL NOT NULL
                 )
                 """.trimIndent(),
             )
@@ -662,35 +682,13 @@ class SearchIndex private constructor(
                   -- **A second opinion on "unchanged".** `mtime` alone says an edited file is
                   -- untouched when the writer preserved the timestamp; the size is already in the
                   -- directory entry, so the check costs nothing and closes the common half of that.
-                  size   INTEGER NOT NULL DEFAULT -1,
+                  size   INTEGER NOT NULL,
                   state  INTEGER NOT NULL,
                   error  TEXT
                 )
                 """.trimIndent(),
             )
-            addColumn(db, "files", "size", "INTEGER NOT NULL DEFAULT -1")
-            // **A vector written before the scale existed is float32**, and `0` is how [floats] is
-            // told: no old row is re-encoded, and no old row is misread as bytes. The next pass over
-            // a changed file writes the quantised form, so an index converts as it is touched rather
-            // than in one long rewrite nobody asked for.
-            addColumn(db, "vectors", "scale", "REAL NOT NULL DEFAULT 0")
-        }
-
-        /**
-         * Adds [column] to [table] if it is not already there.
-         *
-         * **`ALTER TABLE ... ADD COLUMN` has no `IF NOT EXISTS`**, so the question is asked of
-         * `PRAGMA table_info` first. `NOT NULL DEFAULT` is allowed on an added column precisely
-         * because the default is not null: the rows that were there before get the default, which is
-         * what makes this a migration with nothing to compute.
-         */
-        private fun addColumn(db: SQLiteDatabase, table: String, column: String, type: String) {
-            db.rawQuery("PRAGMA table_info($table)", null).use { c ->
-                while (c.moveToNext()) {
-                    if (c.getString(1) == column) return
-                }
-            }
-            db.execSQL("ALTER TABLE $table ADD COLUMN $column $type")
+            db.execSQL("PRAGMA user_version = $SCHEMA")
         }
 
         /**

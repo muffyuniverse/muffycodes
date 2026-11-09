@@ -67,11 +67,10 @@ class WorkspaceTest {
 
     @Test
     fun `a project made before the link existed gets git's line for it`() {
-        // **The upgrade case, and not a migration hack**: the line is written by the function that
-        // makes the link, because the link is what it is for. A project whose repository was made
-        // before this change has the app's other three lines and not this one - so without it the
-        // link reads as an untracked file, the project says "1 to send" about something the person
-        // did not do, and a commit would put a symlink in the repository.
+        // **The line is written by the function that makes the link**, because the link is what it is
+        // for — and it is written on every open, so a repository that has the app's other three lines
+        // and not this one is caught: without it the link reads as an untracked file, the project says
+        // "1 to send" about something the person did not do, and a commit would put a symlink in.
         val proj = workspace.projectDir("Shopping")
         proj.mkdirs()
         File(proj, ".git/info").mkdirs()
