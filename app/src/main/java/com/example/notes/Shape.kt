@@ -55,7 +55,15 @@ import org.json.JSONObject
 enum class ShapeKind(val names: Set<String>) {
     /** The chat turn: a conversation, its tools, its effort and its size. */
     CHAT(setOf("model", "messages", "tools", "tool_choice", "stream", "effort", "max_tokens")),
+    ;
 
+    /**
+     * **The subfolder this kind's files live in** — `shared/schemas/chat/`, `shared/requests/chat/`.
+     *
+     * The kind travels with the question the picker asks, so a picker that lists a kind's folder cannot
+     * offer another kind's unit at all. Lower-case because it is a path a person reads in the browser.
+     */
+    val folder: String get() = name.lowercase()
 }
 
 data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = ShapeKind.CHAT) {

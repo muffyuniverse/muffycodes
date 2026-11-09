@@ -558,13 +558,14 @@ fun BrowserScreen(
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
-            } else if (Workspace.isSystemPath(viewModel.path.joinToString("/"))) {
-                // **Nothing can be added to the system project**, so the button is not offered.
-                // The operator: "+ button should be hidden in system project." It is the app's own
-                // folder — a person reads it and clones from it, and every write there comes from
-                // the app. A button whose only possible outcome is a refusal is worse than no
-                // button: it teaches the person the app is broken rather than that the folder is
-                // the app's.
+            } else if (viewModel.workspace?.isAppHeld(viewModel.path.joinToString("/")) == true) {
+                // **Nothing can be made in the app's held paths**, so the button is not offered.
+                // The operator: "+ button should be hidden in system project." `shared` and
+                // `shared/schemas/` are the app's — a person reads them and clones from them, and
+                // every write there comes from the app. `shared/requests/` is *not* held: it is
+                // where a person makes the forms the app sends, so the button belongs there. A
+                // button whose only possible outcome is a refusal is worse than no button: it
+                // teaches the person the app is broken rather than that the folder is the app's.
                 Spacer(Modifier.size(0.dp))
             } else {
                 // A folder gets the two things a folder gets (§3).

@@ -839,13 +839,6 @@ class Workspace(
      */
     fun appHold(file: File): Hold {
         if (isAppFlag(file) || looksSecret(file.name)) return Hold.APP
-        // **The template exemplar is held as a file**, which is the one thing inside `shared/` the app
-        // must not let anybody change: it is the seed every other template is copied from, so a copy
-        // that was edited is fine and the seed that was edited is a bug report.
-        //
-        // A *path* rather than a lock-list flag, because a flag can be cleared and this must not be able
-        // to be: the operator's rule is that a system lock binds the person too.
-        if (relative(file)?.joinToString("/") == SCHEMA_EXAMPLE_PATH) return Hold.APP
         // **The whole branch inherits, not just the folder.** The operator, looking at `agent/`:
         // "and remember that whole subbranch should inherit them".
         //
@@ -857,22 +850,37 @@ class Workspace(
         // inside it as surely as one at the top. `isAppFlag` is separate and stays about the leaf,
         // because `.muffy/`'s own files are the flags and there is nothing beneath them.
         val names = relative(file) ?: return Hold.NONE
-        val joined = names.joinToString("/")
-        // **The whole system project is read-only, and this is the rule that says so.** The
-        // operator: "make sure that all system project subtree is system locked — it is a readonly
-        // folder that is updated by the app itself, there is no place for user generated content
-        // there."
-        //
-        // The two name rules above were written for *places* — `.muffy/` wherever it appears, and
-        // `agent/` in every project. Neither could say "everything under one project", because
-        // `muffycodes_data` is a name that legitimately appears in every project too. So this is a
-        // whole-path rule, the same shape [isOnboardingPath] has and for the same reason.
-        //
-        // A person still reads every file here, and the way to keep a copy is to clone the file —
-        // which lands in a project of their own, where it is an ordinary file and an ordinary edit.
-        if (isSystemPath(joined)) return Hold.APP
+        if (isAppHeld(names)) return Hold.APP
         return if (names.any { isSystemLocked(it) }) Hold.APP else Hold.NONE
     }
+
+    /**
+     * **The paths the app holds**, as names — the same rule [appHold] applies, asked before the file
+     * exists (a move target, or a "can I add here?" question on a folder row).
+     *
+     * One implementation, because a second one is how a folder gets a "+" button whose only possible
+     * outcome is a refusal.
+     *
+     * §3.8.1, the operator's own design: *"make it an ordinary folder with some system locked files"*.
+     *
+     * - `shared` **itself** is held, so it cannot be renamed or deleted — the app's functionality
+     *   depends on it being where it is. Its contents are the person's.
+     * - `shared/schemas/` **and everything under it** are held, because those are the app's reference
+     *   templates and every file in the folder is one.
+     * - `shared/requests/` is **not held**: that is where a person and an agent write the forms the app
+     *   sends, and a folder lock that covered its contents would make the library read-only — the very
+     *   thing the two folders were split apart to avoid.
+     */
+    fun isAppHeld(names: List<String>): Boolean =
+        (names.size == 1 && isSystem(names[0])) ||
+            (
+                names.size >= 2 && isSystem(names[0]) &&
+                    names[1].equals(SCHEMAS_DIR, ignoreCase = true)
+                )
+
+    /** [isAppHeld] for a path written the way the browser shows it. */
+    fun isAppHeld(path: String): Boolean =
+        isAppHeld(path.trim('/').split('/').filter { it.isNotEmpty() })
 
     /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.
@@ -1637,9 +1645,10 @@ class Workspace(
         // because somebody locked that file, and a folder is locked because somebody wants it to keep
         // existing and keep its name.
         //
-        // **That is what makes the templates work.** `shared/` and `shared/schemas/` are system locked —
-        // the app's functionality depends on them — while `chat.json` inside stays a file both the
-        // person and an agent may edit. One lock stack, two levels, and a folder is not a permission.
+        // **That is what makes the request library work** (§3.8.1). `shared/` and `shared/schemas/`
+        // are system locked — the app's functionality depends on them — while everything under
+        // `shared/requests/` stays files both the person and an agent may edit. One lock stack, two
+        // levels, and a folder is not a permission.
         //
         // It reverses Report 9's prefix rule deliberately: that rule was a workaround for a folder lock
         // meaning "read-only subtree", and the workaround is what needed the folder to be a permission.
@@ -1892,28 +1901,28 @@ class Workspace(
         const val STATE_DIR = ".muffy"
 
         /**
-         * Where the exemplar template lives, account-relative.
+         * **The app's reference templates**, held as a subtree of [SYSTEM_PROJECT].
          *
          * Beside [SYSTEM_PROJECT] rather than in `Schemas`, because this is the *lock* rule and
          * `Workspace` is where locks live — the folder's own code must not be able to disagree with the
-         * thing that protects it.
+         * thing that protects it. A folder rather than a file list, because the rule is "everything in
+         * here is the app's": a list would have to grow every time a reference was added, and a lock
+         * list that names a file which no longer exists is a lock with no object.
          */
-        const val SCHEMA_EXAMPLE_PATH = "shared/schemas/example.json"
+        const val SCHEMAS_DIR = "schemas"
 
         /**
-         * **The folder the app keeps its own files in, and it is `shared` rather than `system`.**
+         * **The folder the app keeps its own files in**, and the person cannot delete, rename or sync
+         * it away.
          *
          * The operator, 2026-11-09: *"we can actually rename system into shared, and make it an ordinary
-         * folder with some system locked files."* The name was never the rule — [isSystemPath] is — so
-         * the rename costs nothing and removes a second meaning of the word "system" from a codebase
-         * that also talks about the phone's system screens and the app's own system locks.
+         * folder with some system locked files."* The name was never the rule — [isAppHeld] and
+         * [appHold] are — so the rename costs nothing and removes a second meaning of the word "system"
+         * from a codebase that also talks about the phone's system screens and the app's own system
+         * locks.
          *
-         * It is still system locked: the app's functionality depends on this folder being where it is,
-         * which is the operator's own reason. What changed is what a *folder* lock means — see
-         * [isAgentLocked].
-         */
-        /**
-         * The folder the person cannot delete, rename or sync away.
+         * **It is locked as a folder, not as a subtree** — see [appHold]: the folder keeps its name and
+         * existence, and its contents (`requests/` above all) are the person's and the agent's.
          *
          * **A folder, not a hidden one.** It holds what belongs to the whole account rather than to any
          * one project — the system prompt, the request templates, and whatever else grows a scope wider
@@ -1922,8 +1931,9 @@ class Workspace(
          * hidden one"*. A hidden file is one nobody edits, and a prompt nobody edits goes stale.
          *
          * It is **not a project**: no repository, no remote, and nothing it holds is ever pushed. The
-         * guards that keep it are in [isSystemPath], and they are case-insensitive because a filesystem
-         * that folds case would otherwise offer a second `Shared` that can be deleted.
+         * guards that keep it are in [isAppHeld] and [isSystem], and they are case-insensitive
+         * because a filesystem that folds case would otherwise offer a second `Shared` that can be
+         * deleted.
          */
         const val SYSTEM_PROJECT = "shared"
 
@@ -2091,24 +2101,6 @@ class Workspace(
          * `onboarding`, and a name rule would lock any folder a person happened to call that. The
          * pages are the app's own writing — a person reads them, clones them, and edits the clone.
          */
-        /**
-         * True for **anything inside the system project**, which the app writes and nobody else does.
-         *
-         * The operator, twice: the system project "is a readonly folder that is updated by the app
-         * itself, there is no place for user generated content there", and its whole subtree is
-         * "system locked".
-         *
-         * **Why a path and not a name.** `muffycodes_data` is the system project's data folder and
-         * every other project has one too — it is the scaffold the app lays down, which the person
-         * and the agent both write in. A name rule would lock the agent out of the very folder it is
-         * asked to keep notes in. So the rule is the first segment: `system/` at the account root,
-         * and everything under it.
-         */
-        fun isSystemPath(path: String): Boolean {
-            val parts = path.trim('/').split('/')
-            return parts.isNotEmpty() && parts[0].equals(SYSTEM_PROJECT, ignoreCase = true)
-        }
-
         fun isOnboardingPath(path: String): Boolean {
             val parts = path.trim('/').split('/')
             return parts.size >= 3 &&

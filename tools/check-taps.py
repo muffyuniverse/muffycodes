@@ -47,6 +47,10 @@ VOCABULARY = {
     "editor view", "editor edit", "editor diff", "diff", "diff commit",
     # entering a file from the list of what is waiting to be sent
     "open changed file",
+    # **The Settings row that opens the request library** (`shared/requests/chat/`). Its own name
+    # rather than "open folder", because the press is about the app's own documents: a log that called
+    # it a folder open could not tell it from a person walking the tree.
+    "open request forms",
     # a row's own switches
     "lock", "unlock", "pin", "unpin", "select", "unselect",
     # what a row's menu offers, and what the selection bar offers

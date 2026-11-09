@@ -510,6 +510,14 @@ private fun AppRoot(viewModel: AppViewModel) {
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
             onOpenSecrets = { tap("secrets"); showSecrets = true },
+            // **The templates row opens the folder a person works in** — `shared/requests/chat/`,
+            // not the references. Tapping it used to do nothing at all: the row's default was an
+            // empty lambda and nothing supplied one, which is a door drawn over a wall.
+            onOpenTemplates = {
+                tap("open request forms")
+                showSettings = false
+                viewModel.open(listOf(Workspace.SYSTEM_PROJECT, "requests", ShapeKind.CHAT.folder))
+            },
             onReport = openReport,
         )
 

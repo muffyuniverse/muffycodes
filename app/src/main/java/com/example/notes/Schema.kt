@@ -1,6 +1,5 @@
 package com.example.notes
 
-import org.json.JSONException
 import org.json.JSONObject
 
 /**
@@ -129,11 +128,11 @@ data class Schema(
          * and they find out from an agent using something they did not choose.
          */
         fun parse(text: String): Result<Schema> {
-            val root = try {
-                JSONObject(text)
-            } catch (e: JSONException) {
-                return Result.failure(IllegalArgumentException(whereIn(text, e)))
-            }
+            // **The document is read as JSONC**, so a template may explain itself beside itself: the
+            // operator asked for comments, and `org.json` refuses both forms. The scanner turns a
+            // comment into whitespace of the same length, so a parse error after one still reports the
+            // line a person is looking at.
+            val root = Jsonc.parse(text).getOrElse { return Result.failure(it) }
             val address = root.optString("address").trim()
             val url = root.optString("url").trim()
             if (address.isEmpty()) {
@@ -179,24 +178,5 @@ data class Schema(
             return Result.success(Schema(address, key, url, body, target, forget, trim))
         }
 
-        /**
-         * Where a syntax error is, in a line.
-         *
-         * `org.json` reports a character offset, and the bracket form sometimes carries the real line —
-         * the same conversion `ModelConfigFile` does, and the same reason: a person editing a file needs
-         * a line, not an offset.
-         */
-        private fun whereIn(text: String, error: JSONException): String {
-            val message = error.message.orEmpty().ifBlank { "it is not valid JSON" }
-            Regex("""line (\d+)""").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                ?.let { return "line $it: $message" }
-            val offset = Regex("""character (\d+)""").find(message)
-                ?.groupValues?.getOrNull(1)?.toIntOrNull()
-                ?: Regex("""\bat (\d+)""").find(message)
-                    ?.groupValues?.getOrNull(1)?.toIntOrNull()
-                ?: return message
-            val line = text.take(offset.coerceIn(0, text.length)).count { it == '\n' } + 1
-            return "line $line: $message"
-        }
     }
 }

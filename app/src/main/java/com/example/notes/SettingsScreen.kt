@@ -105,6 +105,14 @@ fun SettingsScreen(
      */
     onOpenSecrets: () -> Unit = {},
     /**
+     * Opens the request forms — `shared/requests/chat/` in the browser.
+     *
+     * **A door to a folder rather than a list of rows**, because a request form is a file the person
+     * and the agent both edit; the browser and the editor are the manager, and a window of fields here
+     * would be a second way to write the same document.
+     */
+    onOpenTemplates: () -> Unit = {},
+    /**
      * Whether Android will let an agent poll while the screen is off — **the system's fact, passed
      * in** rather than read here.
      *
@@ -247,7 +255,7 @@ fun SettingsScreen(
             // The model, the provider and the effort: [ModelSection] draws the three rows, each of
             // which opens the window that changes it — and that window is where models are added
             // and removed now, beside the list they change.
-            ModelSection(viewModel = viewModel)
+            ModelSection(viewModel = viewModel, onOpenTemplates = onOpenTemplates)
             // **The chat request is not configured here at all** — no address, no key, no shape, no
             // numbers. It is a file a worktree names (`Schema`), and the row above opens the folder.
             // This block used to hold a "Model connection" row for the general scope; that row existed

@@ -989,37 +989,51 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `the whole shared folder is held, and a project's own muffycodes_data is not`() {
-        // **The operator, twice**: the system project "is a readonly folder that is updated by the
-        // app itself, there is no place for user generated content there", and "make sure that all
-        // system project subtree is system locked" — and later, *"shared should also be system locked,
-        // as all of our special folders, because app's functionality depends on them."*
+    fun `shared is held as a folder, schemas as a subtree, and requests as nothing at all`() {
+        // **The operator's rule, twice corrected.** First: *"shared should also be system locked, as all
+        // of our special folders, because app's functionality depends on them"* — and then the half
+        // that makes the folder usable: *"we just need to change how lock works, so that locking a
+        // folder doesnt lock its content but just blocks it from being deleted or renamed."*
         //
-        // **The reason this needs a path rule rather than a name.** The app already holds `agent/` and
-        // `.muffy/` by *name*, wherever they appear. Neither can say "everything under one top-level
-        // folder", and the obvious candidate — the folder `muffycodes_data` — is exactly the one that
-        // must NOT be locked, because every project has one and the agent writes its notes there. So the
-        // rule is the first path segment.
-        //
-        // **What the lock does not do is make the subtree read-only.** A folder lock is an existence
-        // lock now (`isAgentLocked`), so a template inside `shared/schemas/` is still editable; what the
-        // path rule holds is the folder against being renamed or deleted.
+        // So `shared` itself is held (its name and its existence), `shared/schemas/` and everything
+        // under it are held (those are the app's reference templates, and every file in the folder is
+        // one), and `shared/requests/` is **not** — it is where a person and an agent write the forms
+        // the app sends, which is the whole reason the library has two folders.
         val shared = workspace.systemDir.apply { mkdirs() }
-        val deep = File(File(File(shared, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
+        val reference = File(File(shared, "schemas/chat"), "openrouter.jsonc").apply {
             parentFile.mkdirs()
-            writeText("you are an agent\n")
+            writeText("{}\n")
+        }
+        val unit = File(File(shared, "requests/chat"), "mine.jsonc").apply {
+            parentFile.mkdirs()
+            writeText("{}\n")
+        }
+        val prompt = File(File(shared, "prompts"), "system_prompt.txt").apply {
+            parentFile.mkdirs()
+            writeText("you are an agent" + "\n" + "and nothing else")
         }
 
-        assertEquals("the project folder itself", Workspace.Hold.APP, workspace.hold(shared, emptySet()))
+        assertEquals("the folder itself", Workspace.Hold.APP, workspace.hold(shared, emptySet()))
         assertEquals(
-            "a file three folders down, whose every name is ordinary",
+            "a reference, and it is the folder's whole subtree that is held",
             Workspace.Hold.APP,
-            workspace.hold(deep, emptySet()),
+            workspace.hold(reference, emptySet()),
         )
         assertEquals(
             "and it is not written, which is what the mark promises",
             false,
-            workspace.write(deep, "something else"),
+            workspace.write(reference, "something else"),
+        )
+        assertEquals(
+            "a unit is the person's and the agent's",
+            Workspace.Hold.NONE,
+            workspace.hold(unit, emptySet()),
+        )
+        assertTrue("and it can be written", workspace.write(unit, "{}"))
+        assertEquals(
+            "and anything else in the app's folder is ordinary too — it is an ordinary folder with some",
+            Workspace.Hold.NONE,
+            workspace.hold(prompt, emptySet()),
         )
 
         // **The other half, and the half that would break if the rule were written as a name.** A
@@ -1036,6 +1050,21 @@ class WorkspaceTest {
             workspace.hold(prompts, emptySet()),
         )
         assertEquals("and it can be written", true, workspace.write(prompts, "# changed\n"))
+    }
+
+    @Test
+    fun `the held-path rule is the same one asked with names, so a picker cannot disagree`() {
+        // **One implementation**, because a move target does not exist yet and a second copy of the rule
+        // is how a folder gets a "+" button whose only possible outcome is a refusal.
+        assertTrue(workspace.isAppHeld(listOf("shared")))
+        assertTrue(workspace.isAppHeld(listOf("shared", "schemas")))
+        assertTrue(workspace.isAppHeld(listOf("shared", "schemas", "chat", "openrouter.jsonc")))
+        assertTrue("asked as a path too", workspace.isAppHeld("shared/schemas/chat/openrouter.jsonc"))
+        assertTrue("and the case-folded name is not a second folder", workspace.isAppHeld(listOf("Shared")))
+
+        assertFalse(workspace.isAppHeld(listOf("shared", "requests")))
+        assertFalse(workspace.isAppHeld("shared/requests/chat/mine.jsonc"))
+        assertFalse("a project called schemas is not the app's", workspace.isAppHeld(listOf("schemas")))
     }
 
     @Test

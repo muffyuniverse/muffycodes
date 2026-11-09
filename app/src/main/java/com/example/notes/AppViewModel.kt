@@ -767,12 +767,12 @@ class AppViewModel @JvmOverloads constructor(
         // stopped being hidden. The command refuses it too — `coreProblem` names it — so this is the
         // picker agreeing with the command rather than being the only guard.
         if (Workspace.isSystemLocked(dir.name)) return false
-        // **Nothing lands inside the system project**, which is a whole-path question rather than a
-        // name one: `system/wiki/` and `system/muffycodes_data/prompts/` are folders the app writes
-        // and a person does not, and every one of them is named something ordinary. Report: "all
-        // system project subtree is system locked — it is a readonly folder that is updated by the
-        // app itself, there is no place for user generated content there."
-        ws.relative(dir)?.let { if (Workspace.isSystemPath(ws.pathString(it))) return false }
+        // **Nothing lands in the app's held paths** — `shared` itself and `shared/schemas/`. A
+        // whole-path question rather than a name one, because every folder there is named something
+        // ordinary; and the *same* rule the lock applies, so the picker cannot offer a target the
+        // command would refuse. `shared/requests/` is deliberately not among them: it is where the
+        // person keeps the forms the app sends (§3.8.1).
+        ws.relative(dir)?.let { if (ws.isAppHeld(it)) return false }
         // The record's folder is the one the app owns inside a project; everything else — the
         // repository itself included, now that a project *is* the repository — is the person's.
         return !ws.isStructural(dir)
@@ -1051,7 +1051,18 @@ class AppViewModel @JvmOverloads constructor(
      * the list must hold it. The count on the settings row is keyed on a revision so Compose re-runs it
      * after this screen writes a file.
      */
-    fun templateNames(): List<String> = workspace?.let { Schemas.ensure(it.systemDir) }.orEmpty()
+    /**
+     * **The request forms a chat may pick from** — the units in `shared/requests/chat/`.
+     *
+     * `ensure` first, because a fresh install has no folder and the picker would be an empty window on
+     * the first day. It fills only when the folder is absent, so a person who deleted the shipped one
+     * keeps it deleted (see [Schemas.ensure]).
+     */
+    fun templateNames(): List<String> {
+        val ws = workspace ?: return emptyList()
+        Schemas.ensure(ws)
+        return Schemas.names(ws, ShapeKind.CHAT)
+    }
 
     /**
      * Puts back the config the app shipped.
@@ -1868,6 +1879,11 @@ class AppViewModel @JvmOverloads constructor(
         // rule that made this confusing: the same gesture means different things depending on what
         // happens to be on disk. Choosing is a mode for the folder you are in.
         selected = emptySet()
+        // **Showing a path means not showing the account list.** One place says so, because every
+        // caller of this door is a move into the browser: a folder row, a link, a branch, the
+        // templates row in Settings. Without this line the templates row set the path and left the
+        // accounts list drawn over it, which is a door that looks open and is not.
+        onAccountsScreen = false
         refresh()
     }
 

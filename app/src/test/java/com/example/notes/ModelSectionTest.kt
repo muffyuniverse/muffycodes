@@ -46,9 +46,6 @@ class ModelSectionTest {
 
     private val account: java.io.File get() = scene.workspace!!.accountDir
 
-    /** The app's folder, which is where the library lives (§3.11). */
-    private val app: java.io.File get() = scene.workspace!!.systemDir
-
     @Composable
     private fun Section(onOpenTemplates: () -> Unit = {}) {
         MaterialTheme {
@@ -61,13 +58,13 @@ class ModelSectionTest {
         }
     }
 
-    /** Writes a schema into the folder the way the editor would, and refreshes. */
-    private fun write(name: String, schema: Schema = Schema(
+    /** Writes a unit into the folder the way the editor would. */
+    private fun write(name: String, form: Schema = Schema(
         address = "https://x.test/v1",
-        url = "embeddings",
-        body = org.json.JSONObject("""{"model":"e","input":"{{input}}"}"""),
+        url = "chat/completions",
+        body = org.json.JSONObject("""{"model":"m","messages":"{{messages}}"}"""),
     )) {
-        Schemas.write(app, name, schema).getOrThrow()
+        Schemas.write(scene.workspace!!, Schemas.unitPath(ShapeKind.CHAT, name), form).getOrThrow()
     }
 
     // ---- the folder is the manager ---------------------------------------------
@@ -92,7 +89,7 @@ class ModelSectionTest {
         // The count is read, not remembered: a person who deletes one in the browser comes back to a
         // row that says so. This is the assertion that would fail if the list were cached at
         // construction.
-        Schemas.ensure(app)
+        Schemas.ensure(scene.workspace!!)
         compose.setContent { Section() }
 
         compose.onNodeWithText("1 template — tap to edit").assertIsDisplayed()
@@ -100,8 +97,10 @@ class ModelSectionTest {
 
     @Test
     fun `an empty folder says so in words a person can act on`() {
-        Schemas.ensure(app)
-        for (name in Schemas.names(app)) Schemas.remove(app, name)
+        Schemas.ensure(scene.workspace!!)
+        for (name in Schemas.names(scene.workspace!!, ShapeKind.CHAT)) {
+            Schemas.remove(scene.workspace!!, Schemas.unitPath(ShapeKind.CHAT, name))
+        }
         compose.setContent { Section() }
 
         // Not "0 templates": the row is the only place a person is told the feature has nothing to work
