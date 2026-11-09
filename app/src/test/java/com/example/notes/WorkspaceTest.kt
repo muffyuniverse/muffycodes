@@ -990,23 +990,28 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `the whole system project is held, and a project's own muffycodes_data is not`() {
+    fun `the whole shared folder is held, and a project's own muffycodes_data is not`() {
         // **The operator, twice**: the system project "is a readonly folder that is updated by the
         // app itself, there is no place for user generated content there", and "make sure that all
-        // system project subtree is system locked".
+        // system project subtree is system locked" — and later, *"shared should also be system locked,
+        // as all of our special folders, because app's functionality depends on them."*
         //
-        // **The reason this needed a new rule rather than a new name.** The app already held
-        // `agent/` and `.muffy/` by *name*, wherever they appear. Neither can say "everything under
-        // one project", and the obvious candidate — the folder `muffycodes_data` — is exactly the
-        // one that must NOT be locked, because every project has one and the agent writes its notes
-        // there. So the rule is the first path segment, which is the project.
+        // **The reason this needs a path rule rather than a name.** The app already holds `agent/` and
+        // `.muffy/` by *name*, wherever they appear. Neither can say "everything under one top-level
+        // folder", and the obvious candidate — the folder `muffycodes_data` — is exactly the one that
+        // must NOT be locked, because every project has one and the agent writes its notes there. So the
+        // rule is the first path segment.
+        //
+        // **What the lock does not do is make the subtree read-only.** A folder lock is an existence
+        // lock now (`isAgentLocked`), so a template inside `shared/schemas/` is still editable; what the
+        // path rule holds is the folder against being renamed or deleted.
         val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT).apply { mkdirs() }
         val deep = File(File(File(shared, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
             parentFile.mkdirs()
             writeText("you are an agent\n")
         }
 
-        assertEquals("the project folder itself", Workspace.Hold.APP, workspace.hold(system, emptySet()))
+        assertEquals("the project folder itself", Workspace.Hold.APP, workspace.hold(shared, emptySet()))
         assertEquals(
             "a file three folders down, whose every name is ordinary",
             Workspace.Hold.APP,

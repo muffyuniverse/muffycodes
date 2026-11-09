@@ -523,7 +523,7 @@ class SemanticSearchTest {
         write("shopping", "toast.txt", "milk and bread\n")
         val fake = Fake(brokenRerank = true)
 
-        val answer = engine(fake, rerank = PickedModel("test/rerank", "test"))
+        val answer = engine(fake, rerank = PickedModel("rerank.json"))
             .answer(null, "milk", paths = 10, depth = 8, Deadline.none()).getOrThrow()
 
         // **Still a meaning search**, so this is a note rather than a failure: the vector order is the
