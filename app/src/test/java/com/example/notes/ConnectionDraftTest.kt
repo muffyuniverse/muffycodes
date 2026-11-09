@@ -149,11 +149,15 @@ class ConnectionDraftTest {
     }
 
     @Test
-    fun `an effort the app does not know is refused, and the words are listed`() {
+    fun `an effort the app does not know is sent, because the server is the one that judges it`() {
+        // **This used to refuse, and the refusal was wrong.** `effortRank` came from the catalogue's
+        // `supported_efforts`, which is OpenRouter's field — so the app was refusing a word on the
+        // authority of one vendor's list, for a request that goes to whatever server the address names.
+        // A server that does not take the word says so itself, in its own sentence, naming what it does
+        // take; a window that will not close cannot.
         val said = ConnectionDraft(kind = ConnKind.LLM, model = "m", effort = "extreme").problemSaid()
 
-        assertTrue("it refuses: $said", said != null)
-        assertTrue("it lists what is allowed: $said", "medium" in said.orEmpty())
+        assertEquals("so it is accepted", null, said)
     }
 
     @Test

@@ -877,23 +877,12 @@ class WorkspaceTest {
         assertTrue("the copy is made", copy.isSuccess)
         assertEquals("with the same text", "two litres", copy.getOrThrow().readText())
 
-        // A *different* source, so the second refusal can only be about the lock: the first copy
-        // already put a `milk.txt` in `inbox`, and a taken name would refuse for another reason and
-        // make this assertion pass while the lock had stopped working.
-        val bread = File(folder, "bread.txt")
-        workspace.write(bread, "one loaf")
-        lock("inbox")
-        // **The agent is refused, which is the rule the lock exists for.** Copying into a locked
-        // folder is a write into it; a person may still do it to a folder they locked themselves.
-        //
-        // The sentence names the *file* being written, not the folder that holds it - which is what
-        // the first version of this assertion got wrong, and the failure was useful: the message a
-        // model receives is about the path it asked to write, so it can correct the path it asked
-        // for.
-        val why = workspace.agentLockProblem(File(elsewhere, "bread.txt"))
-        assertTrue("the agent is refused: $why", why != null)
-        assertTrue("and told the file it cannot write: $why", why!!.contains("bread.txt"))
-        assertTrue("and that it is a lock: $why", why.contains("locked"))
+        // **What the old rule said, and the operator changed on 2026-11-09**: writing *into* a locked
+        // folder was refused, because a folder lock covered everything inside it. It does not any more —
+        // a folder lock is an existence lock, so the files inside are theirs to write unless a file is
+        // itself locked. `LookTest` and `WorkspaceTest`'s folder-lock test carry the same rule from the
+        // other side; this one keeps the half that did not change.
+        assertTrue("copying out of a locked folder is still allowed", copy.isSuccess)
     }
 
     @Test

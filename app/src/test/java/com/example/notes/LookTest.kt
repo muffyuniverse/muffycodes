@@ -269,8 +269,11 @@ class LookTest {
         assertTrue("the folder is locked, as the person asked", ws.isLockedHere(folder))
         val made = ws.createImage(folder, "drawing.png", Look.CANVASES.first())
         assertTrue("made, not refused: ${made.exceptionOrNull()?.message}", made.isSuccess)
-        // And the agent is the one held back — the same lock, read by the other question.
-        assertTrue("the agent is refused", ws.isAgentLocked(File(folder, "other.png")))
+        // **And what the lock does hold is the folder itself**, not the files inside it — the operator's
+        // 2026-11-09 rule: a folder lock stops renaming and deleting and nothing else. So a picture put
+        // in a locked folder is allowed, which is what the line above proves, and the folder cannot be
+        // renamed out from under the person who locked it.
+        assertTrue("the folder is held", ws.isAgentLocked(folder))
     }
 
     @Test

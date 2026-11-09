@@ -136,6 +136,7 @@ class IndexQueueTest {
         // **The map is the coalescer.** An index pass answers "make this index match this project",
         // so three of them at once are the same statement — and a project saved ten times in an
         // afternoon would otherwise be walked ten times for one changed file.
+        template("embedding.json")
         val fake = Fake()
         IndexQueue.configure(
             ws = ws,
@@ -165,6 +166,7 @@ class IndexQueueTest {
         // **The record answers "what has this app done"**, and the log is where it lives. It is a
         // bookkeeping row — in the file and not in the model's context — because indexing is not part
         // of the conversation.
+        template("embedding.json")
         IndexQueue.configure(
             ws = ws,
             embedder = Fake(),
@@ -196,6 +198,8 @@ class IndexQueueTest {
 
     @Test
     fun `a project that no longer exists is named rather than thrown`() {
+        // The folder is asked about before the template is, so this one needs no template on disk — the
+        // pass stops at "there is no folder called shopping any more".
         IndexQueue.configure(
             ws = ws,
             embedder = Fake(),
@@ -275,6 +279,25 @@ class IndexQueueTest {
      * file, and calling it as a constructor is the mistake this test made first: the compiler said
      * `Unresolved reference`, which reads like a missing import and is a missing `val`.
      */
+    /**
+     * Writes the template the pointer names, **so the pass reads a folder and not a stub.**
+     *
+     * The queue asks the folder for the file (`Schemas.read`) because a pointer is a name, not a
+     * request — so a test that pointed at `embedding.json` without writing it would be testing the
+     * refusal, not the index.
+     */
+    private fun template(name: String) {
+        Schemas.write(
+            ws.accountDir,
+            name,
+            Schema(
+                address = "https://x.test/v1",
+                url = "embeddings",
+                body = org.json.JSONObject("""{"model":"test/embed","input":"{{input}}"}"""),
+            ),
+        ).getOrThrow()
+    }
+
     private fun Config(embedding: PickedModel?) = ModelConfig(
         active = ActiveModel("chat/model", "high"),
         embedding = embedding,
