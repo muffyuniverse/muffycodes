@@ -88,9 +88,11 @@ class SchemasTest {
         Schemas.ensure(account)
         for (name in Schemas.names(account)) Schemas.remove(account, name)
 
-        // **`ensure` is about the folder being empty, not about a file being missing.** Writing one of
-        // the three back would be the app overruling somebody who deleted them on purpose.
+        // **The folder's existence is the flag, not whether it holds a schema.** "Fill it when it holds
+        // none" reads the same and is wrong: a folder somebody emptied by hand holds none either, and
+        // refilling it would be the app putting back the files they just deleted.
         assertEquals(emptyList<String>(), Schemas.ensure(account))
+        assertTrue("the folder is still there, which is what says it was emptied", Schemas.dir(account).isDirectory)
     }
 
     @Test
@@ -99,7 +101,21 @@ class SchemasTest {
         Schemas.remove(account, "embedding.json")
         Schemas.remove(account, "rerank.json")
 
+        // Same rule from the other side: a folder that exists is a folder somebody has seen, so nothing
+        // is written into it — not even the two that are missing.
         assertEquals(listOf("chat.json"), Schemas.ensure(account))
+    }
+
+    @Test
+    fun `deleting the folder is how a person asks for the shipped three back`() {
+        Schemas.ensure(account)
+        Schemas.remove(account, "chat.json")
+        Schemas.dir(account).deleteRecursively()
+
+        // **The one way back to the defaults, said in the code**: a folder that is not there is made and
+        // filled, and a folder that is there is never added to. Nothing else in this class writes the
+        // shipped files, so there is no second path that could disagree.
+        assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), Schemas.ensure(account))
     }
 
     @Test

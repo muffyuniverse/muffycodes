@@ -69,15 +69,7 @@ data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = Sh
      * renderer so a window can refuse a template before it is stored, and the renderer can still
      * refuse it if it arrived some other way.
      */
-    fun problem(): String? {
-        val path = url.trim()
-        if (path.isEmpty()) return "A shape needs a url to send to."
-        if (path.contains("://") || path.startsWith("//")) {
-            return "A shape's url is a path on the connection's address, not an address: \"$path\". " +
-                "The address is the connection's, so a shape cannot send the key somewhere else."
-        }
-        return placeholderProblem(body, kind)
-    }
+    fun problem(): String? = urlProblem(url) ?: placeholderProblem(body, kind)
 
     /**
      * The body, with [values] put where the placeholders are.
@@ -184,6 +176,24 @@ data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = Sh
             val close = text.indexOf("}}", open + 2)
             if (close < 0) return null
             return text.substring(open + 2, close).trim()
+        }
+
+        /**
+         * The third rule on its own: **a url is a path, never an address.**
+         *
+         * Apart from [problem] because two callers need it and one of them has no vocabulary to check
+         * — a request schema read as a file is checked for its url before anything knows what kind of
+         * call it will be. One copy of the rule, because the alternative is two spellings of "the key
+         * cannot be sent somewhere else" and the first time they disagree the wrong one wins.
+         */
+        fun urlProblem(url: String): String? {
+            val path = url.trim()
+            if (path.isEmpty()) return "A request needs a url to send to."
+            if (path.contains("://") || path.startsWith("//")) {
+                return "A request's url is a path, not an address: \"$path\". The address is the " +
+                    "schema's own, and a url that could carry one could send the key somewhere else."
+            }
+            return null
         }
 
         /**

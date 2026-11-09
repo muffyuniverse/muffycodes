@@ -107,18 +107,25 @@ object Schemas {
     }
 
     /**
-     * Writes the shipped schemas when the folder holds none, and answers what is there.
+     * **The folder's existence is the flag**: when it is not there it is made and filled with the
+     * shipped three, and when it is there it is left exactly as it is.
+     *
+     * That distinction is not a detail — it is the whole of "a person who deleted them meant it".
+     * "Fill the folder when it holds no schema" reads the same and is wrong: a folder somebody emptied
+     * by hand holds no schema either, and refilling it would be the app overruling them with the very
+     * files they just removed. What a person who wants the defaults back does is delete the folder.
      *
      * Called before a list is shown rather than at first launch, so an account that upgrades into this
-     * design gets them too — and a folder a person emptied is left empty, because the check is "no
-     * schema at all" rather than "a schema missing".
+     * design gets them too.
      */
     fun ensure(accountDir: File): List<String> {
         val folder = dir(accountDir)
-        val there = names(accountDir)
-        // **A folder that cannot be made is not an error here.** The list is allowed to be empty, and
-        // the picker says so; failing this call would make a read-only account unable to open Settings.
-        if (there.isNotEmpty() || !folder.mkdirs()) return there
+        if (folder.isDirectory) return names(accountDir)
+        // **A folder that cannot be made is not an error here.** The list is allowed to be empty and
+        // the picker says so; failing this call would make a read-only account unable to open Settings
+        // at all, which is a worse answer than a list with nothing in it.
+        folder.mkdirs()
+        if (!folder.isDirectory) return emptyList()
         for ((name, schema) in shipped()) {
             write(accountDir, name, schema)
         }

@@ -64,24 +64,17 @@ data class Schema(
      * of placeholders the caller will fill; null checks only the two rules that hold for every kind,
      * which is what the editor wants while a file is half written.
      */
-    fun problem(kind: ShapeKind? = null): String? {
-        val where = address.trim()
-        if (where.isEmpty()) return "\"address\" is empty — it is the server this request goes to."
-        if (!where.startsWith("http://") && !where.startsWith("https://")) {
-            return "\"address\" must start with http:// or https:// — it is an address, like " +
-                "https://openrouter.ai/api/v1."
-        }
-        if (target < 0) return "\"target\" is negative; write a size, or 0 for off."
-        if (forget < 0) return "\"forget\" is negative; write a size, or 0 for off."
-        if (trim < 0) return "\"trim\" is negative; write a size, or 0 for off."
-        // The url and the placeholders are [Shape]'s rules, and the sender enforces them again — one
-        // copy of each, because a file can arrive from the editor, from a copy, or from a person's
-        // hands, and the rule must not depend on which.
-        val shape = shape(kind ?: ShapeKind.CHAT)
-        val shapeProblem = shape.problem()
-        if (shapeProblem != null) return shapeProblem
-        return if (kind == null) Shape.placeholderProblem(body) else null
-    }
+    fun problem(kind: ShapeKind? = null): String? =
+        // **The url and the placeholders are [Shape]'s rules, asked one at a time.** Not its
+        // `problem()`, because that checks the placeholders against the vocabulary of a *kind* — and a
+        // kind-less check (what the editor wants while a file is half written) must not call an
+        // embedding template's `{{input}}` a mistake.
+        addressProblem(address)
+            ?: numberProblem("target", target)
+            ?: numberProblem("forget", forget)
+            ?: numberProblem("trim", trim)
+            ?: Shape.urlProblem(url)
+            ?: Shape.placeholderProblem(body, kind)
 
     /** The file's text. Two-space pretty, because a person opens these. */
     fun text(): String = toJson().toString(2)
@@ -99,6 +92,23 @@ data class Schema(
     }
 
     companion object {
+
+        /** Why [address] is not somewhere bytes can go, or null when it is. **One copy**, asked by the
+         * reader and by [problem]. */
+        fun addressProblem(address: String): String? {
+            val where = address.trim()
+            if (where.isEmpty()) return "\"address\" is empty — it is the server this request goes to."
+            if (!where.startsWith("http://") && !where.startsWith("https://")) {
+                return "\"address\" must start with http:// or https:// — it is an address, like " +
+                    "https://openrouter.ai/api/v1."
+            }
+            return null
+        }
+
+        /** Why one of the three numbers cannot be used, or null. */
+        fun numberProblem(key: String, value: Long): String? =
+            if (value < 0) "\"$key\" is negative; write a size, or 0 for off." else null
+
         /**
          * Reads a schema, or says which key is wrong.
          *
@@ -117,6 +127,10 @@ data class Schema(
             if (address.isEmpty()) {
                 return Result.failure(IllegalArgumentException("\"address\" is missing"))
             }
+            // **A file that could never be sent is refused when it is read**, rather than at the first
+            // turn — the same rule `model_conf.json` follows, because the person who can fix it is
+            // looking at the file now.
+            addressProblem(address)?.let { return Result.failure(IllegalArgumentException(it)) }
             if (url.isEmpty()) return Result.failure(IllegalArgumentException("\"url\" is missing"))
             val body = root.optJSONObject("body")
                 ?: return Result.failure(
