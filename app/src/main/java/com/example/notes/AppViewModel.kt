@@ -523,6 +523,12 @@ class AppViewModel @JvmOverloads constructor(
         // name the phone installed, which is what a person says when they say "on 149".
         Trace.build = buildName
         Trace.note("app-opened", versionLine)
+        // **The floor is made on every start, and it is creation rather than recreation.** `~local`
+        // cannot be removed (§3.9), so the only state this answers to is a phone that has no account
+        // folder at all — a fresh install, or one that signed in before the rule and had its local
+        // folder renamed away by the adoption this replaced. It writes nothing when the folder is
+        // there, so a phone that has never signed in keeps the only copy of its work untouched.
+        accounts.ensureProvisional()
         refresh()
         // **The introduction, once.** The report that asked for it: *"remove this sign in to begin
         // text box. Instead I want on first open to move operator to readme.md file from system

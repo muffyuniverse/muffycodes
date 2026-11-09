@@ -234,7 +234,12 @@ class AccountsFeatureTest : FeatureTest() {
         scene.viewModel.removeAccount(AccountStore.PROVISIONAL, deleteCopies = false)
 
         assertTrue("still the account we are in", scene.viewModel.isProvisionalAccount)
-        assertTrue("the account is still known", scene.viewModel.known(AccountStore.PROVISIONAL))
+        // **`known` is about keys, not folders** — it answers "can this phone act as that login", and
+        // `~local` never had a key. The question here is whether the workspace is still on the phone.
+        assertTrue(
+            "the account is still listed",
+            scene.viewModel.accountsWithProjects.any { it.first.login == AccountStore.PROVISIONAL },
+        )
         assertTrue("its folder is still there", inside.isDirectory)
         assertTrue(
             "and the refusal says why: ${scene.viewModel.message}",

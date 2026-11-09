@@ -144,7 +144,10 @@ class TransferTest {
     fun `a project with an address may not arrive in the local account`() {
         // **§3.9's second ruling, at the third door that can write `origin`.** Local has no host and no
         // key, so a connected project there would name a repository nothing on this phone can reach.
-        val dir = from.projectDir("Shopping")
+        //
+        // The project is made in the **account** and asked to go into Local, because that is the
+        // direction the rule is about — a local project has no address to begin with.
+        val dir = to.projectDir("Shopping")
         dir.mkdirs()
         File(dir, "a.txt").writeText("on main\n")
         val repo = GitService.initOrOpen(dir, author)
@@ -154,19 +157,21 @@ class TransferTest {
                 git.commit().setMessage("first").setAuthor(author.ident())
                     .setCommitter(author.ident()).call()
             }
-            // **`origin` by name**, because that is the name the app reads (`GitService.remoteUrl`) and a
-            // constant from another package would say the same thing less plainly.
             it.config.setString("remote", "origin", "url", "https://host/owner/shopping.git")
             it.config.save()
         }
 
-        // The other direction is the ordinary one and must still work: an account's project may go
-        // anywhere, and a project with no address may come here.
         val problem = Transfer.problem(to, from.accountDir, "Shopping", toIsLocal = true)
 
         assertNotNull("it refuses", problem)
         assertTrue("naming the rule: $problem", problem!!.contains("Local"))
         assertTrue("and the way out: $problem", problem.contains("Move it to an account"))
+        // **The same project with no address may come here**, and that is the half that makes the rule
+        // about the address rather than about projects.
+        assertNull(
+            "a project with no address is welcome",
+            Transfer.problem(from, to.accountDir, "Shopping", toIsLocal = false),
+        )
     }
 
     @Test

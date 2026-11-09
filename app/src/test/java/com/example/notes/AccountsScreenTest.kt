@@ -164,7 +164,11 @@ class AccountsScreenTest {
         scene.viewModel.signIn("someone-else", "a-key", "", "")
         accounts()
 
-        compose.onAllNodesWithContentDescription("More").assertCountEquals(2)
+        // **Counted against the rows the screen is drawing**, not a number written here: the local
+        // account is a row like any other (§3.9 — it always exists), so a phone with the test account
+        // and this one has three, and the assertion that matters is one menu per row.
+        compose.onAllNodesWithContentDescription("More")
+            .assertCountEquals(scene.viewModel.accountsWithProjects.size)
     }
 
     @Test
