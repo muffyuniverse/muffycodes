@@ -432,8 +432,8 @@ carry a small one. Zero or absent means that hand is off, which is a statement r
 | pointer | stored where | the file is |
 |---|---|---|
 | the worktree's chat request | `.muffy/schemas.json`, per `project/branch` — a **path** from the account root | a chat unit |
-| the embedding model | `.muffy/model_conf.json`'s `embedding` | an embedding unit |
-| the rerank model | `model_conf.json`'s `rerank` | a rerank unit |
+| ~~the embedding model~~ | ~~`model_conf.json`'s `embedding`~~ | **removed 2026-11-09** — `docs/REMOVED-2026-11-09-semantic-search-and-scanner.md` |
+| ~~the rerank model~~ | ~~`model_conf.json`'s `rerank`~~ | **removed 2026-11-09**, same document |
 
 **The pointer is a path, not a name** (§3.8.3): the operator's *"branch just holds a path link to a llm
 request template it should use"*.
@@ -545,7 +545,7 @@ general** — the one piece of `wiredFor` worth surviving, because it is the pie
 | **T2** | The catalogue goes: `ModelCatalogue.kt`, `CatalogueKind`, `EndpointInfo`/`ModelInfo`, `ModelChoice`, `providers`/`providersOf`, the five model/provider verbs, `addPicked`, `effortFor`/`effortRank`, `ActiveModel.provider`, `Choice.provider`, and the `modelSees` courtesy check. | **landed** (`04bfa137`): a model is a word in a file; the effort is sent as written; a sentence that wants a word for the place asks `providerOf` |
 | **T0** | `system` → `shared`, and a folder lock stops covering its contents; `shared/` and `shared/schemas/` system locked; `shared/schemas/example.json` held as a *file*. | **half landed** (`78ab2190`): `isAgentLocked` drops the prefix test and `appHold` gains the exemplar's path — but `isSystemPath` still answers for **every path under `shared`**, so the person's `isLocked` still inherits and nothing in the folder can be written. **F1 in §3.7.2 is that half** |
 | **T3** | The pointer and the send: `Schemas.pointer`/`setPointer` keyed as a session is; `wiredFor` becomes `(project, branch) → Schema + key-by-host`; the branch window picks a file. | **storage landed** (`13336130`) — `.muffy/schemas.json`, one file, atomic. **The resolver and the picker are next**; until they land the runner still reads the connection rows |
-| **T4** | The two vector models reference files: `PickedModel.schema`, the search reading the model id out of the file, the two rows becoming one file list. | **half landed** (`04bfa137`, `ff1aad6a`): the pointer is a name, `SemanticSearch` reads the id from the file and compares ids rather than names; the address and key still come from `model_conf.json`'s `baseUrl` and the vault |
+| **T4** | The two vector models reference files: `PickedModel.schema`, the search reading the model id out of the file, the two rows becoming one file list. | **OBSOLETE 2026-11-09** — the two models and the index behind them were removed (`docs/REMOVED-2026-11-09-semantic-search-and-scanner.md`). What survives of T4 is the **chat** template pointer, which landed in `Schema`/`Schemas` |
 | **T5** | The general scope holds no chat model: `ModelSection`'s chat rows, `ModelChoice` and the rates line go; `model_conf.json` keeps only the two pointers. | **part done** (`947d1ff5`): the chat rows, the picker and the connection row are gone from Settings, and the templates row is in their place; `model_conf.json`'s `active` is still read by the runner |
 | **T6** | The connections window loses its llm half: `ConnKind` becomes git-only, `Connection.shapes` and the shape dialog go, the git window opens on the project's remote host. | **not started** |
 
@@ -1352,4 +1352,6 @@ C3 first would mean writing the account's URL twice.
 - **Two branches, one worktree each, two agents** — per-branch credentials make that two different remote
   identities writing to one repository. Git allows it; whether it is *wise* is the person's call, and the
   branch row shows whose key it is before they run it.
-- **`MediaStore` and Downloads** — `PLAN-universal-2026-11-06` §13e, still open, and unrelated to this.
+- **`MediaStore` and Downloads** — reversed 2026-11-09: the three agent verbs are being **removed** and the
+  SAF folder is not made (`PLAN-universal-2026-11-06` §13e.3). `DownloadsSink` stays, because it writes the
+  app's own `trace.log`.

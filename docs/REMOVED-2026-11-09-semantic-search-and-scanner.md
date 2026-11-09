@@ -112,9 +112,10 @@ so. The chat model's address is `active.baseUrl`, which was always a different f
 
 ## 4. What this leaves open
 
-1. **`model_conf.json` now holds one value: `active`.** C6 of `PLAN-credentials-2026-11-08` moves that to
-   the account's connection row, and then **the file has nothing left to hold**. The removal shrinks C6
-   from "delete most of a file" to "delete the file".
+1. **`model_conf.json` now holds one value: `active`** (model, effort, and the fallback address). C6 of
+   `PLAN-credentials-2026-11-08` **landed and deliberately left it there** — the general settings are the root
+   of the chain. What would remove it is **T5** (*"the general scope holds no chat model"*, part done), and
+   this removal is what makes T5 a deletion of a file rather than a surgery on one.
 2. **The vault's `General` scope has no consumer.** It existed for the app-wide embedding and rerank key —
    one vector space per app — and chat is never general. §3.11 N6 asks for the scope of a minted key
    (`undefined`/general/account/project/branch); this removal is the argument for dropping `general` from
