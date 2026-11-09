@@ -366,6 +366,143 @@ because a copy of the parent's value at a narrower scope stops following the par
 
 ---
 
+---
+
+## 3.6 The request becomes a file — the inheritance goes, and with it the whole scoped llm menu
+
+**The operator, 2026-11-09, and this supersedes §3.5's chain:**
+
+> *"And now I think that this inheritance thing is dumb. We could just leave in general settings a button
+> that then could open a hidden folder with llm request schema templates as files that user can open and
+> edit (and we already have the functionality) - and a branch llm picker just allows to select one of those
+> files as a template to use for the worktree agent. And there is then no need for scoped llm settings
+> menues, just a template manager in general settings and a picker at branch addition and as a 3 dot
+> option."*
+
+> *"and rerank and embedding pickers can also just reference a template file from this folder"*
+
+§3.5 spent a week building field-by-field inheritance between four scopes, a cap, a `changesAgainst`
+comparison so a window would not pin what it inherited, and a row format with every field optional. **All
+of that existed because the settings were forms.** A form has fields, fields need inheritance, and
+inheritance needs a resolver. A file does not: a schema that names its model *has* chosen its model, and
+one that leaves it out is simply a schema that cannot be sent.
+
+### What one schema is (§3.6.1)
+
+`<account>/.muffy/schemas/<name>.json` — **`Schema`** (`Schema.kt`):
+
+| key | what it is | absent means |
+|---|---|---|
+| `address` | the base URL, `https://openrouter.ai/api/v1` | the file is refused — a request with nowhere to go |
+| `url` | the path on it, `chat/completions` | refused |
+| `body` | the request, placeholders and literals mixed | refused |
+| `target` | where the context should end up | off |
+| `forget` | when the agent is asked to clear up | off |
+| `trim` | when the app trims the context itself | off |
+
+**The model and the effort are literals in the body, not placeholders.** Only what the app alone knows at
+call time stays a placeholder: `{{messages}}`, `{{tools}}`, `{{stream}}`, `{{tool_choice}}` (chat),
+`{{input}}`, `{{dimensions}}` (embedding), `{{query}}`, `{{documents}}` (rerank). A model id is a name the
+server assigned and it belongs to the request the way the address does — so **three templates are three
+models**, and copying one is how you get another.
+
+**The three numbers are in the file too, because they are policy and policy belongs with the request it
+governs.** A "long careful" template can carry a bigger target; a template for a small local model can
+carry a small one. Zero or absent means that hand is off, which is a statement rather than a gap.
+
+### Where the folder is, and why (measured 2026-11-09)
+
+`.muffy/` — under the account, outside every repository. Checked, because the design depends on it:
+
+| question | measurement |
+|---|---|
+| is it browsable? | **yes.** `Workspace.isHidden` hides only `.gitkeep`, `.git` and `Beside`'s temp prefix — Report 28 deliberately made the app's own folders visible |
+| is it editable? | **yes.** `.json` is already `EntryKind.TEXT`, and `EditorScreen` saves any file it opens |
+| can a person make one? | **yes.** The browser's own **New file** button, `AppViewModel.createFile` |
+| does it get a version history? | **no — and it cannot.** `GitService.versionsOf(repo, path)` needs a repository and `.muffy/` is in none. An edit is undone by editing back, or by copying the file first; deleting the folder is how you ask for the shipped three again |
+
+**So no template UI is written at all.** The button the operator asked for is `viewModel.open(listOf(".muffy", "schemas"))`
+— a browser open, which already exists and is already tested.
+
+### What the pickers become (§3.6.2)
+
+**One question per pointer, and the pointer is what the file is for:**
+
+| pointer | stored where | the file is |
+|---|---|---|
+| the worktree's chat request | `.muffy/agents.json`, per `project/branch` — the file that already holds the session | a chat schema |
+| the embedding model | `.muffy/model_conf.json`'s `embedding` | an embedding schema |
+| the rerank model | `model_conf.json`'s `rerank` | a rerank schema |
+
+**Which pointer named a schema is what it is for**, so a file cannot disagree with the place that chose it:
+the vocabulary it is checked against travels with the question, not with the document.
+
+**A branch with nothing chosen refuses, naming the picker.** A worktree that silently ran another branch's
+request would spend the key on a model nobody chose for it. There is no `default.json` fallback and no
+"shipped default for a branch", for the same reason §3.5 has no cap: a wrong choice the server refuses is a
+sentence, and a wrong choice the app picks is a surprise on a bill.
+
+**No inheritance and no scopes.** The branch's file is the branch's request; the project and the account
+have none, because they cannot be *sent* anything. The general settings keep an **entry point** — the
+"Model connection" row becomes "Request templates", opening the folder — and nothing else about chat.
+
+### The key (§3.6.3)
+
+**Looked up by the host the schema names, not stored in the file.** A schema is a document people read,
+copy and hand to each other; a key in one is the leak the vault exists to prevent. So at send time:
+
+1. the schema's `address` names a host;
+2. the vault is asked for **a row bound to that host** — the same `hostCovers`/`keyScope` rule Vault A
+   already uses, unchanged, which is the only part of this design that was ever about safety;
+3. **no row for that host is a refusal in words**, naming the host and the place to add a key — not a
+   request with the account's key offered to a server it was not made for.
+
+**What survives from §2.3's checkmarks:** `auth: llm` still resolves a named `llm` row for a tool call.
+What dies: `ConnKind.LLM`, `Choice`, `Connection.shapes`, the shape window, the provider tags, the
+catalogue, and the four-scope llm walk in `wiredFor`.
+
+### Git does NOT become files — the measurement behind that answer (2026-11-09)
+
+The operator asked directly: should git also be templates, or the app's own structured fields?
+
+**Structured, and the two protocols differ in a way that decides it:**
+
+| | a chat request | a git remote |
+|---|---|---|
+| the destination | the schema's own `address` | **`remote.origin.url`** — git's fact, read, never stored twice |
+| the variable part | the whole body: `max_tokens` vs `max_completion_tokens`, `system` vs `developer`, the reasoning echo, which field carries the text to embed | **a username and a token** — basic auth is `user:token`, one word of freedom |
+| a template's freedom | large enough to be worth a document | **none: a three-key JSON with no options** |
+
+**And a second reason that is not about shape:** documents get copied and committed, so a git template
+would be `host + user + token` in plaintext, or a file whose two visible keys point at a credential row —
+a form with extra steps and no gain.
+
+**A branch cannot change the destination, by git's own rule.** A worktree shares `config` through
+`commondir` (`Worktrees.kt:118`), so `remote.origin.url` is the project's. What a branch *may* override is
+its **credential** — the token, and the username, which must travel with it because a token presented under
+the wrong name is a different identity (`GitCredentials.Answer.Use`). `gitConnectionFor(project, branch, host)`
+already walks branch → project → account and filters by host, which is exactly the rule the operator
+stated; nothing about git needs to change shape.
+
+**One defect found while checking, and it is in this plan's scope:** the git window asks for the host as
+free text although `connectionShown` already knows the project's remote host. A typo there produces the
+*withheld* sentence at push time — correct, but late. The window should open on the project's remote host
+and say where the value came from.
+
+### Steps
+
+| step | what | state |
+|---|---|---|
+| **T1** | `Schema` + `Schemas`: the document, the folder, the three shipped requests, the name rules. | **landed** (`f82658bc`, fixed `bd002dad`): the folder's existence is the flag — a folder somebody emptied stays empty, and deleting it is the one way back to the defaults |
+| **T2** | The catalogue goes: `ModelCatalogue.kt`, `CatalogueKind`, `EndpointInfo`/`ModelInfo`, `ModelChoice`, `providers`/`providersOf`, `addModel`/`removeModel`/`addProvider`/`moveProvider`/`removeProvider`, `addPicked`, the *scan semantics* that read `inputModalities` from it, and `effortFor`/`effortRank`. `ActiveModel.provider` goes with them; a sentence that wants the word asks `providerOf(address)`. | **next** — the deletion is stashed and half-done (`ModelConfig`, `AppViewModel`) |
+| **T3** | The pointer and the send: `.muffy/agents.json` gains a schema name per `project/branch`; `AgentWiring.wiredFor` becomes `(project, branch) → Schema + key-by-host`; the branch window picks a file from `Schemas.names`. | after T2 |
+| **T4** | The two vector models reference files: `PickedModel` becomes a name, `Embedder`/`SemanticSearch` read the schema's address and body, and the embedding/rerank pickers become one dialog over `Schemas.names`. | after T3 |
+| **T5** | The general scope's entry point: "Request templates" opens `.muffy/schemas`; `ModelSection`'s chat rows, `ModelChoice`, the key row and the rates line go; `model_conf.json` keeps only the two pointers. | after T4 |
+| **T6** | The connections window loses its llm half: `ConnKind` becomes git-only, `Connection.shapes`/`shapeUrl`/`shapeBody`/`shapeProblem`/`ConnectionDraft.shape*` and the shape dialog go; the git window opens on the project's remote host and names it. | after T5 |
+
+**Why T2 before T3.** A picker that lists files must not sit beside a list of tags: two ways to name a
+model, one of which is invisible in the file, is the drift this section exists to remove.
+
 ## 4. Cost is removed
 
 `usage.cost` and the per-endpoint prices are OpenRouter's extension; the OpenAI protocol has no money in it.
