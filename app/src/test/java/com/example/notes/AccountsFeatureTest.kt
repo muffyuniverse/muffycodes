@@ -472,8 +472,10 @@ class AccountsFeatureTest : FeatureTest() {
      */
     @Test
     fun `an app link in a cloned page is refused`() {
-        val clone = File(scene.viewModel.currentDir ?: scene.root, "my-copy.md")
-        scene.viewModel.followLink("app:connect-github", clone)
+        // **The folder the document lives in**, which is what `followLink` is given: a relative link
+        // in it means a file beside it, and the project it belongs to is a fact about the folder.
+        val folder = scene.viewModel.currentDir ?: scene.root
+        scene.viewModel.followLink("app:connect-github", folder)
 
         assertNull("a copy cannot act", scene.viewModel.pendingConnection)
     }
@@ -485,7 +487,7 @@ class AccountsFeatureTest : FeatureTest() {
             Onboarding.DIR,
         )
         val page = File(dir, Onboarding.pages().last().name)
-        scene.viewModel.followLink("app:use-token", page)
+        scene.viewModel.followLink("app:use-token", page.parentFile)
 
         assertEquals(
             "the app's own page may ask for the token door",
@@ -526,7 +528,7 @@ class AccountsFeatureTest : FeatureTest() {
             ),
             Onboarding.pages().last().name,
         )
-        scene.viewModel.followLink("app:connect-github", page)
+        scene.viewModel.followLink("app:connect-github", page.parentFile)
         assertTrue("the action was recorded", Trace.report().taps > beforeAction)
         assertTrue(
             "named as an action: newest ${Trace.report().lines.take(3)}",
@@ -543,8 +545,7 @@ class AccountsFeatureTest : FeatureTest() {
      */
     @Test
     fun `a refused app link is recorded`() {
-        val clone = File(scene.viewModel.currentDir ?: scene.root, "my-copy.md")
-        scene.viewModel.followLink("app:delete-account", clone)
+        scene.viewModel.followLink("app:delete-account", scene.viewModel.currentDir ?: scene.root)
 
         assertTrue(
             "the refusal is in the log: ${Trace.report().lines.take(3)}",
