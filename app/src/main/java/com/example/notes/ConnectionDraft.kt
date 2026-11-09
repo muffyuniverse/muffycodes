@@ -102,9 +102,13 @@ data class ConnectionDraft(
 
     private fun llmProblem(): String? {
         val address = address.trim()
-        // **Nothing typed at all is not an error**: the window may be open to set only a model, which
-        // inherits the address and the key beside it.
-        if (address.isEmpty() && model.isBlank() && shapeUrl.isBlank() && shapeBody.isBlank()) return null
+        // **Nothing typed at all is not an error**: the window may be open to set only a model, or
+        // only one of the three numbers, which inherit the address and the key beside them.
+        if (address.isEmpty() && model.isBlank() && shapeUrl.isBlank() && shapeBody.isBlank() &&
+            target.isBlank() && forget.isBlank() && trim.isBlank()
+        ) {
+            return null
+        }
         if (address.isNotEmpty() && !address.contains("://")) {
             return "An address is a URL, with its scheme: https://openrouter.ai/api/v1. Without one " +
                 "there is nothing to join the request's path to."

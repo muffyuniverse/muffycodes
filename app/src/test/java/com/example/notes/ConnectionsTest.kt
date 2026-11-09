@@ -337,8 +337,6 @@ class ConnectionsTest {
         model = "deepseek/deepseek-v4.1-flash",
         provider = "deepseek",
         effort = "high",
-        contextLength = 163_840,
-        maxOutput = 65_536,
         baseUrl = "https://openrouter.ai/api/v1",
     )
 

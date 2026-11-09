@@ -738,36 +738,26 @@ private fun ModelPicker(
                                 } else {
                                     providers.firstOrNull().orEmpty()
                                 }
-                                // The numbers the sheet holds are the **active** model's, so they
-                                // are only handed over when the pick is that same model. A
-                                // different model is asked for its own window by the view model.
                                 viewModel.chooseModel(
                                     pick,
                                     provider,
                                     active.effort,
                                     info?.efforts.orEmpty(),
-                                    contextLength = info?.contextLength.takeIf { pick == active.model },
-                                    maxOutput = info?.maxOutput.takeIf { pick == active.model },
                                 )
                             }
                             PROVIDER -> {
                                 Trace.tap("provider", pick)
-                                // **The new provider's own numbers travel with the choice.** They
-                                // did not before: the window and the reply reserve stayed the old
-                                // pin's, so choosing `cloudflare` left the agent clamped to
-                                // `deepinfra`'s 917,504 while that endpoint keeps 943,718 of the
-                                // window for replies. The model's window is the same either way;
-                                // the reserve is not.
-                                val chosenEndpoint = numbers.firstOrNull { it.tag == pick }
+                                // **No window or reply reserve travels with the choice any more.** It
+                                // used to: the two numbers were stored beside the model so the agent
+                                // could be clamped without a catalogue, and carrying the wrong pin's
+                                // reserve across a provider change was a real bug. Nothing clamps now
+                                // — the three numbers in the settings are used as written — so there
+                                // is nothing to carry.
                                 viewModel.chooseModel(
                                     active.model,
                                     pick,
                                     active.effort,
                                     info?.efforts.orEmpty(),
-                                    contextLength = chosenEndpoint?.contextLength
-                                        ?: info?.contextLength.takeIf { active.provider == pick },
-                                    maxOutput = chosenEndpoint?.maxOutput
-                                        ?: info?.maxOutput.takeIf { active.provider == pick },
                                 )
                             }
                             else -> {

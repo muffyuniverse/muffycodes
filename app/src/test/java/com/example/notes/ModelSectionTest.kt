@@ -371,19 +371,13 @@ class ModelSectionTest {
 
         scene.viewModel.chooseModel(
             ModelConfigFile.DEFAULT_MODEL, "deepinfra/fp8", "high", listOf("max", "high", "low"),
-            contextLength = 1_048_576, maxOutput = 131_072,
         )
         scene.viewModel.chooseModel(
             ModelConfigFile.DEFAULT_MODEL, "cloudflare", "high", listOf("max", "high", "low"),
-            contextLength = 1_048_576, maxOutput = 943_718,
         )
 
         assertEquals("the new provider", "cloudflare", scene.viewModel.modelConfig.active.provider)
-        // **The reserve stopped mattering.** It is still read from the catalogue and stored beside
-        // the choice at this point, but nothing clamps to it any more — the numbers that decide how
-        // big a context may get are the operator's three, and the endpoint's reply reserve is a fact
-        // about the market rather than a limit the app enforces.
-        assertEquals("and it travelled with the choice", 943_718, scene.viewModel.modelConfig.active.maxOutput)
+        assertEquals("and the model is unchanged", ModelConfigFile.DEFAULT_MODEL, scene.viewModel.modelConfig.active.model)
     }
 
     /** One endpoint, with only the two numbers this file's tests care about. */

@@ -111,27 +111,27 @@ class ModelConfigTest {
     }
 
     @Test
-    fun `a model's own window is stored with the choice, and a file without one says nothing`() {
-        // **The number two callers need and neither can look up.** The screen's turn and the
-        // service's poll both build an agent hours apart, and neither has a catalogue; a window held
-        // in memory would be a window the service never has. It travels in the same file as the
-        // choice it belongs to.
+    fun `a file that still carries a model's window is read, and the number is ignored`() {
+        // **The keys are gone from what the app writes**, because nothing clamps to them any more
+        // (see `ContextBudget`). A file the previous build wrote still has them, and the honest
+        // treatment is to read the rest of it and drop the two: a migration for a number nobody uses
+        // would be work spent on a value that has no reader.
         val withWindow = ModelConfigFile.default().let { config ->
-            config.copy(active = config.active.copy(contextLength = 1_048_576, maxOutput = 393_216))
+            config.copy(active = config.active)
         }
         ModelConfigFile.write(account, withWindow)
-        val read = ModelConfigFile.load(account).getOrThrow()
+        val written = ModelConfigFile.file(account).readText()
+        assertFalse("the app writes no window", written.contains("contextLength"))
+        assertFalse("nor a reply reserve", written.contains("maxOutput"))
 
-        assertEquals("the window", 1_048_576, read.active.contextLength)
-        assertEquals("and the reply it promises", 393_216, read.active.maxOutput)
-        assertEquals("round trip, whole", withWindow.active, read.active)
-
-        // **Absent is null, not zero.** A file written by an older build has no such key, and a
-        // window of zero tokens would be a claim the catalogue never made.
-        ModelConfigFile.file(account).writeText(shipped())
+        // And a file that has them — this one was written by hand — still loads.
+        ModelConfigFile.file(account).writeText(
+            written.replace(""effort"", ""contextLength": 1048576, "maxOutput": 393216, "effort""),
+        )
         val old = ModelConfigFile.load(account).getOrThrow()
-        assertNull("nothing is claimed about the window", old.active.contextLength)
-        assertNull("nor about the reply", old.active.maxOutput)
+
+        assertEquals("the model it names", withWindow.active.model, old.active.model)
+        assertEquals("and the effort", withWindow.active.effort, old.active.effort)
     }
 
     @Test
@@ -321,10 +321,10 @@ class ModelConfigTest {
 
     @Test
     fun `an embedding choice keeps its dimension, and a file without one keeps no dimension`() {
-        // **The dimension is a request parameter, so it is stored with the choice** — the same rule
-        // `contextLength` follows, and for the same reason: the index built from it has no catalogue
-        // to ask. A file that names no dimension is not an error; it is a config from before this
-        // app could embed, and the picker says "not chosen" rather than inventing a size.
+        // **The dimension is a request parameter, so it is stored with the choice**: the index built
+        // from it has no catalogue to ask. A file that names no dimension is not an error; it is a
+        // config from before this app could embed, and the picker says "not chosen" rather than
+        // inventing a size.
         val config = ModelConfigFile.default().copy(
             embedding = PickedModel(
                 model = "qwen/qwen3-embedding-8b",

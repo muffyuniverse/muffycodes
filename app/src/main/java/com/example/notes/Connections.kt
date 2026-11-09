@@ -458,8 +458,6 @@ fun wiredFor(
             provider = first { _, choice -> choice?.provider?.takeIf(String::isNotBlank) }
                 ?: if (addressAt < 0) account.provider else providerOf(address),
             effort = effort,
-            contextLength = account.contextLength,
-            maxOutput = account.maxOutput,
             baseUrl = address,
         ),
         key = when {

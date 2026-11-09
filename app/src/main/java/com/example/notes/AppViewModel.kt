@@ -1158,43 +1158,25 @@ class AppViewModel @JvmOverloads constructor(
      * The effort is clamped to what the model declares: a model that offers `low` and `max`
      * cannot answer `high`, and sending a rung it never declared is a 400 from one provider and
      * a silently ignored parameter from another.
+     *
+     * **The model's window is not among them any more.** It used to be written beside the choice so
+     * that the two places which build an agent could clamp without a catalogue; nothing clamps now, so
+     * the number had no reader and no longer travels (see `ContextBudget`).
      */
     fun chooseModel(
         model: String,
         provider: String,
         effort: String,
         supported: List<String>,
-        contextLength: Int? = null,
-        maxOutput: Int? = null,
     ) {
         val clamped = ModelConfigFile.effortFor(supported, effort) ?: effort
         val before = modelConfig.active.effort
-        // **The window travels with the choice.** Two readers build an agent — this screen's turn and
-        // the service's poll — and neither can reach a catalogue, so the numbers the picker saw are
-        // written beside the model they belong to.
-        //
-        // **A number is only carried over when the endpoint is the same one.** Both values are facts
-        // about a *pin*: `deepinfra/fp8/flex` keeps 131,072 of the window for replies and
-        // `cloudflare` keeps 943,718, so carrying the old reserve across a provider change would
-        // leave the agent clamped to an endpoint it is no longer using — the 96k bug with the sign
-        // flipped. Null here means "not told", and an unknown endpoint falls through
-        // `ContextBudget.ceiling` to the model's own window, which is the honest answer.
-        val same = model == modelConfig.active.model && provider == modelConfig.active.provider
-        val active = ActiveModel(
-            model = model,
-            provider = provider,
-            effort = clamped,
-            contextLength = contextLength ?: if (same) modelConfig.active.contextLength else null,
-            maxOutput = maxOutput ?: if (same) modelConfig.active.maxOutput else null,
-        )
         writeModelConfig(
-            modelConfig.copy(active = active),
+            modelConfig.copy(
+                active = ActiveModel(model = model, provider = provider, effort = clamped),
+            ),
             "Chose $model on $provider at $clamped",
         )
-        // **A model picked by name has no window yet**, and the app cannot ask the endpoint for it
-        // while a turn is running. So the catalogue is asked once, here, and the answer is written
-        // into the choice — the same place the next poll reads it from.
-        if (active.contextLength == null) learnWindow(model)
         if (clamped != before && supported.isNotEmpty()) {
             Trace.said("effort: $before -> $clamped, this model's way of saying it")
         }
@@ -1208,9 +1190,9 @@ class AppViewModel @JvmOverloads constructor(
      * embedding and rerank."* What differs is the third value, and it is passed rather than inferred:
      * `dimensions` is the embedding model's choice of size, and a rerank model has none.
      *
-     * **The dimension is written with the model, not beside it in a second field**, for the reason
-     * `contextLength` is: the index that is built later has no catalogue to ask, and a dimension read
-     * from the wrong place is an index that has to be rebuilt.
+     * **The dimension is written with the model, not beside it in a second field**: the index that is
+     * built later has no catalogue to ask, and a dimension read from the wrong place is an index that
+     * has to be rebuilt.
      */
     fun choosePicked(kind: CatalogueKind, model: String, provider: String, dimensions: Int?) {
         val one = PickedModel(
@@ -1357,28 +1339,6 @@ class AppViewModel @JvmOverloads constructor(
      * has. Nothing is written if the catalogue answers nothing, and nothing is written over a window
      * that has arrived in the meantime.
      */
-    private fun learnWindow(model: String) {
-        val source = catalogue
-        onWorker {
-            val info = source.model(model).getOrNull() ?: return@onWorker
-            main.post {
-                val now = modelConfig.active
-                // Nothing is written when the choice moved on, or when a window has arrived
-                // already: the second answer to the same question is not news.
-                if (now.model == model && now.contextLength == null) {
-                    writeModelConfig(
-                        modelConfig.copy(
-                            active = now.copy(
-                                contextLength = info.contextLength,
-                                maxOutput = info.maxOutput,
-                            ),
-                        ),
-                        "Read ${model}'s window",
-                    )
-                }
-            }
-        }
-    }
 
     /** Adds a model and the endpoints it may be pinned to. */
     fun addModel(id: String, providers: List<String>): Result<Unit> {

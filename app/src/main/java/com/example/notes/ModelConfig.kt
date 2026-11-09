@@ -23,21 +23,15 @@ data class ModelChoice(
 /**
  * The three values the agent is built from: which model, which endpoint, how hard it thinks.
  *
- * **[contextLength] and [maxOutput] are the model's own window, stored with the choice.** They are
- * not a fourth setting: they are what the catalogue said about this model when it was picked, kept
- * beside it because the two places that build an agent — the screen's turn and the service's poll —
- * have no catalogue to ask. Without them a pin nobody measured fell back to a 96,000-token floor,
- * which is how a million-token model came to be trimmed at 96k.
- *
- * `null` means "not known yet": a config written by an older build, or a model chosen by hand.
- * Both readers then answer with the measured table or the floor, exactly as before.
+ * **The model's window and reply reserve used to live here too**, and they are gone with the ceiling
+ * they fed (see `ContextBudget`): the app does not derive a limit from a model any more, so a number
+ * about a model's size would be a fact nothing reads. The catalogue still reports them, on the
+ * endpoint rows, where they are what a person compares a provider by.
  */
 data class ActiveModel(
     val model: String,
     val provider: String,
     val effort: String,
-    val contextLength: Int? = null,
-    val maxOutput: Int? = null,
     /**
      * **Where the requests go** — the connection's own address, not the vendor's.
      *
@@ -78,10 +72,9 @@ fun chatEndpoint(baseUrl: String): String =
  * model"* — so `extra` is named for what it holds rather than pretending the three are the same.
  *
  * **The dimension is a request parameter, not a property of the model.** `qwen/qwen3-embedding-8b`
- * answers 1024, 2048 or 4096 on demand (measured), so it belongs beside the id exactly as
- * `ActiveModel.contextLength` does — for the same reason: *"the two places that build an agent
- * have no catalogue to ask."* An index stores the dimension it was built at, and a mismatch is
- * "re-index needed", never a comparison.
+ * answers 1024, 2048 or 4096 on demand (measured), so it belongs beside the id: the two places that
+ * build an embedder have no catalogue to ask, and an index stores the dimension it was built at, so a
+ * mismatch is "re-index needed" rather than a comparison.
  */
 data class PickedModel(
     val model: String,
@@ -239,10 +232,9 @@ object ModelConfigFile {
             put("model", config.active.model)
             put("provider", config.active.provider)
             put("effort", config.active.effort)
-            // Only when known, so a file this app writes stays the file it wrote before: a null
-            // written as 0 would tell the ceiling that the model holds nothing.
-            config.active.contextLength?.let { put("contextLength", it) }
-            config.active.maxOutput?.let { put("maxOutput", it) }
+            // **Nothing about the model's size is written any more.** A file that still has those
+            // keys is read without them, which is why the reader ignores them rather than failing:
+            // the app stopped clamping, so a number nobody uses is not worth a migration.
         })
         put("models", JSONArray().apply {
             config.models.forEach { choice ->
@@ -362,10 +354,6 @@ object ModelConfigFile {
             return Result.failure(IllegalArgumentException("active.effort is empty"))
         }
 
-        // Absent is null, not zero: `optInt` answers 0 for a missing key, and a window of zero
-        // tokens is a claim the catalogue never made.
-        val window = if (activeObject.has("contextLength")) activeObject.optInt("contextLength", -1).takeIf { it > 0 } else null
-        val reply = if (activeObject.has("maxOutput")) activeObject.optInt("maxOutput", -1).takeIf { it > 0 } else null
         // **The two optional blocks, read only when present.** A block that is there and wrong is a
         // refusal like any other, because a config that silently dropped a model the person chose
         // would leave search using nothing while the file plainly names one.
