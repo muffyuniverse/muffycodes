@@ -3968,9 +3968,8 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Where the agent's requests go.
      *
-     * Swappable for the same reason [catalogue] is: no test opens a socket, so the box has to be
-     * drivable by a script — and being able to say exactly what was sent is most of what makes a
-     * test of a chat worth writing.
+     * Swappable so a test never opens a socket: the box has to be drivable by a script, and being able
+     * to say exactly what was sent is most of what makes a test of a chat worth writing.
      */
     var chatDoor: ((Wired) -> Door)? = null
 
@@ -4606,7 +4605,10 @@ class AppViewModel @JvmOverloads constructor(
             keyless = asked.keyless,
             shape = asked.shape,
             model = asked.active.model,
-            provider = asked.active.provider,
+            // **The host, because the address is the upstream** — see `providerOf`. The log's "who
+            // answered" is a fact about where the bytes went, which is the one thing the tag could
+            // never be trusted for once a person could point the app anywhere.
+            provider = providerOf(asked.active.baseUrl),
             // **Recorded, never enforced.** Nothing is scoped by this - it is what lets the log
             // answer "which project costs me most", and a door built without one writes an empty
             // project rather than failing.

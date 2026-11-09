@@ -1061,7 +1061,9 @@ class Agent(
 
         return Request(
             model = model.model,
-            provider = model.provider,
+            // **The host.** `Request.provider` is what the log and the footer say about where a reply
+            // came from, and the only fact the app has is the address it sent to.
+            provider = providerOf(model.baseUrl),
             effort = model.effort,
             system = layers.withLine(line),
             messages = messages(rows),

@@ -469,9 +469,24 @@ name and an existence.
 
 **What follows, and all of it is deletion:**
 
-- `shared/` is **an ordinary folder of the account** — not a project, not classified, not listed as one. It
-  needs no path rule: the agent reaches it from any worktree as `../shared/schemas/example.json`, because
-  `resolve` already allows anything under the account and `..` is already legal for reads.
+- `shared/` is **an ordinary folder of the account** — not a project, not classified, not listed as one —
+  and **system locked like every other folder the app depends on**, which is the operator's correction:
+  *"shared should also be system locked, as all of our special folders, because app's functionality depends
+  on them. And it all utilizes our already existing lock stack of system and user set locks with a minor
+  change for how folder locks should work."* So the whole protection is **the two existing levels applied
+  to the folders that exist**, and the only new rule is what a folder lock means:
+
+  | path | lock | what it stops |
+  |---|---|---|
+  | `shared/` | **system** | renaming or deleting the folder. Its contents are the person's. |
+  | `shared/schemas/` | **system** | renaming or deleting it — a template's folder is named by pointers |
+  | `shared/schemas/example.json` | **system** | editing, renaming, deleting. **Readable**, so it can be copied. |
+  | `shared/schemas/chat.json` | *none* | nothing. The person may edit it, and so may an agent. |
+  | `.muffy/`, `agent/`'s records | **system** | the same, as they already are |
+
+  It needs no path rule of its own: the agent reaches it from any worktree as
+  `../shared/schemas/example.json`, because `resolve` already allows anything under the account and `..` is
+  already legal for reads.
 - **`isSystemPath` goes** (it existed to make one whole project read-only), and `isSystemLocked`'s segment
   names go with it.
 - **`appHold` becomes one question**: is this path on the app's locked list? The three sources it used to

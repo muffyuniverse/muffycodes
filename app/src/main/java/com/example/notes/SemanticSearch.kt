@@ -983,7 +983,7 @@ class SemanticSearch(
         const val NO_MODEL =
             "No embedding template is chosen, so there is nothing here that can search by meaning. " +
                 "Open Settings, choose the row called \"Embedding model\", and pick one of the " +
-                "templates in .muffy/schemas."
+                "templates in shared/schemas."
 
         /**
          * How many chunks are shown to the reranker.

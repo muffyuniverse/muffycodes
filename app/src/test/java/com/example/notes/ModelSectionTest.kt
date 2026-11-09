@@ -6,8 +6,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -19,15 +19,12 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * The model rows, painted for real.
+ * **The model block, painted for real — and it is now a list of files.**
  *
- * The three values are one choice made in steps, and each step changes what the next one offers:
- * the effort ladder belongs to the model, and the provider has to be one the model lists. So the
- * questions here are about what the screen shows after each press, which a unit test of the file
- * cannot answer.
- *
- * **OpenRouter is answered by a script, never by a socket**, which is the rule the whole suite
- * keeps: a picker that could only be checked by paying for a key is a picker checked by hand.
+ * The three pickers (model, provider, effort) are gone with the catalogue that fed them, so what is left
+ * to ask is one question: does the screen name the templates in the folder, and does a press write the
+ * pointer it promised? Everything about *which* model a template asks for belongs to the file, so the
+ * tests that used to drive a picker are replaced by tests that drive a file list.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -45,574 +42,225 @@ class ModelSectionTest {
         Scenario(RuntimeEnvironment.getApplication(), signIn = true)
     }
 
-    /** Answers the two catalogue calls from fixed data, the way the app would read them. */
-    private fun scripted(endpoints: List<EndpointInfo> = DEFAULT_ENDPOINTS): Catalogue =
-        object : Catalogue {
-            override fun model(id: String): Result<ModelInfo> = Result.success(
-                ModelInfo(
-                    id = id,
-                    name = "DeepSeek: DeepSeek V4.1 Flash 1017",
-                    releasedAt = 1792225624L,
-                    contextLength = 1048576,
-                    maxOutput = 393216,
-                    inputModalities = listOf("text", "image"),
-                    outputModalities = listOf("text"),
-                    intelligence = 39.5,
-                    efforts = listOf("max", "high", "low", "none"),
-                    defaultEffort = "high",
-                )
-            )
+    private val account: java.io.File get() = scene.workspace!!.accountDir
 
-            override fun endpoints(id: String): Result<List<EndpointInfo>> = Result.success(endpoints)
-        }
-
-    /**
-     * The section's rows, and the key above them — which is where both are now.
-     *
-     * The key stopped being the last line of the model rows and became the first field of the
-     * agent block. This harness draws them in that order, so a test that asks about either is
-     * asking about the screen a person sees.
-     */
     @Composable
-    private fun Section(onSetKey: () -> Unit = {}) {
+    private fun Section(onOpenTemplates: () -> Unit = {}) {
         MaterialTheme {
             Surface {
                 Column {
-                    KeyRow(viewModel = scene.viewModel, onSetKey = onSetKey)
-                    ModelSection(viewModel = scene.viewModel)
-                    // **Both sections, because the settings screen draws both** and the embedding
-                    // rows are only meaningful beside the chat model's — the point of "dims can
-                    // replace effort screen for embedding model" is that they are the same block.
-                    PickedSection(viewModel = scene.viewModel)
+                    KeyRow(viewModel = scene.viewModel, onSetKey = {})
+                    ModelSection(viewModel = scene.viewModel, onOpenTemplates = onOpenTemplates)
                 }
             }
         }
     }
 
-    @Test
-    fun `the three values are shown on the screen`() {
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Model").assertIsDisplayed()
-        compose.onNodeWithText("Provider").assertIsDisplayed()
-        compose.onNodeWithText("Effort").assertIsDisplayed()
-        compose.onNodeWithText(ModelConfigFile.DEFAULT_MODEL).assertIsDisplayed()
-        compose.onNodeWithText("deepseek").assertIsDisplayed()
-        compose.onNodeWithText("high").assertIsDisplayed()
+    /** Writes a schema into the folder the way the editor would, and refreshes. */
+    private fun write(name: String, schema: Schema = Schema(
+        address = "https://x.test/v1",
+        url = "embeddings",
+        body = org.json.JSONObject("""{"model":"e","input":"{{input}}"}"""),
+    )) {
+        Schemas.write(account, name, schema).getOrThrow()
     }
 
-    // ---- the two models that are not the chat model -------------------------
+    // ---- the folder is the manager ---------------------------------------------
 
     @Test
-    fun `the embedding and rerank rows are on the screen, and say not chosen`() {
-        // **The operator's instruction is that a non-chat model is chosen the same way** — a row, a
-        // sheet, a pick — so the rows have to be on the same screen as the chat model's. And with no
-        // embedding model chosen, the honest word is "not chosen": a slug picked on the person's
-        // behalf would be a choice they never made and cannot see.
-        scene.viewModel.catalogue = scripted()
+    fun `the row says how many templates there are, and opens the folder they live in`() {
+        // **One row, and it is a door.** The operator's design: a button that opens the folder, and the
+        // browser and editor are the management UI. So there is nothing else on this screen to assert —
+        // the count says whether anything is there, and the press asks for the folder.
+        var opened = 0
+        compose.setContent { Section(onOpenTemplates = { opened++ }) }
+
+        // The shipped three, written when the folder was first read.
+        compose.onNodeWithText("3 templates — tap to edit").assertIsDisplayed()
+        compose.onNodeWithText("Request templates").performClick()
+
+        assertEquals("the row asked for the folder", 1, opened)
+    }
+
+    @Test
+    fun `a folder with one template says one, not three`() {
+        // The count is read, not remembered: a person who deletes two in the browser comes back to a row
+        // that says so. This is the assertion that would fail if the list were cached at construction.
+        Schemas.ensure(account)
+        Schemas.remove(account, "embedding.json")
+        Schemas.remove(account, "rerank.json")
+        compose.setContent { Section() }
+
+        compose.onNodeWithText("1 template — tap to edit").assertIsDisplayed()
+    }
+
+    @Test
+    fun `an empty folder says so in words a person can act on`() {
+        Schemas.ensure(account)
+        for (name in Schemas.names(account)) Schemas.remove(account, name)
+        compose.setContent { Section() }
+
+        // Not "0 templates": the row is the only place a person is told the feature has nothing to work
+        // with, so it says what to do about it.
+        compose.onNodeWithText("none yet — tap to add one").assertIsDisplayed()
+    }
+
+    @Test
+    fun `the chat model and the effort are not on this screen any more`() {
+        // **The absence is the decision.** Those three rows read OpenRouter's catalogue; a request is a
+        // file now, and the model is a literal in it. A row that stayed would be a second place to say
+        // what the file already says.
+        compose.setContent { Section() }
+
+        for (gone in listOf("Model", "Provider", "Effort", "Rates")) {
+            compose.onNodeWithText(gone).assertDoesNotExist()
+        }
+    }
+
+    // ---- the two vector models point at files ----------------------------------
+
+    @Test
+    fun `the embedding and rerank rows say not chosen before anything is`() {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Embedding model").assertIsDisplayed()
         compose.onNodeWithText("Rerank model").assertIsDisplayed()
-        compose.onAllNodesWithText("not chosen").fetchSemanticsNodes().let {
-            assertTrue("both rows say so, and there are two of them: ${it.size}", it.size >= 2)
-        }
-        // **No Dimensions row while nothing is chosen**, because a size for a model that does not
-        // exist is a setting with nothing to apply to.
-        compose.onAllNodesWithText("Dimensions").fetchSemanticsNodes().let {
-            assertTrue("no dimension row yet: ${it.size}", it.isEmpty())
-        }
+        // Both unnamed, which is the honest state of a fresh account — and the search feature says so
+        // rather than inventing a template on the person's behalf.
+        compose.onNodeWithText("not chosen").assertIsDisplayed()
     }
 
     @Test
-    fun `a dimension row replaces the effort row for the embedding model`() {
-        // **"Dims can replace effort screen for embedding model."** The chat model's third value is
-        // effort; the embedding model's is the dimension, in the same place, because it is the same
-        // kind of fact — a value the model publishes and the person picks.
-        //
-        // The dimension is a REQUEST parameter (measured: qwen3-embedding-8b answers 1024, 2048 or
-        // 4096 on demand), which is what makes it a choice rather than a description.
-        scene.viewModel.choosePicked(
-            CatalogueKind.EMBEDDING,
-            "qwen/qwen3-embedding-8b",
-            "deepinfra",
-            1024,
-        )
+    fun `choosing an embedding template writes its name and the size, not a model id`() {
+        write("mine.json")
+        scene.viewModel.setEmbeddingSchema("mine.json")
         compose.setContent { Section() }
 
-        compose.onNodeWithText("Dimensions").assertIsDisplayed()
-        compose.onNodeWithText("1024").assertIsDisplayed()
-        // **And the effort row is still there for the chat model**, which is the point: the two rows
-        // belong to two different models and both are shown.
-        compose.onNodeWithText("Effort").assertIsDisplayed()
+        // **The pointer is a file name.** That is what makes editing the file change the behaviour of
+        // every worktree that names it, which is the point of having one folder.
+        assertEquals("mine.json", scene.viewModel.modelConfig.embedding?.schema)
+        // And the size is kept beside it, because the index that is compared against was built at a
+        // size the template's `{{dimensions}}` cannot tell us.
+        assertEquals(1024, scene.viewModel.modelConfig.embedding?.dimensions)
+        compose.onNodeWithText("mine.json").assertIsDisplayed()
     }
 
     @Test
-    fun `choosing an embedding model writes it, with its dimension, into the file`() {
-        // The file is the only store, so the claim is about the file: what the picker sets has to
-        // land there rather than in a copy held by a screen — and the dimension has to land *with*
-        // the model, because the index built later has no catalogue to ask.
-        scene.viewModel.choosePicked(
-            CatalogueKind.EMBEDDING,
-            "qwen/qwen3-embedding-8b",
-            "deepinfra",
-            2048,
+    fun `a rerank template is given no size, because the job has none`() {
+        write("rank.json", Schema("https://x.test/v1", url = "rerank", body = org.json.JSONObject("{}")))
+        scene.viewModel.setRerankSchema("rank.json")
+
+        assertEquals("rank.json", scene.viewModel.modelConfig.rerank?.schema)
+        // A `dimensions` the server never asked for is a field it may refuse.
+        assertEquals(null, scene.viewModel.modelConfig.rerank?.dimensions)
+    }
+
+    @Test
+    fun `a new size asks first and says what the rebuild costs`() {
+        // **Not a preference**: the vectors on disk are in the old template's coordinate system, and a
+        // cosine between two of those looks like a score. So the question is drawn before anything is
+        // written, and the person can say no.
+        write("a.json")
+        scene.viewModel.setEmbeddingSchema("a.json")
+        scene.viewModel.cycleEmbeddingDimensions()
+
+        // A different size is a different space, so it is pending rather than applied.
+        assertEquals(null, scene.viewModel.modelConfig.embedding?.dimensions?.takeIf { it == 2048 })
+        assertTrue(
+            "the sentence names the size and the cost: ${scene.viewModel.pendingPickedSaid}",
+            scene.viewModel.pendingPickedSaid.contains("2048") &&
+                scene.viewModel.pendingPickedSaid.contains("rebuilds"),
         )
-
-        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
-        assertEquals("the model", "qwen/qwen3-embedding-8b", read.embedding?.model)
-        assertEquals("the endpoint", "deepinfra", read.embedding?.provider)
-        assertEquals("and the size it was chosen at", 2048, read.embedding?.dimensions)
-        // **The chat choice is untouched**, because choosing an embedder is not choosing a
-        // conversation model.
-        assertEquals(
-            "the chat model is still the chat model",
-            ModelConfigFile.DEFAULT_MODEL,
-            read.active.model,
-        )
-    }
-
-    // ---- a new embedding model is a question, not a preference --------------
-
-    @Test
-    fun `changing the embedding model asks first, and says what the rebuild costs`() {
-        // **The vectors on disk are in the old model's coordinate system**, so a new one throws every
-        // project's index away. That costs minutes and tokens, so the person is told and can decline
-        // — and the option that keeps what works has a name rather than being called Cancel.
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 1024)
-
-        assertEquals("nothing is written yet", "first/embed", scene.viewModel.modelConfig.embedding?.model)
-        assertEquals("and the question is waiting", "second/embed", scene.viewModel.pendingPicked?.model)
-        val said = scene.viewModel.pendingPickedSaid
-        assertTrue("it says every project: $said", "every project" in said)
-        assertTrue("and that it takes minutes: $said", "several minutes" in said)
-        assertTrue("and what it costs: $said", "tokens" in said)
-        assertTrue("and when to do it anyway: $said", "stopped answering" in said)
-        // **It names what is being thrown away**, or the warning is a general caution instead of a
-        // statement about this index.
-        assertTrue("naming the model in force: $said", "first/embed" in said)
-
-        compose.setContent { Section() }
-        compose.onNodeWithText("Rebuild every project's index?").assertIsDisplayed()
-        compose.onNodeWithText("Keep the one I have").assertIsDisplayed()
     }
 
     @Test
-    fun `declining the rebuild keeps the index that works`() {
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 1024)
-
+    fun `declining keeps the template that works`() {
+        write("a.json")
+        scene.viewModel.setEmbeddingSchema("a.json")
+        scene.viewModel.cycleEmbeddingDimensions()
         scene.viewModel.cancelPicked()
 
-        assertEquals("the choice is unchanged", "first/embed", scene.viewModel.modelConfig.embedding?.model)
-        assertEquals("and nothing is waiting", null, scene.viewModel.pendingPicked)
-        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
-        assertEquals("the file too", "first/embed", read.embedding?.model)
+        assertEquals("a.json", scene.viewModel.modelConfig.embedding?.schema)
+        assertEquals("and its size", 1024, scene.viewModel.modelConfig.embedding?.dimensions)
     }
 
     @Test
-    fun `agreeing writes the model, and the index is rebuilt under it`() {
-        // **Both halves, and in the order that works**: emptying the index also clears the record of
-        // which model built it, which is what lets the new one be declared. A pass asked before the
-        // empty would open the index, see the old model and refuse.
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 2048)
-
+    fun `agreeing writes the new size`() {
+        write("a.json")
+        scene.viewModel.setEmbeddingSchema("a.json")
+        scene.viewModel.cycleEmbeddingDimensions()
         scene.viewModel.confirmPicked()
 
-        assertEquals("written", "second/embed", scene.viewModel.modelConfig.embedding?.model)
-        assertEquals("at its own size", 2048, scene.viewModel.modelConfig.embedding?.dimensions)
-        assertEquals("and no longer waiting", null, scene.viewModel.pendingPicked)
-        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
-        assertEquals("in the file", "second/embed", read.embedding?.model)
-        assertEquals("with the size", 2048, read.embedding?.dimensions)
+        assertEquals(2048, scene.viewModel.modelConfig.embedding?.dimensions)
     }
 
     @Test
-    fun `the same model at another endpoint is applied without a question`() {
-        // **The endpoint says where the request goes, not where the numbers come from**, so the index
-        // stays valid and asking would be asking somebody to rebuild everything for a change of
-        // route. This is what `PickedModel.space()` exists to get right.
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 1024)
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "cloudflare", 1024)
+    fun `a different template for the same job asks, because it may be another model`() {
+        // The pointer's name is part of the space (`PickedModel.space`), so pointing at another file is
+        // a new coordinate system until the person says so — even if both files happen to name the same
+        // model, because the app cannot read "happens to" anywhere it could check.
+        write("a.json")
+        write("b.json")
+        scene.viewModel.setEmbeddingSchema("a.json")
+        scene.viewModel.setEmbeddingSchema("b.json")
 
-        assertEquals("applied at once", "cloudflare", scene.viewModel.modelConfig.embedding?.provider)
-        assertEquals("nothing was asked", null, scene.viewModel.pendingPicked)
+        assertEquals("a.json is still the one in force", "a.json", scene.viewModel.modelConfig.embedding?.schema)
+        assertTrue(scene.viewModel.pendingPickedSaid.isNotEmpty())
     }
 
     @Test
-    fun `the same model at a new size is a new space, so it asks`() {
-        // **The size is part of the vector space, not a preference about it**: 1024 and 4096 from the
-        // same model are two coordinate systems, which is why `declare` compares the pair.
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 1024)
-        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 4096)
+    fun `clearing the embedding pointer turns the feature off rather than picking one`() {
+        write("a.json")
+        scene.viewModel.setEmbeddingSchema("a.json")
 
-        assertEquals("the question is asked", 4096, scene.viewModel.pendingPicked?.dimensions)
-        assertEquals("and nothing is written", 1024, scene.viewModel.modelConfig.embedding?.dimensions)
+        scene.viewModel.clearPicked(PickedKind.EMBEDDING)
+
+        // Null, not a default: a model choice nobody made is worse than a feature that says it is off.
+        assertEquals(null, scene.viewModel.modelConfig.embedding)
     }
 
-    @Test
-    fun `a rerank model is given no dimension, because the job has none`() {
-        // **The three jobs are not the same shape.** Passing a size for a reranker would store a
-        // number nothing reads, and a later reader would try to honour it.
-        scene.viewModel.choosePicked(
-            CatalogueKind.RERANK,
-            "voyageai/rerank-2.5-lite",
-            "voyageai",
-            1024,
-        )
-
-        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
-        assertEquals("the model", "voyageai/rerank-2.5-lite", read.rerank?.model)
-        assertEquals("and no dimension was kept", null, read.rerank?.dimensions)
-    }
+    // ---- the file, and the key ------------------------------------------------
 
     @Test
-    fun `clearing the embedding choice turns the feature off rather than picking one`() {
-        // **A model the person cannot see is worse than a feature that is off.** Clearing has to
-        // leave `null` in the file, which is the state the picker reads as "not chosen".
-        scene.viewModel.choosePicked(
-            CatalogueKind.EMBEDDING,
-            "qwen/qwen3-embedding-8b",
-            "deepinfra",
-            1024,
-        )
-        scene.viewModel.clearPicked(CatalogueKind.EMBEDDING)
-
-        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
-        assertEquals("nothing is chosen", null, read.embedding)
-    }
-
-    @Test
-    fun `choosing a provider writes it into the file`() {
-        // The file is the only store, so the claim is about the file: what the picker sets has to
-        // land there rather than in a copy held by a screen.
-        //
-        // Driven through the view model rather than through the sheet, because this harness
-        // composes a dialog's content and then reports it as not displayed — an assertion made
-        // against it would be measuring the harness, not the app. The sheet's own rendering is
-        // covered by the rows above, which are outside any dialog.
-        scene.viewModel.catalogue = scripted()
-        scene.viewModel.chooseModel(
-            ModelConfigFile.DEFAULT_MODEL, "deepinfra/fp8", "high", listOf("max", "high", "low"),
-        )
-
-        assertEquals("the choice", "deepinfra/fp8", scene.viewModel.modelConfig.active.provider)
-        val onDisk = ModelConfigFile.load(scene.workspace!!.accountDir).getOrThrow()
-        assertEquals("and it is in the file", "deepinfra/fp8", onDisk.active.provider)
-    }
-
-    @Test
-    fun `moving a provider changes the fallback order, and the file is the record of it`() {
-        // **Report 25**: "I want ability to rearrange provider endpoints on the provider selection
-        // card ... so that their order is the fallback order". The order is now load-bearing - the
-        // door walks it when an endpoint fails - so a move has to be a change to the *file*, not a
-        // rearrangement of a list the screen keeps.
-        //
-        // Driven through the view model, for the reason the neighbouring test gives: this harness
-        // reports a dialog's content as not displayed, so an assertion made by tapping inside one
-        // measures the harness rather than the app.
-        val model = ModelConfigFile.DEFAULT_MODEL
-        scene.viewModel.addProvider(model, "deepinfra/fp8")
-        scene.viewModel.addProvider(model, "cloudflare")
-        val before = scene.viewModel.modelConfig.providersOf(model)
-        assertTrue("the fixture has at least three endpoints: $before", before.size >= 3)
-
-        // Move the second endpoint to the front.
-        scene.viewModel.moveProvider(model, 1, 0)
-
-        val after = scene.viewModel.modelConfig.providersOf(model)
-        assertEquals("the moved endpoint is first", before[1], after[0])
-        assertEquals("and nothing was lost", before.size, after.size)
-        assertEquals("and the rest kept their order", before[0], after[1])
-
-        val onDisk = ModelConfigFile.load(scene.workspace!!.accountDir).getOrThrow()
-        assertEquals("the file holds the new order", after, onDisk.providersOf(model))
-    }
-
-    @Test
-    fun `a move that would go past either end does nothing`() {
-        // **A drag that ends where it started is something a finger does constantly**, and so is a
-        // press on an arrow at the top of the list. Neither is an error, and neither may reorder
-        // anything: an out-of-range move that wrapped would send the first endpoint to the bottom on
-        // a mis-tap, which is the one way this could lose the person's arrangement.
-        val model = ModelConfigFile.DEFAULT_MODEL
-        val before = scene.viewModel.modelConfig.providersOf(model)
-        assertTrue("the fixture has more than one", before.size > 1)
-
-        scene.viewModel.moveProvider(model, 0, -1)
-        scene.viewModel.moveProvider(model, before.lastIndex, before.size)
-        scene.viewModel.moveProvider(model, 0, 0)
-
-        assertEquals(
-            "the order is untouched",
-            before,
-            scene.viewModel.modelConfig.providersOf(model),
-        )
-    }
-
-    @Test
-    fun `changing provider carries that provider's reply reserve, not the old one`() {
-        // **The 96k bug with the sign flipped.** The window and the reply reserve are facts about a
-        // *pin*, not about the model: `deepinfra/fp8` keeps 131,072 of a 1,048,576 window and
-        // `cloudflare` keeps 943,718 of the same window. Carrying the old reserve across a provider
-        // change left the agent clamped to an endpoint it was no longer using — the app would have
-        // trimmed at 917,504 on an endpoint that only accepts 104,858.
-        scene.viewModel.catalogue = scripted(
-            listOf(
-                endpoint("deepinfra/fp8", reply = 131_072),
-                endpoint("cloudflare", reply = 943_718),
-            ),
-        )
-        scene.viewModel.readCatalogue(ModelConfigFile.DEFAULT_MODEL)
-        scene.await("the endpoints", 5_000) { scene.viewModel.modelEndpoints.size == 2 }
-
-        scene.viewModel.chooseModel(
-            ModelConfigFile.DEFAULT_MODEL, "deepinfra/fp8", "high", listOf("max", "high", "low"),
-        )
-        scene.viewModel.chooseModel(
-            ModelConfigFile.DEFAULT_MODEL, "cloudflare", "high", listOf("max", "high", "low"),
-        )
-
-        assertEquals("the new provider", "cloudflare", scene.viewModel.modelConfig.active.provider)
-        assertEquals("and the model is unchanged", ModelConfigFile.DEFAULT_MODEL, scene.viewModel.modelConfig.active.model)
-    }
-
-    /** One endpoint, with only the two numbers this file's tests care about. */
-    private fun endpoint(tag: String, reply: Int) = EndpointInfo(
-        tag = tag, providerName = tag, contextLength = 1_048_576, maxPrompt = null,
-        maxOutput = reply, priceIn = 0.1, priceOut = 0.2, priceCache = null,
-        tokensPerSecond = null, uptime = null, tools = true,
-    )
-
-    @Test
-    fun `a provider that cannot call tools is not one the agent can use`() {
-        // The add form greys these out, because a provider without tool support cannot run an
-        // agent at all. The fact is on the endpoint, so this is where it is asserted.
-        val noTools = listOf(
-            EndpointInfo(
-                tag = "somewhere/text-only", providerName = "Somewhere", contextLength = 1000,
-                maxPrompt = null, maxOutput = 1000, priceIn = 0.1, priceOut = 0.2,
-                priceCache = null, tokensPerSecond = null, uptime = null, tools = false,
-            )
-        )
-        scene.viewModel.catalogue = scripted(noTools)
-
-        scene.viewModel.readCatalogue(ModelConfigFile.DEFAULT_MODEL)
-        scene.await("the endpoints", 5_000) { scene.viewModel.modelEndpoints.isNotEmpty() }
-
-        assertTrue(
-            "the endpoint says it cannot call tools",
-            scene.viewModel.modelEndpoints.none { it.tools },
-        )
-    }
-
-    @Test
-    fun `a model with nothing in its catalogue cannot be read`() {
-        // A model whose endpoint list is empty is a failure, not an empty screen: "no providers"
-        // and "no answer yet" look the same on a phone and mean different things.
-        scene.viewModel.catalogue = object : Catalogue {
-            override fun model(id: String) = Result.success(
-                ModelInfo(id, "x", null, 1000, 1000, emptyList(), emptyList(), null, emptyList(), null)
-            )
-
-            override fun endpoints(id: String) =
-                Result.failure<List<EndpointInfo>>(IllegalArgumentException("no providers"))
-        }
-
-        scene.viewModel.readCatalogue("x")
-        scene.await("the refusal", 5_000) { scene.viewModel.catalogueProblem != null }
-
-        assertTrue(
-            "it says why: ${scene.viewModel.catalogueProblem}",
-            scene.viewModel.catalogueProblem!!.contains("no providers"),
-        )
-    }
-
-    @Test
-    fun `a model config the app cannot read is said on the screen and the last good choice stays`() {
-        // A damaged file does not quietly become the defaults: the screen says the file will not
-        // read while still showing what the agent would use. Both are true at once, and a person
-        // needs both.
-        val file = ModelConfigFile.file(scene.workspace!!.accountDir)
-        // Broken JSON, written without an unbalanced brace so the repository-wide brace check
-        // stays a real check.
-        file.writeText("{ \"version\": 1, \"active\": {} }")
+    fun `a config the app cannot read is said on the screen, and the file is not replaced`() {
+        // A damaged file does not quietly become the defaults. Both facts are true at once, and a person
+        // needs both: the file is broken, and here is what the agent would use meanwhile.
+        val file = ModelConfigFile.file(account)
+        file.writeText("""{ "version": 1, "active": {} }""")
         scene.viewModel.refresh()
 
         compose.setContent { Section() }
 
         compose.onNodeWithText("will not read", substring = true).assertIsDisplayed()
-        compose.onNodeWithText(ModelConfigFile.DEFAULT_MODEL).assertIsDisplayed()
     }
 
     @Test
-    fun `reset puts back the model the app ships`() {
-        // Not a history step: "reset" means the copy in the build, which is the one thing that
-        // cannot itself be broken by the edit being undone.
-        scene.viewModel.catalogue = scripted()
-        scene.viewModel.chooseModel(
-            ModelConfigFile.DEFAULT_MODEL, "cloudflare", "high", listOf("max", "high", "low"),
-        )
-        assertEquals("changed first", "cloudflare", scene.viewModel.modelConfig.active.provider)
+    fun `reset puts back the config the app ships`() {
+        // From the build's own copy, not from the account's history: "reset" means the one that cannot
+        // itself be broken by the edit being undone.
+        scene.viewModel.setEffort("low")
+        assertEquals("low", scene.viewModel.modelConfig.active.effort)
 
         scene.viewModel.resetModelConfig()
 
-        assertEquals(
-            "back to the shipped choice",
-            "deepseek",
-            scene.viewModel.modelConfig.active.provider,
-        )
-    }
-
-    @Test
-    fun `the active model cannot be removed and the choice says why`() {
-        // Removing it would leave the agent with no model, which is not a state a person can fix
-        // from this screen; choosing another first is.
-        val refusal = scene.viewModel.removeModel(ModelConfigFile.DEFAULT_MODEL)
-
-        assertTrue("refused", refusal.isFailure)
-        assertTrue(
-            "and it says what to do instead: ${refusal.exceptionOrNull()?.message}",
-            refusal.exceptionOrNull()!!.message!!.contains("choose another first"),
-        )
-        assertTrue(
-            "and the model is still there",
-            scene.viewModel.modelConfig.models.any { it.id == ModelConfigFile.DEFAULT_MODEL },
-        )
-    }
-
-    @Test
-    fun `adding a model with no providers is refused`() {
-        assertTrue("nothing to pin to", scene.viewModel.addModel("x/y", emptyList()).isFailure)
-        assertTrue(
-            "and one that is already there",
-            scene.viewModel.addModel(ModelConfigFile.DEFAULT_MODEL, listOf("deepseek")).isFailure,
-        )
-    }
-
-    @Test
-    fun `the context line is gone, with the ceiling it was computed from`() {
-        // **Reported from the live log, twice**, and answered by deleting the thing rather than
-        // rewording it: "context 900k of 1000k — what does that mean? I somehow have the context
-        // full or what?" then "is it what provider can take out of what model can?".
-        //
-        // The line was written because the screen and the agent were held to the *same clamped
-        // number* and could disagree about it. Nothing is clamped now — the operator's numbers are
-        // used as written — so there is no number for the screen and the agent to agree on, and a
-        // line of three derived figures would be decoration over a budget the app no longer keeps.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        scene.await("the catalogue", 5_000) { scene.viewModel.modelInfo != null }
-
-        compose.onNodeWithText("Context:", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("input", substring = true).assertDoesNotExist()
-    }
-
-    @Test
-    fun `there is no button to press to find out, because the screen reads it itself`() {
-        // The button was the only way to ask, so the screen showed the floor until somebody
-        // pressed it — the same floor that once had a million-token model trimmed at 96k. One
-        // line that is always current beats a line and a control that explains it.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        scene.await("the read the screen does for itself", 5_000) {
-            scene.viewModel.modelInfo != null
-        }
-
-        compose.onNodeWithText("Read").assertDoesNotExist()
-    }
-
-    @Test
-    fun `the numbers are read on arrival, for the model actually in use`() {
-        // The button used to be the only way to find out, which meant a screen that showed the
-        // floor — the same floor that once had a million-token model trimmed at 96k. Arriving at
-        // the screen is now enough.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        scene.await("the read the screen does for itself", 5_000) {
-            scene.viewModel.modelInfo?.contextLength == 1048576
-        }
-
-        assertEquals(
-            "and it is the model in use that was asked about",
-            ModelConfigFile.DEFAULT_MODEL,
-            scene.viewModel.modelInfo!!.id,
-        )
+        assertEquals("high", scene.viewModel.modelConfig.active.effort)
     }
 
     @Test
     fun `the key row says plainly when there is no key`() {
-        // The agent cannot read a model list or answer without it, so "no key" is not a detail:
-        // it is the reason nothing on this screen can be chosen freely.
-        scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
 
+        // The sentence a fresh install gets. It matters more than it used to: a shipped template names no
+        // key, so this is the only place a person is told why nothing can be sent.
         compose.onNodeWithText("No model key yet", substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun `the key row changes when a key is kept`() {
-        scene.viewModel.catalogue = scripted()
-        scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one")
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("A model key is kept", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 
     @Test
     fun `the key itself is never on the screen`() {
-        // The same rule as the GitHub token: it can be typed and kept, and it is never shown
-        // back. A screen that could show it is a screenshot away from a spend.
-        scene.viewModel.catalogue = scripted()
-        scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one")
+        scene.viewModel.saveModelKey("sk-or-v1-secret-value")
         compose.setContent { Section() }
 
-        compose.onNodeWithText("sk-or-v1", substring = true).assertDoesNotExist()
-    }
-
-    private companion object {
-        val DEFAULT_ENDPOINTS = listOf(
-            EndpointInfo(
-                tag = "deepseek", providerName = "DeepSeek", contextLength = 1048576,
-                maxPrompt = null, maxOutput = 393216,
-                priceIn = 0.15, priceOut = 0.60, priceCache = 0.003,
-                tokensPerSecond = null, uptime = null, tools = true,
-            ),
-            EndpointInfo(
-                tag = "deepinfra/fp8", providerName = "DeepInfra", contextLength = 1048576,
-                maxPrompt = null, maxOutput = 131072,
-                priceIn = 0.098, priceOut = 0.294, priceCache = 0.0029,
-                tokensPerSecond = null, uptime = null, tools = true,
-            ),
-            EndpointInfo(
-                tag = "deepinfra/fp8/flex", providerName = "DeepInfra", contextLength = 1048576,
-                maxPrompt = null, maxOutput = 131072,
-                priceIn = 0.0784, priceOut = 0.2352, priceCache = 0.0024,
-                tokensPerSecond = null, uptime = null, tools = true,
-            ),
-        )
-    }
-    @Test
-    fun `a key kept while the screen is up changes the row`() {
-        // **The reported failure.** The row is drawn from a plain property, so Compose had no reason
-        // to read it again after a dialog wrote — and a person who had just kept their key saw the
-        // screen still saying "No model key yet", twice, and reported that the key was not
-        // passing through.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-        compose.onNodeWithText("No model key yet", substring = true).assertIsDisplayed()
-
-        compose.runOnIdle { scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one") }
-        compose.waitForIdle()
-
+        compose.onNodeWithText("sk-or-v1-secret-value").assertDoesNotExist()
         compose.onNodeWithText("A model key is kept", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 }

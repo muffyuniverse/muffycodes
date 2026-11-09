@@ -32,9 +32,10 @@ import org.json.JSONObject
  *
  * ### What is deliberately absent
  *
- * **The key.** A file is a thing a person reads, copies and commits; a key in one would be the leak the
- * vault exists to prevent. The key is looked up by host instead ([SchemaKey]), so a template naming
- * `openrouter.ai` is sent with whatever this phone has stored for `openrouter.ai` and nothing else.
+ * **The key's value.** A file is a thing a person reads, copies and commits; a key in one would be the
+ * leak the vault exists to prevent. A template names a **row** instead ([key]), and the name is resolved
+ * against the row's own host — so `@openrouter` is offered to `openrouter.ai` and refused to anything
+ * else. That check is what keeps a name from being an exfiltration primitive.
  *
  * **The model's window and reply reserve.** Nothing clamps any more (`ContextBudget`), so a number about
  * a model's size would be a fact nothing reads.
@@ -42,6 +43,14 @@ import org.json.JSONObject
 data class Schema(
     /** The base URL: `https://openrouter.ai/api/v1`. An address, because it is where bytes go. */
     val address: String,
+    /**
+     * **The vault row that holds this server's key, by name** — `@openrouter` — or blank for none.
+     *
+     * Never the key itself: a template is a document people read, copy and hand to each other, and the
+     * name is resolved by host so that a file cannot send one server's key to another. Absent means no
+     * `Authorization` header is sent at all, which is why a server on this phone needs no flag.
+     */
+    val key: String = "",
     /** The path on it: `chat/completions`. Relative, by [Shape]'s third rule. */
     val url: String,
     /** What is sent, with the placeholders the app fills. */
@@ -81,6 +90,9 @@ data class Schema(
 
     private fun toJson(): JSONObject = JSONObject().apply {
         put("address", address)
+        // **Written only when one is named.** Absent is a statement — no key — and a `"key": ""` would
+        // read as a row with an empty name rather than as "this server wants none".
+        if (key.isNotBlank()) put("key", key)
         put("url", url)
         // **Written only when they are not zero**, so a template that turns a hand off says nothing
         // about it rather than saying 0 twice — and so an embedding template is not cluttered with
@@ -132,6 +144,18 @@ data class Schema(
             // looking at the file now.
             addressProblem(address)?.let { return Result.failure(IllegalArgumentException(it)) }
             if (url.isEmpty()) return Result.failure(IllegalArgumentException("\"url\" is missing"))
+            val key = root.optString("key").trim()
+            // **A name, checked as a name.** A value that looks like somebody's key — long, no `@` — is
+            // refused with the two ways to do it, because a person who pasted one has just written a
+            // credential into a document that gets copied, and they deserve to be told rather than
+            // silently obeyed.
+            if (key.isNotEmpty() && !key.startsWith("@")) {
+                return Result.failure(
+                    IllegalArgumentException(
+                        "\"key\" holds a name, not a key: write @$key and store the value in the vault.",
+                    ),
+                )
+            }
             val body = root.optJSONObject("body")
                 ?: return Result.failure(
                     IllegalArgumentException("\"body\" must be an object — the request to send."),
@@ -152,7 +176,7 @@ data class Schema(
             val target = number("target").getOrElse { return Result.failure(it) }
             val forget = number("forget").getOrElse { return Result.failure(it) }
             val trim = number("trim").getOrElse { return Result.failure(it) }
-            return Result.success(Schema(address, url, body, target, forget, trim))
+            return Result.success(Schema(address, key, url, body, target, forget, trim))
         }
 
         /**

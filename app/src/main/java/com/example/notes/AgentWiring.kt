@@ -43,7 +43,9 @@ object AgentWiring {
                 // that sends it read the same object.
                 shape = wired.shape,
                 model = wired.active.model,
-                provider = wired.active.provider,
+                // **The host, because the address is the upstream.** The tag that used to sit here was
+                // OpenRouter's routing data; this is the word a person recognises in the log.
+                provider = providerOf(wired.active.baseUrl),
                 effort = wired.active.effort,
                 // **The worktree the turn belongs to**, so the request log answers "which project
                 // spent this" rather than filing every row under an empty name.

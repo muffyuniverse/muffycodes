@@ -83,10 +83,11 @@ fun ModelSection(
     // **The dimension, only where it exists.** A value the model publishes and the person picks, kept
     // beside the pointer because the index built from it has no template to ask — and it stays a
     // number in `model_conf.json` because the template's `{{dimensions}}` is filled per call.
-    config.embedding?.let { chosen ->
+    val embedding = config.embedding
+    if (embedding != null) {
         SettingRow(
             label = "Dimensions",
-            value = chosen.dimensions?.toString() ?: "not chosen",
+            value = embedding.dimensions?.toString() ?: "not chosen",
             onTap = { viewModel.cycleEmbeddingDimensions() },
         )
     }

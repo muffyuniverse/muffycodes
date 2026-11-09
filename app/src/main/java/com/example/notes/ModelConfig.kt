@@ -68,7 +68,7 @@ fun chatEndpoint(baseUrl: String): String =
  */
 data class PickedModel(
     /**
-     * **The template this points at** — a file name in `.muffy/schemas/`, like `embedding.json`.
+     * **The template this points at** — a file name in `shared/schemas/`, like `embedding.json`.
      *
      * A name rather than an id, because the thing that decides where the call goes and what it says is
      * the file. That is the operator's 2026-11-09 decision: *"rerank and embedding pickers can also just
@@ -337,7 +337,7 @@ object ModelConfigFile {
     /**
      * **One pointer at a template**, or null when the file has none.
      *
-     * The key is `schema` — a file name in `.muffy/schemas/` — and **its absence is what turns the
+     * The key is `schema` — a file name in `shared/schemas/` — and **its absence is what turns the
      * feature off.** An empty string is a file somebody edited wrongly rather than a model they have not
      * chosen yet, so it is refused with the place named, the same rule `model_conf.json` has always had.
      *

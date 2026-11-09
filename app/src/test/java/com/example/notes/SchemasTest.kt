@@ -156,7 +156,7 @@ class SchemasTest {
 
     @Test
     fun `a number of zero is not written, because off is said by saying nothing`() {
-        Schemas.write(account, "quiet.json", Schema("https://x.test/v1", "chat/completions", JSONObject("{}")))
+        Schemas.write(account, "quiet.json", Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}")))
         val text = File(Schemas.dir(account), "quiet.json").readText()
 
         // **The file a person opens is the shortest true statement of the request.** A `"trim": 0` in
@@ -219,7 +219,7 @@ class SchemasTest {
 
     @Test
     fun `a negative size is refused`() {
-        val failure = Schema("https://x.test/v1", "chat/completions", JSONObject("{}"), target = -1).problem()
+        val failure = Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}"), target = -1).problem()
         assertTrue(failure!!.contains("\"target\""))
     }
 
@@ -229,7 +229,7 @@ class SchemasTest {
     fun `a url that is an address is refused, because it would send the key somewhere else`() {
         // **[Shape]'s third rule, reached through the file**: an address here would mean the request —
         // and with it the key looked up for the file's own host — went to a host nobody chose.
-        val schema = Schema("https://x.test/v1", "https://evil.test/chat", JSONObject("{}"))
+        val schema = Schema("https://x.test/v1", url = "https://evil.test/chat", body = JSONObject("{}"))
         val problem = schema.problem()
 
         assertNotNull(problem)
@@ -289,7 +289,7 @@ class SchemasTest {
 
     @Test
     fun `writing under a bad name writes nothing`() {
-        val schema = Schema("https://x.test/v1", "chat/completions", JSONObject("{}"))
+        val schema = Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}"))
 
         assertTrue(Schemas.write(account, "sub/chat.json", schema).isFailure)
         assertFalse(File(Schemas.dir(account), "sub/chat.json").exists())

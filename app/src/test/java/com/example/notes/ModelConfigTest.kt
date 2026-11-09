@@ -27,6 +27,13 @@ class ModelConfigTest {
         account.mkdirs()
     }
 
+    /**
+     * A file with a tag list and a provider in it — **what the previous build wrote, byte for byte.**
+     *
+     * Kept as the fixture for the rule that matters now: both keys are read and dropped. A file on
+     * somebody's phone still says `"provider": "deepinfra/fp8"` and still lists its endpoints, and the app
+     * has to load it without a migration and without believing either word.
+     */
     private fun shipped(): String = """
         {
           "version": 1,
@@ -45,12 +52,16 @@ class ModelConfigTest {
         val parsed = ModelConfigFile.parse(shipped()).getOrThrow()
 
         assertEquals("the model", ModelConfigFile.DEFAULT_MODEL, parsed.active.model)
-        assertEquals("the tag, not the name", "deepinfra/fp8", parsed.active.provider)
         assertEquals("effort", "high", parsed.active.effort)
+        // **The tag list and the provider word are read and dropped.** They are OpenRouter's routing, the
+        // address is the upstream now, and a file the previous build wrote has to keep loading — a
+        // migration for a word nobody routes by would be work spent on nothing. So the whole parsed
+        // model is compared with the three fields that exist: anything the reader had kept would show up
+        // as a difference here rather than as a silent extra.
         assertEquals(
-            "and the tags keep their order, which is the person's",
-            listOf("deepseek", "deepinfra/fp8", "deepinfra/fp8/flex"),
-            parsed.providersOf(ModelConfigFile.DEFAULT_MODEL),
+            "nothing but the model, the effort and the address survives the read",
+            ActiveModel(ModelConfigFile.DEFAULT_MODEL, "high", OPENROUTER_BASE),
+            parsed.active,
         )
     }
 
@@ -65,7 +76,8 @@ class ModelConfigTest {
         val read = ModelConfigFile.load(account).getOrThrow()
 
         assertEquals("the same choice", written.active, read.active)
-        assertEquals("and the same catalogue", written.models, read.models)
+        assertEquals("and the same pointers", written.embedding, read.embedding)
+        assertEquals("both of them", written.rerank, read.rerank)
     }
 
     /**
@@ -174,138 +186,12 @@ class ModelConfigTest {
     }
 
     @Test
-    fun `a provider that is not one of the models is refused`() {
-        // The check that keeps the file honest: an active provider that the model does not
-        // list would be a pin to an endpoint the person had removed.
-        val mistake = """
-            { "version": 1,
-              "active": { "model": "m", "provider": "deepinfra", "effort": "high" },
-              "models": [ { "id": "m", "providers": ["deepinfra/fp8"] } ] }
-        """.trimIndent()
-
-        val error = ModelConfigFile.parse(mistake).exceptionOrNull()?.message.orEmpty()
-
-        assertTrue("it names the field: $error", error.contains("active.provider"))
-    }
-
-    @Test
-    fun `a provider tag that ends in a slash is refused`() {
-        // `deepinfra/` looks like a tag and is a prefix: it would match every endpoint of the
-        // provider, which is exactly the autorouting the pin exists to prevent.
-        val mistake = """
-            { "version": 1,
-              "active": { "model": "m", "provider": "deepinfra/", "effort": "high" },
-              "models": [ { "id": "m", "providers": ["deepinfra/"] } ] }
-        """.trimIndent()
-
-        val error = ModelConfigFile.parse(mistake).exceptionOrNull()?.message.orEmpty()
-
-        assertTrue("it explains why: $error", error.contains("not a prefix"))
-    }
-
-    @Test
-    fun `an active model that is not in the catalogue is refused`() {
-        // The catalogue is the allow-list; the choice has to be inside it.
-        val mistake = """
-            { "version": 1,
-              "active": { "model": "gone/model", "provider": "p", "effort": "high" },
-              "models": [ { "id": "m", "providers": ["p"] } ] }
-        """.trimIndent()
-
-        val error = ModelConfigFile.parse(mistake).exceptionOrNull()?.message.orEmpty()
-
-        assertTrue("it says which: $error", error.contains("is not in models"))
-    }
-
-    @Test
-    fun `a model with no providers is refused`() {
-        val mistake = """
-            { "version": 1,
-              "active": { "model": "m", "provider": "p", "effort": "high" },
-              "models": [ { "id": "m", "providers": [] } ] }
-        """.trimIndent()
-
-        val error = ModelConfigFile.parse(mistake).exceptionOrNull()?.message.orEmpty()
-
-        assertTrue("a model is pinned to something: $error", error.contains("providers is empty"))
-    }
-
-    @Test
     fun `a version from the future is refused rather than read wrongly`() {
         val future = """{ "version": 9, "active": {}, "models": [] }"""
 
         val error = ModelConfigFile.parse(future).exceptionOrNull()?.message.orEmpty()
 
         assertTrue("it says what it can read: $error", error.contains("version 9"))
-    }
-
-    @Test
-    fun `a repeated provider tag is kept once`() {
-        // The forms can produce it (tick, untick, tick), and two identical rows in the picker
-        // would read as two endpoints at the same price.
-        val doubled = """
-            { "version": 1,
-              "active": { "model": "m", "provider": "p", "effort": "high" },
-              "models": [ { "id": "m", "providers": ["p", "p", "q"] } ] }
-        """.trimIndent()
-
-        val parsed = ModelConfigFile.parse(doubled).getOrThrow()
-
-        assertEquals(listOf("p", "q"), parsed.providersOf("m"))
-    }
-
-    // ---- the effort ladder ---------------------------------------------------
-
-    @Test
-    fun `effort moves down to what the model supports`() {
-        // The operator's rule: if the model does not declare the chosen effort, it moves down to
-        // one it does, and the operator can raise it again. `max` is absent from this ladder —
-        // which is the case the rule is for, since the ladder is the model's, not the app's.
-        val ladder = listOf("high", "low", "none")
-
-        assertEquals("max is not offered, so the next one down", "high",
-            ModelConfigFile.effortFor(ladder, "max"))
-        assertEquals("high is offered", "high", ModelConfigFile.effortFor(ladder, "high"))
-        assertEquals("and a rung that is between two of them", "low",
-            ModelConfigFile.effortFor(ladder, "medium"))
-    }
-
-    @Test
-    fun `effort moves up when there is nothing below`() {
-        // "Moves down" has no down when the model's ladder starts above what was asked: a model
-        // offering only `high` and `max` has to answer `low` with `high`, and refusing would be
-        // the app overruling a choice it was handed.
-        assertEquals("high", ModelConfigFile.effortFor(listOf("max", "high"), "low"))
-        // `medium` is between `high` and `max`, and neither is below it, so it lands on the
-        // lowest the model has — the same rule, and the opposite answer to what "down" suggests.
-        assertEquals("high", ModelConfigFile.effortFor(listOf("max", "high"), "medium"))
-    }
-
-    @Test
-    fun `a model that declares no ladder sends none`() {
-        // Sending an effort a model never declared is a 400 from one provider and a silently
-        // ignored parameter from another, and the second is worse.
-        assertNull(ModelConfigFile.effortFor(emptyList(), "high"))
-    }
-
-    @Test
-    fun `an effort name this app has never seen is still placed below the known ones`() {
-        // A model may add a name tomorrow; the app must place it rather than throw. An unknown
-        // rung ranks below every known one, so a request for it falls to the lowest effort the
-        // model does declare — which is the safe direction, since nothing is sent that the model
-        // has not said it understands.
-        assertEquals("unknown ranks below `none`", -1, ModelConfigFile.effortRank("some_new_thing"))
-        assertTrue(ModelConfigFile.effortRank("some_new_thing") < ModelConfigFile.effortRank("none"))
-        assertEquals("low", ModelConfigFile.effortFor(listOf("high", "low"), "some_new_thing"))
-    }
-
-    @Test
-    fun `none is a rung of the ladder, not an absence`() {
-        // `none` is a real rung, not "unset": sliding to the left end of the effort control is
-        // "no reasoning at all", which is a materially different agent and has to sort there.
-        assertTrue(ModelConfigFile.effortRank("none") < ModelConfigFile.effortRank("low"))
-        assertTrue(ModelConfigFile.effortRank("low") < ModelConfigFile.effortRank("high"))
-        assertTrue(ModelConfigFile.effortRank("high") < ModelConfigFile.effortRank("max"))
     }
 
     @Test
@@ -320,29 +206,21 @@ class ModelConfigTest {
     // ---- the two models that are not the chat model -------------------------
 
     @Test
-    fun `an embedding choice keeps its dimension, and a file without one keeps no dimension`() {
-        // **The dimension is a request parameter, so it is stored with the choice**: the index built
-        // from it has no catalogue to ask. A file that names no dimension is not an error; it is a
-        // config from before this app could embed, and the picker says "not chosen" rather than
-        // inventing a size.
+    fun `an embedding pointer keeps its dimension, and a file without one keeps no dimension`() {
+        // **The dimension is a request parameter, so it is stored with the pointer**: the index built
+        // from it has no template to ask at the moment it compares. A file that names no dimension is
+        // not an error; it is a config from before this app could embed, and the row says "not chosen"
+        // rather than inventing a size.
         val config = ModelConfigFile.default().copy(
-            embedding = PickedModel(
-                model = "qwen/qwen3-embedding-8b",
-                provider = "deepinfra",
-                dimensions = 1024,
-                providers = listOf("deepinfra", "together"),
-            ),
+            embedding = PickedModel(schema = "embedding.json", dimensions = 1024),
         )
         val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
 
-        assertEquals("the model", "qwen/qwen3-embedding-8b", read.embedding?.model)
-        assertEquals("its provider", "deepinfra", read.embedding?.provider)
+        assertEquals("the template", "embedding.json", read.embedding?.schema)
         assertEquals("its size", 1024, read.embedding?.dimensions)
-        assertEquals(
-            "and the endpoints it may use",
-            listOf("deepinfra", "together"),
-            read.embedding?.providers,
-        )
+        // **A name, not a model id and not an endpoint tag.** Reading it back as the same pair is the
+        // whole of what the file promises: the folder is where the request lives now.
+        assertEquals(PickedModel("embedding.json", 1024), read.embedding)
     }
 
     @Test
@@ -360,12 +238,12 @@ class ModelConfigTest {
     @Test
     fun `a half-written embedding block is refused by name`() {
         // A block that is there and incomplete is a file someone edited wrongly, and the refusal has
-        // to say which key — `embedding.provider` is the sentence that lets them fix it.
+        // to say which key — `embedding.schema` is the sentence that lets them fix it.
         val text = """
             {"version":1,
              "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
              "models":[{"id":"deepseek/deepseek-v4.1-flash-1017","providers":["deepseek"]}],
-             "embedding":{"model":"qwen/qwen3-embedding-8b"}}
+             "embedding":{"dimensions":1024}}
         """.trimIndent()
 
         val read = ModelConfigFile.parse(text)
@@ -373,7 +251,7 @@ class ModelConfigTest {
         assertTrue("it is refused", read.isFailure)
         assertTrue(
             "and names the key: ${read.exceptionOrNull()?.message}",
-            read.exceptionOrNull()?.message.orEmpty().contains("embedding.provider"),
+            read.exceptionOrNull()?.message.orEmpty().contains("embedding.schema"),
         )
     }
 
@@ -385,8 +263,7 @@ class ModelConfigTest {
         val text = """
             {"version":1,
              "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
-             "models":[{"id":"deepseek/deepseek-v4.1-flash-1017","providers":["deepseek"]}],
-             "embedding":{"model":"qwen/qwen3-embedding-8b","provider":"deepinfra","dimensions":0}}
+             "embedding":{"schema":"embedding.json","dimensions":0}}
         """.trimIndent()
 
         val read = ModelConfigFile.parse(text)

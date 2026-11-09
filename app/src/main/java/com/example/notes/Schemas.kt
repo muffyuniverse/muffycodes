@@ -3,7 +3,7 @@ package com.example.notes
 import java.io.File
 
 /**
- * **The folder of request schemas** — `<account>/.muffy/schemas/`, one [Schema] per file.
+ * **The folder of request schemas** — `<account>/shared/schemas/`, one [Schema] per file.
  *
  * A folder rather than a form, because a request is a document and a person can copy one. That is the
  * operator's design, 2026-11-09: *"a button that then could open a hidden folder with llm request schema
@@ -17,13 +17,21 @@ import java.io.File
  * rule `model_conf.json` lives under. Putting the folder inside a repository to inherit a history would
  * put request shapes into commits, which is the thing the hidden folder exists to avoid.
  *
- * ### Why `.muffy/`
+ * ### Why `shared/`, and why it is locked
  *
- * `.muffy/` is the app's own state — outside every project, outside every repository, and already
- * excluded from what an agent may touch. A schema folder under a project would either be committed
- * (a request shape is the person's, not the repository's) or need an ignore rule about a folder that is
- * not in the tree; under `.muffy/` it is hidden from the project list and still reachable, which is the
- * "hidden folder" the operator asked for.
+ * The operator, 2026-11-09: *"we can actually rename system into shared, and make it an ordinary folder
+ * with some system locked files … and then we can just keep llm request templates in shared as a system
+ * locked subfolder."*
+ *
+ * `shared/` is an **ordinary folder of the account** — not a project, not classified, no path rule of its
+ * own — and it is **system locked**, like `.muffy/` and the agent's records, because the app's
+ * functionality depends on it being where it is. `shared/schemas/` is locked the same way, and
+ * `example.json` inside it is locked as a *file*, so it can be read and copied and never edited.
+ *
+ * **A folder lock is not a subtree lock** (`Workspace.isAgentLocked`): it stops the folder being renamed
+ * or deleted, and its contents are the person's — so `chat.json`, beside the locked example, is a file
+ * both the person and an agent may edit. That is the whole of the protection, and it uses the lock stack
+ * the app already had.
  *
  * ### Why the shipped ones exist
  *
@@ -35,7 +43,17 @@ import java.io.File
 object Schemas {
 
     /** The folder, as a path from the account root — the same path the browser shows. */
-    const val DIR = ".muffy/schemas"
+    const val DIR = "shared/schemas"
+
+    /**
+     * The exemplar: **locked as a file, so it can be copied and never edited.**
+     *
+     * The operator: *"one system locked example template from which other templates can then be copied
+     * so that there is even less special machinery"*. It is the only template the app writes for itself,
+     * which is why it is the only one that must not be changed: everything else is a copy somebody made
+     * deliberately, and a copy is theirs.
+     */
+    const val EXAMPLE = "example.json"
 
     /** The suffix every schema has. A file without it is not offered, so a note can live here too. */
     const val SUFFIX = ".json"
@@ -152,6 +170,9 @@ object Schemas {
             body = Shape.CHAT.literal(
                 "model" to ModelConfigFile.DEFAULT_MODEL,
                 "effort" to "high",
+                // **`key` is a name, not a value** (§3.6.3). The shipped file names none, because a fresh
+                // install has no row to name — and absent means "send no Authorization header at all",
+                // which is the honest state of a phone that has not been given a key yet.
             ),
         ),
         "embedding.json" to Schema(

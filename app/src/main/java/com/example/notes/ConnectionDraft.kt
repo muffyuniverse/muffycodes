@@ -119,10 +119,10 @@ data class ConnectionDraft(
         numberProblem(target, "The compaction target")?.let { return it }
         numberProblem(forget, "The clear-up point")?.let { return it }
         numberProblem(trim, "The trim point")?.let { return it }
-        if (effort.isNotBlank() && ModelConfigFile.effortRank(effort) < 0) {
-            return "\"$effort\" is not an effort the app knows. Use one of: none, minimal, low, " +
-                "medium, high, max — or leave it blank to inherit."
-        }
+        // **The effort is not checked against a ladder any more.** `effortRank` came from the
+        // catalogue's `supported_efforts`, which is OpenRouter's field and not part of the protocol —
+        // so a word this build has not seen is a word the *server* judges. A refusal in its own
+        // words beats a window that would not close over a value the server invented.
         shapeProblem()?.let { return it }
         return null
     }

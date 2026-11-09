@@ -837,10 +837,10 @@ class CredentialStore(context: Context) : Credentials {
                 target = if (json.has("target")) json.optLong("target") else null,
                 forget = if (json.has("forget")) json.optLong("forget") else null,
                 trim = if (json.has("trim")) json.optLong("trim") else null,
-                // **A word for a sentence, not a routing instruction** (see [Choice]). Written only
-                // when somebody's window said one, which today is never — the account's own choice
-                // keeps its word in `model_conf.json` and a row's choice names its address instead.
-                provider = json.optString("provider"),
+                // **`provider` is read and dropped when present**, like the tag lists in
+                // `model_conf.json`: a row written by the previous build still loads, and the word it
+                // carries is no longer a routing instruction the app can honour — the address is the
+                // upstream, and a sentence that wants the word asks `providerOf`.
             )
             // **A row with nothing in it is not a row.** It can only be there from an older version of
             // this file, and reading it as a choice would let a blank row shadow the parent's model.
@@ -865,7 +865,6 @@ class CredentialStore(context: Context) : Credentials {
             choice.target?.let { put("target", it) }
             choice.forget?.let { put("forget", it) }
             choice.trim?.let { put("trim", it) }
-            if (choice.provider.isNotBlank()) put("provider", choice.provider)
         }
         prefs.edit().putString(key, json.toString()).apply()
     }
