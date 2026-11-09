@@ -2400,8 +2400,9 @@ internal val README_TEXT = """
 
     ## It begins with an account
 
-    An account is where your projects live: a name, a host and a key. Sign in with GitHub, or
-    add any host by hand — a GitLab, a Gitea, a server of your own.
+    An account is where your projects live: a name, a host and a key. Add a GitHub account and
+    its sign-in window fills the three in for you, or add a custom account and type the host
+    yourself — a GitLab, a Gitea, a server of your own.
 
     **Nothing is here until you do.** There is no account the app ships and no project it makes
     for you: a project is a repository, and a repository belongs to somebody.

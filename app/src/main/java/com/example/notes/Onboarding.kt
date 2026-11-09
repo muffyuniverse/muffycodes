@@ -42,7 +42,7 @@ object Onboarding {
      * The number is compared with the one recorded in settings. A person's own notes belong in their
      * own files, not in these.
      */
-    const val REVISION = 2
+    const val REVISION = 3
 
     /** A page: its file name, and its text. The name's leading number is the order. */
     data class Page(val name: String, val text: String)
@@ -77,13 +77,15 @@ That is the whole idea. Everything else is what it makes possible.
 """.trimIndent()
 
     private val FILES = """
-# Your files live in GitHub
+# Your files live in a repository
 
-Sign in with GitHub and this app becomes a folder in your account.
+An account is a host and a key. GitHub is where most people start, because its sign-in window makes
+the key for you — but any host that speaks git works, including a server you run yourself, and
+switching accounts is switching hosts.
 
 Every project is a repository. Every save is a commit, so the history you see in the editor is the
-same history GitHub shows. Nothing is uploaded when you press something — the work *is* the upload,
-and a sync is only the last step.
+same history the host shows. Nothing is uploaded when you press something — the work *is* the
+upload, and a sync is only the last step.
 
 **Your writing outlives the app.** Uninstall it, and your files are still there, in the account you
 already trust.

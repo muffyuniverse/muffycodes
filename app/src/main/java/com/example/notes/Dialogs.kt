@@ -670,11 +670,18 @@ fun NewProjectDialog(
 }
 
 /**
- * **Two ways in, and only one of them is GitHub's.**
+ * **Two ways in, and neither is the real one.**
  *
  * The operator's decision: the device flow stays, as *"a separate door option... a convenience on top of
- * the shared process"*. So this is a choice between two doors that end in the same save, and it says what
- * each one is for rather than making a person guess which is the "real" one.
+ * the shared process"*, and — the correction that shapes the words below — **"github is just one of the
+ * git compatible hosts"**. Nothing in the app is GitHub-shaped: an account is a name, a host and a key,
+ * and `AddHostAccountDialog` is the general case that works for any server speaking git. GitHub gets its
+ * own entry for exactly one reason, and the entry says it: its OAuth device flow fills in what an account
+ * needs, instead of the person typing it.
+ *
+ * So the two are *peers*, listed as two options rather than as a primary button with an escape hatch
+ * underneath — a person who self-hosts should not have to read the GitHub sentence to work out that the
+ * second one is meant for them.
  */
 @Composable
 fun AddAccountDialog(
@@ -696,11 +703,11 @@ fun AddAccountDialog(
                     onClick = onGitHub,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Sign in with GitHub", style = MaterialTheme.typography.titleMedium)
+                    Text("Add GitHub account", style = MaterialTheme.typography.titleMedium)
                 }
                 Text(
-                    "The name and the address are filled in for you, because GitHub says who a key " +
-                        "belongs to.",
+                    "Its sign-in window fills in the name, the host and the key for you, because " +
+                        "GitHub pairs a device code with a key it makes itself.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -709,10 +716,11 @@ fun AddAccountDialog(
                     onClick = onAnotherHost,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Another host", style = MaterialTheme.typography.titleMedium)
+                    Text("Add custom account", style = MaterialTheme.typography.titleMedium)
                 }
                 Text(
-                    "Any host that speaks git: you say the host, and paste a key you made there.",
+                    "Any host that speaks git — your own server, a work one, another service. You " +
+                        "say the host and paste a key you made there.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -745,7 +753,7 @@ fun AddHostAccountDialog(
     var key by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Another host") },
+        title = { Text("Add custom account") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -767,7 +775,11 @@ fun AddHostAccountDialog(
                     singleLine = true,
                     supportingText = {
                         Text(
-                            "Just the name, like ${GITHUB_HOST} — a project's address goes on the project.",
+                            // **The example is the field's own starting value**, not GitHub: this is the
+                            // window for every host *but* the one whose door fills this in, and naming it
+                            // here read as "type github.com, then edit it".
+                            "Just the name, like $host — a project's full address goes on the project, " +
+                                "not here.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     },
