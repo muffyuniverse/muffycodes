@@ -166,11 +166,16 @@ class TransferTest {
         assertNotNull("it refuses", problem)
         assertTrue("naming the rule: $problem", problem!!.contains("Local"))
         assertTrue("and the way out: $problem", problem.contains("Move it to an account"))
-        // **The same project with no address may come here**, and that is the half that makes the rule
-        // about the address rather than about projects.
+        // **A project with no address may come here**, which is the half that makes the rule about the
+        // address rather than about projects: `Bare` is a repository in the account that has never been
+        // given one.
+        val bare = to.projectDir("Bare")
+        bare.mkdirs()
+        File(bare, "b.txt").writeText("local work\n")
+        GitService.initOrOpen(bare, author).close()
         assertNull(
             "a project with no address is welcome",
-            Transfer.problem(from, to.accountDir, "Shopping", toIsLocal = false),
+            Transfer.problem(to, from.accountDir, "Bare", toIsLocal = true),
         )
     }
 
