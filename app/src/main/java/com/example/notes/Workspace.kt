@@ -118,8 +118,28 @@ class Workspace(
      */
     fun ensure() {
         accountDir.mkdirs()
-        ensureSystemFolder()
         ensureSystemLinks()
+    }
+
+    /**
+     * **Seeds the app's own folder — the one thing that needs no account** (§3.11).
+     *
+     * The introduction, the system prompt, the empty article folders and the README live here, and
+     * they have to exist on a phone that has never signed in: that is the whole reason the folder is
+     * the app's rather than an account's. So this is called once at start-up, from the app rather
+     * than from a workspace, and it makes the folder if it is missing.
+     *
+     * **It does not touch a project's links.** Those are a fact about a tree, and there is no tree
+     * until there is a project — [ensure] does them, per account.
+     */
+    fun ensureAppFolder() {
+        try {
+            appDir.mkdirs()
+            ensureReadme(appDir)
+        } catch (t: Throwable) {
+            // A folder that cannot be made is a phone problem, and every write that needs it says so
+            // on its own. Nothing to report from here.
+        }
     }
 
     /**
@@ -230,17 +250,6 @@ class Workspace(
      * fresh prompt. That is the right recovery: the alternative is an account whose settings have
      * nowhere to live and an agent that refuses to start.
      */
-    private fun ensureSystemFolder() {
-        try {
-            val dir = appDir
-            dir.mkdirs()
-            ensureReadme(dir)
-        } catch (t: Throwable) {
-            // A folder that cannot be made is a phone problem, and every write that needs it will
-            // say so on its own. Nothing to report from here.
-        }
-    }
-
     /**
      * Puts the app's own README in the system project, **once**.
      *
@@ -284,9 +293,11 @@ class Workspace(
     private fun ensureOnboarding(dir: File) {
         val root = File(dir, Onboarding.DIR)
         try {
-            // **The account's state folder, not the system project's** — `stateDir` is where the
-            // app keeps its own flags, and `dir` here is the system project.
-            val stamp = File(File(accountDir, STATE_DIR), ONBOARDING_STAMP)
+            // **The app's own state, beside the pages it is about.** One folder per phone means one
+            // stamp: the pages are the same pages whichever account is open, so a per-account stamp
+            // would rewrite them once per identity for no reason — and on a phone with no account it
+            // would never run at all.
+            val stamp = File(File(appDir, STATE_DIR), ONBOARDING_STAMP)
             val written = stamp.takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull() ?: 0
             if (written >= Onboarding.REVISION && root.isDirectory) return
             root.mkdirs()

@@ -516,6 +516,11 @@ class AppViewModel @JvmOverloads constructor(
         // name the phone installed, which is what a person says when they say "on 149".
         Trace.build = buildName
         Trace.note("app-opened", versionLine)
+        // **The app's own folder is made before anything asks whether there is an account** (§3.11).
+        // It holds the introduction, the system prompt and the library, none of which belongs to an
+        // identity — so it exists on a phone that has never signed in, and the first screen a person
+        // sees is readable.
+        Workspace(accounts.sharedDir, accounts.sharedDir).ensureAppFolder()
         refresh()
         // **The introduction, once.** The report that asked for it: *"remove this sign in to begin
         // text box. Instead I want on first open to move operator to readme.md file from system
@@ -621,17 +626,19 @@ class AppViewModel @JvmOverloads constructor(
      * "onboarding is late", never "onboarding is skipped".
      */
     private fun openOnboarding() {
-        val ws = workspace ?: return
         val pages = Onboarding.pages()
         if (pages.isEmpty()) return
         if (settings.onboardingDone(pages.size)) return
-        val dir = File(ws.systemDir, Onboarding.DIR)
+        // **The app's folder, not an account's** (§3.11). The introduction has to be readable on a
+        // phone that has never signed in — that is the whole reason it lives where it does — so this
+        // asks for the pages before it asks whether there is a workspace, and the path it sets is the
+        // `shared/…` a person sees rather than one only a workspace could produce.
         val at = settings.onboardingAt.coerceIn(0, pages.lastIndex)
-        val page = File(dir, pages[at].name)
+        val page = File(File(accounts.sharedDir, Onboarding.DIR), pages[at].name)
         if (!page.isFile) return
         onboarding = true
         Trace.note("onboarding", "page ${at + 1} of ${pages.size}")
-        editingPath = ws.relative(page)
+        editingPath = listOf(Workspace.SYSTEM_PROJECT, Onboarding.DIR, page.name)
         editorSession++
     }
 
@@ -703,7 +710,7 @@ class AppViewModel @JvmOverloads constructor(
         // `onboardingIndexOf` answers -1 once `onboarding` is false, so asking it afterwards said
         // "not an onboarding page" about the page it was on. The first version of this fix cleared
         // the flag first and closed nothing, and the test caught it.
-        val shown = editingPath?.let { workspace?.fileAt(it) }
+        val shown = editingFile
         val wasOnPage = shown != null && onboardingIndexOf(shown) >= 0
         settings.markOnboardingAt(Onboarding.pages().size)
         onboarding = false
@@ -3208,14 +3215,38 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The file the editor is showing, or null. */
     val editingFile: File?
-        get() = editingPath?.let { workspace?.fileAt(it) }
+        get() = editingPath?.let { path ->
+            // **The app's folder is readable with no account** (§3.11), and it is the one path that
+            // can be: there is no project to belong to, so the workspace is not what answers for it.
+            // Everything else still goes through the workspace, which is what keeps a branch's
+            // worktree redirection in one place.
+            workspace?.fileAt(path) ?: appFileAt(path)
+        }
+
+    /**
+     * A path inside the app's folder, or null when it names anything else.
+     *
+     * The same conversion `Workspace.partsOf` performs in reverse — `shared/a/b` is
+     * `<files>/shared/a/b` — kept here because this is the one reader that must work when there is no
+     * workspace to ask.
+     */
+    private fun appFileAt(path: List<String>): File? {
+        if (path.firstOrNull()?.equals(Workspace.SYSTEM_PROJECT, ignoreCase = true) != true) return null
+        return path.drop(1).fold(accounts.sharedDir) { dir, name -> File(dir, name) }
+    }
 
     /**
      * Saves the editor's text. The file is written on disk, then committed to the
      * account's history — which is where a local file's versions come from.
      */
     fun saveEditor(text: String) {
-        val ws = workspace ?: return
+        // **Said, not dropped.** With no account the only file the editor can be showing is one of
+        // the app's own — which is locked and refused below — but a guard that returns in silence is
+        // the one thing this app does not do, and "no account" is now a state a person can be in.
+        val ws = workspace ?: run {
+            message = "No account is open, so there is nothing to save into."
+            return
+        }
         val file = editingFile ?: return
         // Refused here as well as on the screen. The screen only ever saves text, so
         // this cannot fire in normal use — which is the point: the guarantee is that
