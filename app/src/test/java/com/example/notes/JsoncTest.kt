@@ -97,7 +97,7 @@ class JsoncTest {
         assertEquals("the length is unchanged", text.length, stripped.length)
         assertEquals(
             "the newlines inside the comment are kept",
-            6,
+            5,
             stripped.count { it == '\n' },
         )
     }

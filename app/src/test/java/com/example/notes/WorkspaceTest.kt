@@ -1062,6 +1062,10 @@ class WorkspaceTest {
         assertTrue("asked as a path too", workspace.isAppHeld("shared/schemas/chat/openrouter.jsonc"))
         assertTrue("and the case-folded name is not a second folder", workspace.isAppHeld(listOf("Shared")))
 
+        assertTrue(
+            "and the introduction, because a revision bump would overwrite an edit in place",
+            workspace.isAppHeld("shared/onboarding/01-what-this-is.md"),
+        )
         assertFalse(workspace.isAppHeld(listOf("shared", "requests")))
         assertFalse(workspace.isAppHeld("shared/requests/chat/mine.jsonc"))
         assertFalse("a project called schemas is not the app's", workspace.isAppHeld(listOf("schemas")))

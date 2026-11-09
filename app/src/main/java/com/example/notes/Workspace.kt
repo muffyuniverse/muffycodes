@@ -867,6 +867,9 @@ class Workspace(
      *   depends on it being where it is. Its contents are the person's.
      * - `shared/schemas/` **and everything under it** are held, because those are the app's reference
      *   templates and every file in the folder is one.
+     * - `shared/onboarding/` **and everything under it** are held for the same reason: the pages are
+     *   the app's own writing, a person reads them and clones them, and an edit in place would be
+     *   silently overwritten the next time the app's revision changed.
      * - `shared/requests/` is **not held**: that is where a person and an agent write the forms the app
      *   sends, and a folder lock that covered its contents would make the library read-only — the very
      *   thing the two folders were split apart to avoid.
@@ -875,7 +878,10 @@ class Workspace(
         (names.size == 1 && isSystem(names[0])) ||
             (
                 names.size >= 2 && isSystem(names[0]) &&
-                    names[1].equals(SCHEMAS_DIR, ignoreCase = true)
+                    (
+                        names[1].equals(SCHEMAS_DIR, ignoreCase = true) ||
+                            names[1].equals(Onboarding.DIR, ignoreCase = true)
+                        )
                 )
 
     /** [isAppHeld] for a path written the way the browser shows it. */

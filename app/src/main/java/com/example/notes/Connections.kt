@@ -336,6 +336,21 @@ data class Wired(
      * a key, it is simply not for this server.
      */
     val keyProblem: String? = null,
+    /**
+     * **The form this turn runs**, when the chat named one — the whole request as a document.
+     *
+     * Null on the older path (a scope's connection rows) and on the refusal path below. It is here
+     * rather than only in the derived fields because a refusal has to be able to say *which* file was
+     * named and where to pick another.
+     */
+    val form: Schema? = null,
+    /**
+     * **Why this chat cannot send anything**, when it cannot — the sentence the person reads.
+     *
+     * The one thing a turn cannot work around: no form, or a form that will not read. A refusal rather
+     * than a fallback, because a fallback would spend the key on a model nobody chose for this chat.
+     */
+    val missing: String? = null,
 ) {
     companion object {
         /**
@@ -352,6 +367,92 @@ data class Wired(
             limits: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
             keyProblem: String? = null,
         ): Wired = Wired(at, active, key, keyState, shape, keyless, limits, keyProblem)
+
+        /**
+         * **What a chat is asked with, from the form it names** (§3.8.3) — the pointer's path, read as
+         * a document, and nothing else.
+         *
+         * This is the whole of the resolution: the form's address is where the bytes go, its `key` is
+         * the *name* of a vault row, its `url` is the path on that address, its body is what is sent,
+         * and its three numbers are the context policy. There is no inheritance and no second place to
+         * look, which is what makes "the chat's form is the chat's request" a fact rather than a rule.
+         *
+         * **The key is resolved by its name and the form's own host.** A row is stored bound to the
+         * host it was made for, so a form naming `@openrouter` for `example.com` gets nothing rather
+         * than sending that key to a server it was never issued by — the vault's rule, asked through
+         * the name the document carries.
+         *
+         * **A chat with no form refuses in words**, naming the picker: a worktree that silently ran
+         * another chat's request would spend the key on a model nobody chose for it.
+         */
+        fun ofForm(
+            ws: Workspace,
+            credentials: Credentials,
+            project: String,
+            branch: String,
+        ): Wired {
+            val path = Schemas.pointer(ws.accountDir, project, branch)
+            if (path == null) {
+                return Wired(
+                    at = SecretScope.Branch(project, branch),
+                    active = ActiveModel("", ""),
+                    key = { null },
+                    keyState = { KeyState.NONE },
+                    missing = "This chat has no request form yet, so there is nothing to send. " +
+                        "Pick one with the chat's template button — forms live in " +
+                        "${Schemas.REQUESTS}/${ShapeKind.CHAT.folder}/, and the format is explained " +
+                        "in ${Schemas.DIR}/${ShapeKind.CHAT.folder}/${Schemas.REFERENCE}.",
+                )
+            }
+            val form = Schemas.read(ws, path, ShapeKind.CHAT).getOrElse { broken ->
+                return Wired(
+                    at = SecretScope.Branch(project, branch),
+                    active = ActiveModel("", ""),
+                    key = { null },
+                    keyState = { KeyState.NONE },
+                    missing = "${broken.message} Pick another form with the chat's template button.",
+                )
+            }
+            val name = form.key.removePrefix("@").trim()
+            val host = hostOfAddress(form.address)
+            // **No name is a server that wants no key** — a model on this phone — and it is said by the
+            // document rather than by a checkbox: the form either names a row or it does not.
+            val keyless = name.isEmpty()
+            val look = { credentials.secret(project, branch, name, host) }
+            val keyProblem = if (keyless || look() != null) {
+                null
+            } else {
+                "This form names the secret @$name for $host, and this phone has no readable secret " +
+                    "by that name for that host. Add it in Settings → Secrets."
+            }
+            return Wired(
+                at = SecretScope.Branch(project, branch),
+                active = ActiveModel(
+                    model = form.body.optString("model"),
+                    // **The effort is a field in the body, not a setting**, so the label a sentence
+                    // prints is read from the same place the server reads it.
+                    effort = form.body.optString("reasoning_effort"),
+                    baseUrl = form.address,
+                ),
+                key = { if (keyless) null else look() },
+                keyState = {
+                    when {
+                        keyless -> KeyState.NONE
+                        look() != null -> KeyState.READABLE
+                        else -> KeyState.NONE
+                    }
+                },
+                shape = form.shape(ShapeKind.CHAT),
+                keyless = keyless,
+                limits = ContextBudget.Limits.of(
+                    trigger = form.forget,
+                    hard = form.trim,
+                    target = form.target,
+                ),
+                keyProblem = keyProblem,
+                form = form,
+            )
+        }
     }
 }
 
