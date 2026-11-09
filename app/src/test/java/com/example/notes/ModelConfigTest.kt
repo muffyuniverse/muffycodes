@@ -126,7 +126,7 @@ class ModelConfigTest {
 
         // And a file that has them — this one was written by hand — still loads.
         ModelConfigFile.file(account).writeText(
-            written.replace(""effort"", ""contextLength": 1048576, "maxOutput": 393216, "effort""),
+            written.replace("\"effort\"", "\"contextLength\": 1048576, \"maxOutput\": 393216, \"effort\""),
         )
         val old = ModelConfigFile.load(account).getOrThrow()
 

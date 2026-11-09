@@ -483,9 +483,15 @@ private const val MODEL = "model"
 private const val PROVIDER = "provider"
 private const val EFFORT = "effort"
 
-/** A label, a value, and the fact that tapping it opens a choice. */
+/**
+ * A label, a value, and the fact that tapping it opens a choice.
+ *
+ * **`internal` rather than private**, because the settings screen uses the same row for the model
+ * connection: one shape for "this row opens a window" is what makes the screen read as a list of doors
+ * rather than as a list with one odd row in it.
+ */
 @Composable
-private fun SettingRow(label: String, value: String, onTap: () -> Unit) {
+internal fun SettingRow(label: String, value: String, onTap: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

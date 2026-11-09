@@ -500,6 +500,12 @@ private fun AppRoot(viewModel: AppViewModel) {
                 val permission = Notices.permission()
                 if (permission != null) askNotices.launch(permission)
             },
+            // **The general scope's connection**, opened from Settings: the same window a project
+            // and a branch have, with `null` place meaning "no worktree" — the account's own records.
+            onModelConnection = {
+                tap("model connection", "this account")
+                pending = Pending.ModelConnection(null, null)
+            },
             onBack = { showSettings = false },
             // **No `onSignIn` / `onRemoveAccount` any more** (§13c.5 step 3): those three acts live
             // on the accounts screen, which is the main menu. Settings keeps only what is local to
