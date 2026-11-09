@@ -1266,6 +1266,18 @@ template selected" means.
 **N0 and N1 before N2**, because N2's audit is about doors that only become reachable when the workspace can
 be absent. **N5 after F6**, because it lists what F6 stores.
 
+**N0 landed** (`c5ce10b6`, `fc2677b6`, `c9d05996`, `f5b6be4c`; CI 42657430545 green). Measured on the way:
+`Workspace` needed **two roots**, not one (`partsOf` answers `shared/…` for the app's folder and the account
+path for everything else, and `fileAt` answers `shared/` directly rather than through a worktree, because it
+is not a project and has no branch); the constructor has **no default**, and `Workspace.single(dir)` names the
+one-tree shape so no production caller can get the per-account layout by omission; and the **request history
+moves to `<account>/.muffy/requests`** — it is what that identity spent, and its folder was one name away from
+the request library's `requests/`.
+
+Three fixtures had to be told the truth twice: a folder that is no longer an entry (`VisibilityFeatureTest`'s
+three lists), a test that asserts the old path is *gone* — which a careless rewrite turned into a tautology —
+and six more sites that built `<account>/shared` by hand where `systemDir` is the call the app makes.
+
 ## 4. Cost is removed
 
 `usage.cost` and the per-endpoint prices are OpenRouter's extension; the OpenAI protocol has no money in it.
