@@ -179,8 +179,13 @@ fun LlmConnectionDialog(
                 // make a person think they had to have one.
                 TextButton(onClick = { editingShape = true }) {
                     Text(
+                        // **The one in force, and whether this scope is the one that wrote it.**
+                        // "The app's own" stopped being true the moment a parent could supply a
+                        // shape: a project that inherits one is not using the app's.
                         if (shapeUrl.isBlank() && shapeBody.isBlank()) {
-                            "Request shape: the app's own (tap to change)"
+                            "Request shape: " +
+                                (inForce.shapeUrl.ifBlank { Shape.CHAT.url }) +
+                                " · inherited (tap to change)"
                         } else {
                             "Request shape: $shapeUrl (tap to change)"
                         },
@@ -225,14 +230,12 @@ fun LlmConnectionDialog(
     if (editingShape) {
         ShapeDialog(
             kind = ShapeKind.CHAT,
-            url = shapeUrl.ifBlank { Shape.CHAT.url },
-            body = shapeBody.ifBlank { Shape.CHAT.body.toString() },
+            // **The shape in force, not this scope's own.** The window opened on the values that would
+            // be sent, so the editor opens on the body that would be sent — and saving it unchanged
+            // writes nothing, because `changesAgainst` compares it with the same in-force text.
+            url = shapeUrl.ifBlank { inForce.shapeUrl.ifBlank { Shape.CHAT.url } },
+            body = shapeBody.ifBlank { inForce.shapeBody.ifBlank { Shape.CHAT.body.toString() } },
             onDismiss = { editingShape = false },
-            onUsePreset = {
-                shapeUrl = ""
-                shapeBody = ""
-                editingShape = false
-            },
             onResult = { url, text ->
                 shapeUrl = url
                 shapeBody = text
@@ -387,9 +390,13 @@ fun ShapeDialog(
     url: String,
     body: String,
     onDismiss: () -> Unit,
-    onUsePreset: () -> Unit,
     onResult: (String, String) -> Unit,
 ) {
+    // **What the editor opened on**, kept so Reset can put it back. A body is a JSON document somebody
+    // is editing by hand, and one wrong keystroke can leave it unreadable with no undo on a phone — so
+    // the way back is a button rather than a memory.
+    val openedPath = remember { url }
+    val openedText = remember { body }
     var path by remember { mutableStateOf(url) }
     var text by remember { mutableStateOf(body) }
 
@@ -433,7 +440,14 @@ fun ShapeDialog(
         dismissButton = {
             Row {
                 TextButton(onClick = onDismiss) { Text("Cancel") }
-                TextButton(onClick = onUsePreset) { Text("App's own") }
+                // **Reset restores what this window opened on**, which is the shape in force — the
+                // app's own when nothing is stored, the parent's when this scope inherits one, this
+                // scope's own when it already wrote one. It does not save and it does not close: the
+                // point is to see again the document you started from.
+                TextButton(onClick = {
+                    path = openedPath
+                    text = openedText
+                }) { Text("Reset") }
             }
         },
     )

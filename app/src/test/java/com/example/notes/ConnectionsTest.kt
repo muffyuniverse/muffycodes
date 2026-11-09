@@ -644,18 +644,21 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `a row the account cannot use falls back to its records`() {
-        // The same completeness rule at the widest scope: a row naming a server and no model is not in
-        // force, so the account's own model and address answer — which is the answer as if the row had
-        // never been made.
+    fun `a row at the account is used like any other, and its key is its own`() {
+        // **The account is a scope, not a special case.** A row there says "not the account's own
+        // records" — and it is read by the same walk that reads a project's or a branch's. This used
+        // to be the completeness rule's last stand: a row with an address and no model was "not in
+        // force" and the account's records answered instead, which is a second rule for the same
+        // question.
         val wired = asked(
             connections = mapOf<SecretScope, Connection>(
                 SecretScope.Account to Connection("https://elsewhere.example/v1", "sk-other"),
             ),
         )
 
-        assertEquals(account.model, wired.active.model)
-        assertEquals(account.baseUrl, wired.active.baseUrl)
-        assertEquals("sk-the-account-key", wired.key())
+        assertEquals("the row's address", "https://elsewhere.example/v1", wired.active.baseUrl)
+        assertEquals("and the model it inherits from the account's records", account.model, wired.active.model)
+        assertEquals("with the row's own key", "sk-other", wired.key())
+        assertEquals("and the scope it came from", SecretScope.Account, wired.at)
     }
 }

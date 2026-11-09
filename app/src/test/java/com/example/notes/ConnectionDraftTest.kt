@@ -19,18 +19,91 @@ class ConnectionDraftTest {
     // ---- the llm window ----------------------------------------------------------------
 
     @Test
-    fun `an address with no model is refused, and the sentence says why`() {
-        // **The cap, said where a person can act on it.** A model id is a name the server assigns, so
-        // the account's name would be asking this server for something it does not have — and the
-        // request would fail at the server with a message about a model, which is the wrong fix.
-        val said = ConnectionDraft(
+    fun `an address with no model is kept, because the server is the one that refuses it`() {
+        // **The cap is gone** (operator, 2026-11-09). A model id is still a name the server assigns, so
+        // this combination is probably wrong — and the window no longer refuses to close over it,
+        // because the answer is the server's: it names the model it does not have, which is a better
+        // sentence than "say which model this server serves" from a form that cannot know.
+        val draft = ConnectionDraft(
             kind = ConnKind.LLM,
             address = "https://models.example.org/v1",
-        ).problemSaid()
+        )
+
+        assertNull("nothing to refuse: ${draft.problemSaid()}", draft.problemSaid())
+        assertEquals(
+            "and the address is written as its own field",
+            "https://models.example.org/v1",
+            draft.connection()?.address,
+        )
+        assertNull("with no model written, so that one is inherited", draft.choice())
+    }
+
+    @Test
+    fun `the three numbers are written as typed, and a blank one is not written`() {
+        val draft = ConnectionDraft(
+            kind = ConnKind.LLM,
+            target = "60000",
+            forget = "0",
+            trim = "250000",
+        )
+
+        assertNull("nothing to refuse", draft.problemSaid())
+        assertEquals(
+            "blank and zero are different: 0 turns the hand off, blank inherits",
+            Choice(target = 60_000, forget = 0, trim = 250_000),
+            draft.choice(),
+        )
+        assertNull("and no pair is written by numbers alone", draft.connection())
+    }
+
+    @Test
+    fun `a number that is not a number is refused, naming the field`() {
+        val said = ConnectionDraft(kind = ConnKind.LLM, trim = "12k").problemSaid()
 
         assertTrue("it refuses: $said", said != null)
-        assertTrue("it names the field: $said", "model" in said.orEmpty())
-        assertTrue("and says why an inherited one will not do", "assigns" in said.orEmpty())
+        assertTrue("naming the field: $said", "trim" in said.orEmpty())
+    }
+
+    @Test
+    fun `a field left at the value it inherits is not written`() {
+        // **The window opens on the values in force**, so "left alone" and "typed the same" look
+        // identical in the text. Saving what did not change would pin the parent's value at this scope,
+        // where it would stop following the parent — the opposite of changing only what you need.
+        val inForce = ConnectionDraft.opening(
+            kind = ConnKind.LLM,
+            at = "https://openrouter.ai/api/v1",
+            model = "deepseek/deepseek-v4.1-flash",
+            effort = "high",
+            limits = ContextBudget.Limits.of(trigger = 100_000, hard = 250_000, target = 60_000),
+            shape = Shape.CHAT,
+        )
+        val typed = inForce.copy(model = "llama3.3:70b")
+
+        val changed = typed.changesAgainst(inForce)
+
+        assertEquals("the model is the only thing that changed", "llama3.3:70b", changed.model)
+        assertNull("so no pair is written", changed.connection())
+        assertEquals(
+            "and only the model is in the choice",
+            Choice(model = "llama3.3:70b"),
+            changed.choice(),
+        )
+    }
+
+    @Test
+    fun `a window whose fields were all left alone writes nothing at all`() {
+        val inForce = ConnectionDraft.opening(
+            kind = ConnKind.LLM,
+            at = "https://openrouter.ai/api/v1",
+            model = "a-model",
+            limits = ContextBudget.Limits.of(trigger = 100_000, hard = 0, target = 60_000),
+            shape = Shape.CHAT,
+        )
+
+        val changed = inForce.changesAgainst(inForce)
+
+        assertNull("no pair", changed.connection())
+        assertNull("no choice", changed.choice())
     }
 
     @Test

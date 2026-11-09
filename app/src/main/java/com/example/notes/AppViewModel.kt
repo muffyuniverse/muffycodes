@@ -1760,7 +1760,8 @@ class AppViewModel @JvmOverloads constructor(
             effort = credentials.choice(scope, ConnKind.LLM)?.effort?.takeIf { it.isNotBlank() }
                 ?: asked?.active?.effort.orEmpty(),
             limits = asked?.limits ?: ContextBudget.Limits.of(trigger = 0, hard = 0),
-            shape = own?.shapes?.get(ShapeKind.CHAT),
+            // **The shape in force**, so the editor opens on the document that would be sent.
+            shape = asked?.shape,
             // **Off unless this scope ticked it**, because a grant is a statement about a row.
             nameable = own?.nameable == true,
         )
