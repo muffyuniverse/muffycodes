@@ -39,7 +39,6 @@ WorkspaceTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java
 RequestStatsTest app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
 ModelConfigTest app/src/main/java/com/example/notes/ModelConfig.kt
 SchemasTest app/src/main/java/com/example/notes/Schema.kt app/src/main/java/com/example/notes/Schemas.kt app/src/main/java/com/example/notes/Shape.kt
-ModelCatalogueTest app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt
 OpenRouterAuthTest app/src/main/java/com/example/notes/OpenRouterAuth.kt
 ProjectGitTest app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 RepoLocksTest app/src/main/java/com/example/notes/RepoLocks.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt

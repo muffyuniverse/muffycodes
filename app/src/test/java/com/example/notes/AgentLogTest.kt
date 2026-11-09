@@ -61,7 +61,7 @@ class AgentLogTest {
             git = ProjectGit(workspace, { null }, { GitAuthor("M", "m@example.com") }),
             log = record,
             door = ScriptedDoor(),
-            model = ActiveModel("m", "p", "high"),
+            model = ActiveModel("m", "high"),
         )
     }
 

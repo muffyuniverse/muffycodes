@@ -71,7 +71,7 @@ class AgentTest {
         git = git,
         log = log,
         door = door,
-        model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high"),
+        model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high"),
         // No limits means the defaults: no trigger, no trim, which is what most of these tests
         // want — a request that behaves as if the context had all the room in the world.
         limits = limits ?: ContextBudget.Limits.of(trigger = 0, hard = 0),
@@ -83,7 +83,7 @@ class AgentTest {
 
     private fun call(name: String, args: String, id: String = "c1") = Call(id, name, args)
 
-    private fun model() = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")
+    private fun model() = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")
 
     private fun rows() = AgentLog.open(File(ws.accountDir, "shopping")).rows()
 
@@ -3426,7 +3426,7 @@ class AgentTest {
         Agent(
             accountDir = account, project = "shopping", ws = ws, git = git, log = log,
             door = door,
-            model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high"),
+            model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high"),
             maxResult = 500,
         ).burst("read the whole thing")
 

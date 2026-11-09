@@ -212,7 +212,7 @@ object AgentWiring {
      * The app's own default, not a guess: a config that will not parse is a person's file being
      * edited, and the right answer is the model the app ships with rather than no request at all.
      */
-    val DEFAULT_MODEL = ActiveModel(ModelConfigFile.DEFAULT_MODEL, "deepseek", "high")
+    val DEFAULT_MODEL = ActiveModel(ModelConfigFile.DEFAULT_MODEL, "high")
 
     /**
      * **What a turn on [project] at [branch] is asked with**, from what is on this phone.

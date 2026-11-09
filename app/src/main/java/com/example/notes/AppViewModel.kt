@@ -233,114 +233,6 @@ class AppViewModel @JvmOverloads constructor(
     var modelConfigProblem: String? by mutableStateOf(null)
         private set
 
-    /**
-     * Where the picker's numbers come from.
-     *
-     * Swappable so a test can answer without a socket: the whole agent is built on the rule that
-     * nothing in the suite opens a connection, and a picker that could only be tested against
-     * OpenRouter would be a picker tested by hand or not at all.
-     */
-    var catalogue: Catalogue = OpenRouterCatalogue(
-        key = { activeLogin?.let { credentials.modelKey(it) } },
-        // **Read per call**, so a person who points the account at another compatible server gets
-        // that server's catalogue on the next picker rather than the one it was built with.
-        baseUrl = { modelConfig.baseUrl },
-    )
-
-    /**
-     * What OpenRouter says about the model in use, read when a picker opens.
-     *
-     * **State rather than a call from the screen**, for two reasons. A sheet that fetches while
-     * it draws freezes exactly when the network is slow, which is when somebody opened it; and
-     * the *choices* do not need the network at all — the provider tags are in the config file —
-     * so only the numbers are allowed to be late. Before they arrive the rows are still there.
-     */
-    var modelInfo: ModelInfo? by mutableStateOf(null)
-        private set
-
-    var modelEndpoints: List<EndpointInfo> by mutableStateOf(emptyList())
-        private set
-
-    var catalogueProblem: String? by mutableStateOf(null)
-        private set
-
-    var catalogueReading: Boolean by mutableStateOf(false)
-        private set
-
-    /** The model the numbers above belong to, so a picker does not re-read on every frame. */
-    private var catalogueFor: String? = null
-
-    /** Reads the numbers for [model], once per model unless [force]. */
-    fun readCatalogue(model: String, force: Boolean = false) {
-        if (!force && model == catalogueFor && (modelInfo != null || catalogueProblem != null)) return
-        catalogueFor = model
-        catalogueReading = true
-        catalogueProblem = null
-        val source = catalogue
-        onWorker {
-            val info = source.model(model)
-            val endpoints = source.endpoints(model)
-            main.post {
-                info.fold(
-                    onSuccess = { modelInfo = it },
-                    onFailure = { catalogueProblem = it.message },
-                )
-                endpoints.fold(
-                    onSuccess = { modelEndpoints = it },
-                    onFailure = { if (catalogueProblem == null) catalogueProblem = it.message },
-                )
-                catalogueReading = false
-            }
-        }
-    }
-
-    /** The add form's own read: a model that is not in use yet. */
-    var previewInfo: ModelInfo? by mutableStateOf(null)
-        private set
-
-    var previewEndpoints: List<EndpointInfo> by mutableStateOf(emptyList())
-        private set
-
-    var previewProblem: String? by mutableStateOf(null)
-        private set
-
-    var previewReading: Boolean by mutableStateOf(false)
-        private set
-
-    /**
-     * Asks OpenRouter about [id] before anything is written.
-     *
-     * A form that only wrote a string into the file would let a typo through and fail eight
-     * seconds into the agent's first turn with a 404; this turns that into a sentence at the
-     * moment the person is looking.
-     */
-    fun readPreview(id: String) {
-        val clean = id.trim()
-        previewInfo = null
-        previewEndpoints = emptyList()
-        previewProblem = null
-        previewReading = true
-        val source = catalogue
-        onWorker {
-            val info = source.model(clean)
-            val endpoints = if (info.isSuccess) source.endpoints(clean) else
-                Result.failure(IllegalStateException("not asked"))
-            main.post {
-                info.fold(
-                    onSuccess = { previewInfo = it },
-                    onFailure = { previewProblem = it.message },
-                )
-                if (info.isSuccess) {
-                    endpoints.fold(
-                        onSuccess = { previewEndpoints = it },
-                        onFailure = { previewProblem = it.message },
-                    )
-                }
-                previewReading = false
-            }
-        }
-    }
-
     /** The search text, which searches inside the current project (§7). */
     var query: String by mutableStateOf("")
 
@@ -1153,69 +1045,87 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * The three values the picker sets, kept together because they only make sense together.
+     * **A model is a word the person types, not a row they pick.**
      *
-     * The effort is clamped to what the model declares: a model that offers `low` and `max`
-     * cannot answer `high`, and sending a rung it never declared is a 400 from one provider and
-     * a silently ignored parameter from another.
-     *
-     * **The model's window is not among them any more.** It used to be written beside the choice so
-     * that the two places which build an agent could clamp without a catalogue; nothing clamps now, so
-     * the number had no reader and no longer travels (see `ContextBudget`).
+     * This used to be `chooseModel(model, provider, effort, supported)`, where `supported` was the
+     * endpoint's effort ladder read from OpenRouter's catalogue and `provider` was a tag that pinned
+     * the request to one of its downstreams. Both are gone: the catalogue's own paths
+     * (`/models/{id}/endpoints`, `/embeddings/models`) exist on no other server, so a picker built on
+     * them was a picker for exactly one vendor — and the app is meant to talk to whatever answers
+     * `/chat/completions`. A model id that the server does not have is a refusal in the server's own
+     * words, which is the same answer every number in this app now gets.
      */
-    fun chooseModel(
-        model: String,
-        provider: String,
-        effort: String,
-        supported: List<String>,
-    ) {
-        val clamped = ModelConfigFile.effortFor(supported, effort) ?: effort
-        val before = modelConfig.active.effort
+    fun setModel(model: String) {
+        val clean = model.trim()
+        if (clean.isEmpty()) return
         writeModelConfig(
-            modelConfig.copy(
-                active = ActiveModel(model = model, provider = provider, effort = clamped),
-            ),
-            "Chose $model on $provider at $clamped",
+            modelConfig.copy(active = modelConfig.active.copy(model = clean)),
+            "Chose $clean",
         )
-        if (clamped != before && supported.isNotEmpty()) {
-            Trace.said("effort: $before -> $clamped, this model's way of saying it")
-        }
+    }
+
+    /** The effort, as typed. Blank is a statement: the shape sends no `reasoning_effort` at all. */
+    fun setEffort(effort: String) {
+        writeModelConfig(
+            modelConfig.copy(active = modelConfig.active.copy(effort = effort.trim())),
+            "Effort: ${effort.trim().ifEmpty { "none" }}",
+        )
     }
 
     /**
-     * Chooses the model that turns text into vectors, **or the one that reorders results.**
+     * **Points at a template, which is the whole of choosing an embedding or rerank model.**
      *
-     * One function for both because they are the same act on the same shape of block — the operator's
-     * instruction: *"generalize them to take catalogue path as an argument and implement for models,
-     * embedding and rerank."* What differs is the third value, and it is passed rather than inferred:
-     * `dimensions` is the embedding model's choice of size, and a rerank model has none.
+     * The operator: *"rerank and embedding pickers can also just reference a template file from this
+     * folder."* So a `PickedModel` is a file name and a size, and this writes it.
      *
-     * **The dimension is written with the model, not beside it in a second field**: the index that is
-     * built later has no catalogue to ask, and a dimension read from the wrong place is an index that
-     * has to be rebuilt.
+     * **A different template is asked about before it happens**, because for an embedding pointer it is
+     * not a preference: the vectors already on disk are in the old template's coordinate system, so
+     * every project's index has to be thrown away and rebuilt. That costs minutes and tokens, so the
+     * person is told and can say no — [pendingPicked] is the question and the screen draws it.
+     *
+     * **A rerank pointer is never that question**, and neither is a change of address inside a template
+     * the pointer already named: the address says where a request goes, not where the vectors come from.
      */
-    fun choosePicked(kind: CatalogueKind, model: String, provider: String, dimensions: Int?) {
+    fun setPicked(kind: PickedKind, schema: String, dimensions: Int?) {
+        val clean = schema.trim()
+        if (clean.isEmpty()) return
         val one = PickedModel(
-            model = model,
-            provider = provider,
-            dimensions = if (kind == CatalogueKind.EMBEDDING) dimensions else null,
-            providers = providersFor(kind, model),
+            schema = clean,
+            // **The dimension is written beside the pointer, or not at all.** A rerank model has no
+            // such parameter, and a field the server never asked for is one it may refuse.
+            dimensions = if (kind == PickedKind.EMBEDDING) dimensions else null,
         )
-        // **A different embedding model is asked about before it happens**, because it is not a
-        // preference: the vectors already on disk are in the old model's coordinate system, so every
-        // project's index has to be thrown away and rebuilt. That costs minutes and tokens, so the
-        // person is told what it costs and can say no — [pendingPicked] is the question, and the
-        // screen draws it.
-        //
-        // **A different endpoint is not that question.** The provider is where the request goes, not
-        // where the vectors come from, so moving a model to another endpoint keeps the index and is
-        // applied at once.
         val current = modelConfig.embedding
-        if (kind == CatalogueKind.EMBEDDING && current != null && current.space() != one.space()) {
+        if (kind == PickedKind.EMBEDDING && current != null && current.space() != one.space()) {
             pendingPicked = one
             return
         }
         applyPicked(kind, one)
+    }
+
+    /** Points the embedding job at [schema], keeping the size it is already built at. */
+    fun setEmbeddingSchema(schema: String) = setPicked(
+        PickedKind.EMBEDDING,
+        schema,
+        modelConfig.embedding?.dimensions ?: SCHEMA_DIMENSIONS.first(),
+    )
+
+    /** Points the rerank job at [schema]. A rerank model has no size, by the protocol. */
+    fun setRerankSchema(schema: String) = setPicked(PickedKind.RERANK, schema, null)
+
+    /**
+     * Steps the embedding size through the ones this build knows.
+     *
+     * **A cycle rather than a picker**, because there are three and they are a property of the model: a
+     * dialog for a choice of three would be more taps than the answer is worth. A size the file names
+     * that is not in this list starts the cycle, so a value written by a newer build is not silently
+     * replaced by one this build happens to know.
+     */
+    fun cycleEmbeddingDimensions() {
+        val current = modelConfig.embedding ?: return
+        val steps = (SCHEMA_DIMENSIONS + (current.dimensions ?: 0)).distinct()
+        val at = steps.indexOf(current.dimensions)
+        setPicked(PickedKind.EMBEDDING, current.schema, steps[(at + 1).mod(steps.size)])
     }
 
     /**
@@ -1232,11 +1142,12 @@ class AppViewModel @JvmOverloads constructor(
         get() {
             val one = pendingPicked ?: return ""
             val now = modelConfig.embedding
-            return "Choosing ${one.model} at ${one.dimensions} dimensions throws away the index of " +
+            return "Pointing the embedding model at ${one.schema}, at ${one.dimensions} dimensions, " +
+                "throws away the index of " +
                 "every project and rebuilds it in the background. That takes several minutes and " +
                 "spends tokens on your key, and until it finishes a search answers with what is " +
                 "already indexed.\n\n" +
-                "The index on disk was built with ${now?.model ?: "another model"}. Only change this " +
+                "The index on disk was built with ${now?.schema ?: "another template"}. Only change " +
                 "if that endpoint has stopped answering — otherwise the index you have works."
         }
 
@@ -1244,7 +1155,7 @@ class AppViewModel @JvmOverloads constructor(
     fun confirmPicked() {
         val one = pendingPicked ?: return
         pendingPicked = null
-        applyPicked(CatalogueKind.EMBEDDING, one)
+        applyPicked(PickedKind.EMBEDDING, one)
         rebuildIndexes()
     }
 
@@ -1253,13 +1164,12 @@ class AppViewModel @JvmOverloads constructor(
         pendingPicked = null
     }
 
-    private fun applyPicked(kind: CatalogueKind, one: PickedModel) {
+    private fun applyPicked(kind: PickedKind, one: PickedModel) {
         val next = when (kind) {
-            CatalogueKind.CHAT -> return
-            CatalogueKind.EMBEDDING -> modelConfig.copy(embedding = one)
-            CatalogueKind.RERANK -> modelConfig.copy(rerank = one)
+            PickedKind.EMBEDDING -> modelConfig.copy(embedding = one)
+            PickedKind.RERANK -> modelConfig.copy(rerank = one)
         }
-        writeModelConfig(next, "Chose ${one.model} on ${one.provider} for ${kind.label.lowercase()}")
+        writeModelConfig(next, "Pointed the ${kind.label} at ${one.schema}")
     }
 
     /**
@@ -1294,173 +1204,22 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    /** The endpoints stored for [model] in [kind]'s block, so a choice keeps its provider list. */
-    private fun providersFor(kind: CatalogueKind, model: String): List<String> = when (kind) {
-        CatalogueKind.CHAT -> modelConfig.providersOf(model)
-        CatalogueKind.EMBEDDING -> modelConfig.embedding
-            ?.takeIf { it.model == model }?.providers.orEmpty()
-        CatalogueKind.RERANK -> modelConfig.rerank
-            ?.takeIf { it.model == model }?.providers.orEmpty()
-    }
-
     /**
-     * Adds a model to the embedding or rerank list — **the same act as adding a chat model**, which
-     * is what "same structure as we already use" asks for.
+     * **The templates in the folder**, read fresh, for the three rows and the dialogs behind them.
      *
-     * There is no list to add to in the file, because each of the two jobs has exactly one model
-     * chosen: adding one *is* choosing it. So this exists for the picker's Add button, which asks
-     * the catalogue whether the id is real before it becomes the choice.
+     * Read on every call rather than cached: a person writes a template in the editor, comes back, and
+     * the list must hold it. The count on the settings row is keyed on a revision so Compose re-runs it
+     * after this screen writes a file.
      */
-    fun addPicked(kind: CatalogueKind, id: String, provider: String): Result<Unit> {
-        if (kind == CatalogueKind.CHAT) return Result.failure(IllegalArgumentException("not this one"))
-        val clean = id.trim()
-        if (clean.isEmpty()) return Result.failure(IllegalArgumentException("A model needs an id"))
-        val tag = provider.trim()
-        if (tag.isEmpty()) return Result.failure(IllegalArgumentException("A model needs a provider"))
-        choosePicked(kind, clean, tag, kind.dimensions?.firstOrNull())
-        return Result.success(Unit)
-    }
+    fun templateNames(): List<String> = workspace?.let { Schemas.ensure(it.accountDir) }.orEmpty()
 
     /** Forgets the embedding or rerank choice, so the feature says "not chosen" rather than guessing. */
-    fun clearPicked(kind: CatalogueKind) {
+    fun clearPicked(kind: PickedKind) {
         val next = when (kind) {
-            CatalogueKind.CHAT -> return
-            CatalogueKind.EMBEDDING -> modelConfig.copy(embedding = null)
-            CatalogueKind.RERANK -> modelConfig.copy(rerank = null)
+            PickedKind.EMBEDDING -> modelConfig.copy(embedding = null)
+            PickedKind.RERANK -> modelConfig.copy(rerank = null)
         }
-        writeModelConfig(next, "Cleared the ${kind.label.lowercase()}")
-    }
-
-    /**
-     * Asks the catalogue for one model's window, once, and writes it beside the choice.
-     *
-     * **A file write, not a field.** The poll that builds an agent runs in another process and
-     * cannot see this view model, so a number held in memory would be a number the service never
-     * has. Nothing is written if the catalogue answers nothing, and nothing is written over a window
-     * that has arrived in the meantime.
-     */
-
-    /** Adds a model and the endpoints it may be pinned to. */
-    fun addModel(id: String, providers: List<String>): Result<Unit> {
-        val clean = providers.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
-        if (id.isBlank()) return Result.failure(IllegalArgumentException("A model needs an id"))
-        if (clean.isEmpty()) {
-            return Result.failure(IllegalArgumentException("A model needs at least one provider"))
-        }
-        if (modelConfig.models.any { it.id == id }) {
-            return Result.failure(IllegalArgumentException("$id is already in the list"))
-        }
-        writeModelConfig(
-            modelConfig.copy(models = modelConfig.models + ModelChoice(id, clean)),
-            "Added $id",
-        )
-        return Result.success(Unit)
-    }
-
-    /**
-     * Removes a model, refusing the one in use.
-     *
-     * Refused with a sentence rather than by removing it and then having no model: the picker
-     * asks a person to choose another first, which is a thing they can do, where "the agent has
-     * no model" is not.
-     */
-    fun removeModel(id: String): Result<Unit> {
-        if (id == modelConfig.active.model) {
-            return Result.failure(
-                IllegalArgumentException("That is the model in use, so choose another first")
-            )
-        }
-        val left = modelConfig.models.filterNot { it.id == id }
-        if (left.size == modelConfig.models.size) {
-            return Result.failure(IllegalArgumentException("$id is not in the list"))
-        }
-        writeModelConfig(modelConfig.copy(models = left), "Removed $id")
-        return Result.success(Unit)
-    }
-
-    /**
-     * Adds a provider to a model's list.
-     *
-     * **The providers of a model are a list the person chooses**, not a fact the app derives: one
-     * model is served by many endpoints, they differ in price and in window, and pinning to one is
-     * how a person says which they want. So adding one is a choice from the endpoints OpenRouter
-     * publishes for that model - never a typed tag. Report: "you are prompted to give model tag
-     * instead of opening a list of available providers for current model".
-     */
-    fun addProvider(model: String, tag: String): Result<Unit> {
-        val clean = tag.trim()
-        if (clean.isEmpty()) return Result.failure(IllegalArgumentException("A provider needs a tag"))
-        val choice = modelConfig.models.firstOrNull { it.id == model }
-            ?: return Result.failure(IllegalArgumentException("$model is not in the list"))
-        if (choice.providers.any { it == clean }) {
-            return Result.failure(IllegalArgumentException("$clean is already allowed for $model"))
-        }
-        Trace.tap("add provider", clean)
-        val next = modelConfig.models.map {
-            if (it.id == model) it.copy(providers = it.providers + clean) else it
-        }
-        writeModelConfig(modelConfig.copy(models = next), "Allowed $clean for $model")
-        return Result.success(Unit)
-    }
-
-    /**
-     * Moves one endpoint up or down in a model's list, **which is the fallback order.**
-     *
-     * The operator asked for this directly: "I want ability to rearrange provider endpoints on the
-     * provider selection card (by holding and then moving them), so that their order is the fallback
-     * order."
-     *
-     * **[from] and [to] are positions in the model's own list**, not names, because the act is a
-     * move rather than an edit: the caller knows where the row was dragged from and where it landed.
-     * A move that would leave the list unchanged is a no-op rather than an error - a drag that ends
-     * where it started is something a finger does constantly.
-     */
-    fun moveProvider(model: String, from: Int, to: Int) {
-        val choice = modelConfig.models.firstOrNull { it.id == model } ?: return
-        val list = choice.providers
-        if (from !in list.indices || to !in list.indices || from == to) return
-        val moved = list.toMutableList().apply { add(to, removeAt(from)) }
-        Trace.tap("reorder provider", "${list[from]} to ${to + 1}")
-        val next = modelConfig.models.map {
-            if (it.id == model) it.copy(providers = moved) else it
-        }
-        writeModelConfig(
-            modelConfig.copy(models = next),
-            "Moved ${list[from]} to position ${to + 1} for $model",
-        )
-    }
-
-    /**
-     * Takes a provider out of a model's list.
-     *
-     * **The one in use is refused**, because removing it would leave the agent pinned to an endpoint
-     * its own config no longer lists - a state the picker could not show and the next request would
-     * fail on. Choosing another provider first is one tap; discovering the breakage later is not.
-     */
-    fun removeProvider(model: String, tag: String): Result<Unit> {
-        if (model == modelConfig.active.model && tag == modelConfig.active.provider) {
-            return Result.failure(
-                IllegalArgumentException("That is the provider in use, so choose another first")
-            )
-        }
-        val choice = modelConfig.models.firstOrNull { it.id == model }
-            ?: return Result.failure(IllegalArgumentException("$model is not in the list"))
-        if (choice.providers.none { it == tag }) {
-            return Result.failure(IllegalArgumentException("$tag is not allowed for $model"))
-        }
-        if (choice.providers.size == 1) {
-            // A model with no provider is a model that cannot be asked anything, so the last one is
-            // kept rather than left behind as an entry that looks usable and is not.
-            return Result.failure(
-                IllegalArgumentException("$model would have no provider left; remove the model instead")
-            )
-        }
-        Trace.tap("remove provider", tag)
-        val next = modelConfig.models.map {
-            if (it.id == model) it.copy(providers = it.providers - tag) else it
-        }
-        writeModelConfig(modelConfig.copy(models = next), "Stopped allowing $tag for $model")
-        return Result.success(Unit)
+        writeModelConfig(next, "Cleared the ${kind.label}")
     }
 
     /**

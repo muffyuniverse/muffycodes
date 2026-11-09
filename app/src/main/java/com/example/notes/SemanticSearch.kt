@@ -57,8 +57,16 @@ class SemanticSearch(
     /** The project this agent is working in. **The whole of the search's extent.** */
     private val project: String,
     private val embedder: Embedder,
-    /** The chosen embedding model, read per call: a person may pick one while the agent is idle. */
+    /** The chosen embedding template, read per call: a person may pick one while the agent is idle. */
     private val embedding: () -> PickedModel? = { null },
+    /**
+     * **The template a pointer names, read from the folder per call.**
+     *
+     * The pointer says *which* request; the file says what it contains — including the model id that
+     * [#modelOf] reads out of it. A missing or broken file is a refusal in words rather than a request
+     * sent with the wrong name, because a template can be renamed or edited while this app is running.
+     */
+    private val schema: (String) -> Result<Schema> = { Result.failure(IllegalStateException("no templates")) },
     /** The chosen rerank model, read per call, or null when the person has not chosen one. */
     private val rerank: () -> PickedModel? = { null },
     /**
@@ -144,6 +152,16 @@ class SemanticSearch(
         override fun close() = index.close()
     }
 
+    /**
+     * **The model id inside a template** — read from the file, never stored beside the pointer.
+     *
+     * One source of truth: a person who changes the model in `embedding.json` changes what this app
+     * embeds with, and the pointer's own name is what the index is keyed by. Null when the file will not
+     * read or has no `model` key, which [ready] turns into a sentence naming the template.
+     */
+    private fun modelOf(name: String): String? =
+        schema(name).getOrNull()?.body?.optString("model")?.trim()?.takeIf(String::isNotEmpty)
+
     private fun ready(): Result<Ready> {
         val pick = embedding()
         val root = ws.treeOf(project, branch)
@@ -171,24 +189,33 @@ class SemanticSearch(
         // not rescue this: two models at 1024 are still two coordinate systems, and a cosine between
         // them is a number that looks like a score. So the refusal names both and says what empties
         // it, because a rebuild is a real cost and not a thing to do behind somebody's cursor.
-        if (built != null && pick != null && built.model != pick.model) {
+        if (built != null && pick != null && built.model != pick.schema) {
             index.close()
             return Result.failure(
                 IllegalStateException(
                     "The index for \"$project\" was built with \"${built.model}\", and " +
-                        "\"${pick.model}\" is chosen now. Vectors from two models cannot be " +
+                        "\"${pick.schema}\" is chosen now. Vectors from two templates cannot be " +
                         "compared, so the index has to be emptied and rebuilt before this model " +
                         "can answer — choose \"${built.model}\" again to keep the index, or empty " +
                         "it to switch.",
                 ),
             )
         }
-        val model = built?.model ?: pick!!.model
+        val model = built?.model ?: modelOf(pick!!.schema) ?: run {
+            index.close()
+            return Result.failure(
+                IllegalStateException(
+                    "The index for \"$project\" points at the template \"${pick!!.schema}\", and it " +
+                        "could not be read or names no model. Fix it in Settings → Request templates, " +
+                        "or choose another with the row called \"Embedding model\".",
+                ),
+            )
+        }
         val dims = built?.dims ?: pick!!.dimensions ?: run {
             index.close()
             return Result.failure(
                 IllegalStateException(
-                    "\"${pick!!.model}\" is chosen as the embedding model but no dimension is, and " +
+                    "\"${pick!!.schema}\" is chosen as the embedding model but no dimension is, and " +
                         "an index has to be one size. Open Settings, choose the row called " +
                         "\"Embedding model\", and pick its dimensions.",
                 ),
@@ -717,7 +744,7 @@ class SemanticSearch(
 
         val rerankModel = rerank()
         if (rerankModel != null && candidates.size > 1) {
-            val reranked = embedder.rerank(query, candidates.map { it.text }, rerankModel.model)
+            val reranked = embedder.rerank(query, candidates.map { it.text }, rerankModel.schema)
             val order = reranked.getOrNull()
             if (order.isNullOrEmpty()) {
                 // **Vector order is still a meaning search**, so this is a note rather than a
@@ -954,8 +981,9 @@ class SemanticSearch(
 
         /** The sentence a person sees when the feature has no model to work with. */
         const val NO_MODEL =
-            "No embedding model is chosen, so there is nothing here that can search by meaning. " +
-                "Open Settings, choose the row called \"Embedding model\", and pick its dimensions."
+            "No embedding template is chosen, so there is nothing here that can search by meaning. " +
+                "Open Settings, choose the row called \"Embedding model\", and pick one of the " +
+                "templates in .muffy/schemas."
 
         /**
          * How many chunks are shown to the reranker.

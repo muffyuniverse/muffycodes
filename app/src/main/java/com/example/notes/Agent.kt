@@ -209,15 +209,6 @@ class Agent(
      */
     private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
-     * Whether the model in force can see a picture — or `null` when nothing has said.
-     *
-     * **`ModelCatalogue.Entry.inputModalities` already answers this** for any model the app has
-     * looked up, so the wiring passes the real answer where it has one. Null is the default because
-     * an `Agent` built in a test has no catalogue and must still be able to call `look`: the check is
-     * a courtesy that stops a blind model wasting a turn, never a gate on the capability itself.
-     */
-    private val modelSees: (() -> Boolean)? = null,
-    /**
      * **What the screens are told when a command has changed the project on disk.**
      *
      * Passed through to [AgentTools] unchanged, where the reasoning lives. Here it is one more
@@ -259,7 +250,6 @@ class Agent(
         httpAllowed = httpAllowed,
         fetchLimit = fetchLimit,
         phone = phone,
-        modelSees = modelSees,
         onDiskChanged = onDiskChanged,
         branch = branch,
         // **One engine per agent, because one agent is one worktree.** That is also the extent of a

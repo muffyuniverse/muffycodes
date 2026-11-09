@@ -145,18 +145,15 @@ class AgentTools(
      * secrets rather than an empty store that looks like "the token is missing".
      */
     private val credentials: Credentials? = null,
-    /**
-     * Whether the model in force can see a picture — or `null` when nothing has said.
-     *
-     * **`ModelCatalogue.Entry.inputModalities` already answers this**, read from the provider's own
-     * catalogue, so the app knows before it spends anything. Null means "not told", which lets every
-     * existing test build a tool set without a model and still call `look`; the app passes the real
-     * answer at the one place it builds tools for a turn.
-     *
-     * A blind model sent an image either errors or — worse — silently ignores it, and the second is
-     * a conversation that goes nowhere for no visible reason. So this refuses in words instead.
+    /*
+     * **`modelSees` is gone**, with the catalogue that answered it: whether a model takes images is
+     * `architecture.input_modalities`, which is OpenRouter's field and not part of the chat protocol.
+     * The rule this app follows for a fact that is not in the protocol is that it is not needed
+     * (§4, cost) — and a blind model sent a picture is a refusal in the server's own words, which is
+     * the same answer every other wrong guess gets. A tool set that refuses in the app's words was
+     * worth having only while the app could actually know the answer.
      */
-    private val modelSees: (() -> Boolean)? = null,
+
     /**
      * **What the screens are told when a command has changed the project on disk.**
      *
@@ -4241,13 +4238,6 @@ class AgentTools(
      * line, so a reader can count them and a line break cannot appear inside one.
      */
     private fun look(args: JSONObject): String {
-        if (modelSees != null && !modelSees!!()) {
-            return refusal(
-                "This model cannot see pictures. Say so rather than sending one: " +
-                    "the person can switch to a model that takes images, and `read` still works " +
-                    "for anything that is text.",
-            )
-        }
         val asked = args.optJSONArray("paths")
             ?: return refusal("Say which pictures to look at: {\"paths\":[\"a.png\"]}")
         if (asked.length() == 0) {

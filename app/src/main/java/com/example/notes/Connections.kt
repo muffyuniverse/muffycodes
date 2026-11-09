@@ -155,21 +155,10 @@ data class Choice(
     val forget: Long? = null,
     /** Where the app trims the context itself. */
     val trim: Long? = null,
-    /**
-     * The word a sentence uses for where this model comes from, or blank for "name the address".
-     *
-     * **Not a routing instruction and not asked for in any window.** It used to be one — `provider.only`
-     * chose an upstream behind one fixed URL, and the context ceilings were keyed by the tag — and the
-     * address is the upstream now, so the tag has no work left except being readable in a sentence. A
-     * choice written by the account carries the word the account already had, so nothing a person has
-     * read changes; a choice written in a row's window carries none and [providerOf] names the address.
-     */
-    val provider: String = "",
-) {
+
     /** True when this row says nothing, which is the inheritance — see [Connection.wroteNothing]. */
     fun wroteNothing(): Boolean =
-        model.isBlank() && effort.isBlank() && target == null && forget == null && trim == null &&
-            provider.isBlank()
+        model.isBlank() && effort.isBlank() && target == null && forget == null && trim == null
 }
 
 /**
@@ -450,16 +439,7 @@ fun wiredFor(
 
     return Wired(
         at = if (addressAt < 0) SecretScope.Account else scopes[addressAt],
-        active = ActiveModel(
-            model = model,
-            // **The choice's own word, or the address's.** A choice written in a row's window names no
-            // provider — the window asks only what the protocol defines — so the host is the honest
-            // word for where the request goes, and the account's own choice keeps the word it had.
-            provider = first { _, choice -> choice?.provider?.takeIf(String::isNotBlank) }
-                ?: if (addressAt < 0) account.provider else providerOf(address),
-            effort = effort,
-            baseUrl = address,
-        ),
+        active = ActiveModel(model = model, effort = effort, baseUrl = address),
         key = when {
             keyless -> ({ null })
             // **A key for another host is not offered at all**, rather than sent and refused: the

@@ -446,48 +446,77 @@ sentence, and a wrong choice the app picks is a surprise on a bill.
 have none, because they cannot be *sent* anything. The general settings keep an **entry point** — the
 "Model connection" row becomes "Request templates", opening the folder — and nothing else about chat.
 
+### The folder is `shared/`, and the lock rule is what makes it ordinary (§3.6.2b)
+
+**The operator, 2026-11-09:** *"we can actually rename system into shared, and make it an ordinary folder
+with some system locked files (and we just need to change how lock works, so that locking a folder doesnt
+lock its content but just blocks it from being deleted or renamed)."*
+
+**Why the two are one change.** `system/` is special *only* because a folder-lock used to mean "read-only
+subtree", and the app needed a whole project that a person could not write into. Correct the lock and the
+special case evaporates.
+
+**The lock rule, stated once:**
+
+| what is locked | what the lock stops |
+|---|---|
+| a **file** | editing it, renaming it, deleting it — a file *is* its content |
+| a **folder** | renaming it, deleting it. **Its contents are untouched.** |
+
+That reverses Report 9's fix (`locked.any { path.startsWith("$it/") }`) deliberately: the inherited lock
+was a workaround for a rule that treated a folder as a permission. A folder is not a permission; it is a
+name and an existence.
+
+**What follows, and all of it is deletion:**
+
+- `shared/` is **an ordinary folder of the account** — not a project, not classified, not listed as one. It
+  needs no path rule: the agent reaches it from any worktree as `../shared/schemas/example.json`, because
+  `resolve` already allows anything under the account and `..` is already legal for reads.
+- **`isSystemPath` goes** (it existed to make one whole project read-only), and `isSystemLocked`'s segment
+  names go with it.
+- **`appHold` becomes one question**: is this path on the app's locked list? The three sources it used to
+  encode as name rules — `.muffy/`'s flags, `agent/`'s records, and now `shared/schemas/example.json` — are
+  entries in that list, written by the app.
+- **"System locked" stops being a name and becomes a level** on the same lock list the person uses: a flag
+  the app writes and the person cannot clear, which is what "system locks restrict both" already meant.
+- `SYSTEM_PROJECT`/`linkSystem`/`ensureSystemLinks`/`ensureExcluded` — **kept only as convenience**, and
+  renamed: a `shared` link inside each worktree is a browsing aid, never a permission. If it is dropped
+  entirely, nothing about reachability changes.
+
+**The cost, said plainly:** a person who locks a folder to keep an agent out of its files loses that lever.
+They lock the files. The alternative was a rule where the same word meant two different things depending on
+what you pointed at.
+
 ### The key (§3.6.3)
 
-**Looked up by the host the schema names, not stored in the file.** A schema is a document people read,
-copy and hand to each other; a key in one is the leak the vault exists to prevent. So at send time:
+**A template names a vault row; it never holds a value.** The operator, choosing between the three
+options and being right about all three reasons: *"the file names a vault row"* — rotation stays in one
+place, and a key is not in a document that gets copied and read.
 
-1. the schema's `address` names a host;
-2. the vault is asked for **a row bound to that host** — the same `hostCovers`/`keyScope` rule Vault A
-   already uses, unchanged, which is the only part of this design that was ever about safety;
-3. **no row for that host is a refusal in words**, naming the host and the place to add a key — not a
-   request with the account's key offered to a server it was not made for.
+```json
+{ "address": "https://openrouter.ai/api/v1", "key": "@openrouter", "url": "chat/completions", … }
+```
 
-**What survives from §2.3's checkmarks:** `auth: llm` still resolves a named `llm` row for a tool call.
-What dies: `ConnKind.LLM`, `Choice`, `Connection.shapes`, the shape window, the provider tags, the
-catalogue, and the four-scope llm walk in `wiredFor`.
+**Absent `key` means no `Authorization` header at all.** Absence is the statement, so a server on the phone
+needs no flag and `Connection.keyless` dies.
 
-### Git does NOT become files — the measurement behind that answer (2026-11-09)
+**The name is resolved by the host, not by trust.** This is the one thing that must not be simplified away:
 
-The operator asked directly: should git also be templates, or the app's own structured fields?
+```
+secret(name = "openrouter", host = hostOf(schema.address))
+```
 
-**Structured, and the two protocols differ in a way that decides it:**
+The vault's own signature already says *"The [host] is part of the question, not part of the name"*, it
+already answers null for a host a secret was not stored for, and it already matches whole labels. So a
+template that names `@openrouter` and an address of `evil.test` is **refused, naming both hosts** — the name
+selects a row, the row's stored host is the fact. Without this, a `key` field is an exfiltration primitive,
+which is the one failure a refusal cannot undo.
 
-| | a chat request | a git remote |
-|---|---|---|
-| the destination | the schema's own `address` | **`remote.origin.url`** — git's fact, read, never stored twice |
-| the variable part | the whole body: `max_tokens` vs `max_completion_tokens`, `system` vs `developer`, the reasoning echo, which field carries the text to embed | **a username and a token** — basic auth is `user:token`, one word of freedom |
-| a template's freedom | large enough to be worth a document | **none: a three-key JSON with no options** |
+**A name is not unique across scopes** (`(scope, name)`), so it resolves **branch → project → account →
+general** — the one piece of `wiredFor` worth surviving, because it is the piece with the safety property.
 
-**And a second reason that is not about shape:** documents get copied and committed, so a git template
-would be `host + user + token` in plaintext, or a file whose two visible keys point at a credential row —
-a form with extra steps and no gain.
-
-**A branch cannot change the destination, by git's own rule.** A worktree shares `config` through
-`commondir` (`Worktrees.kt:118`), so `remote.origin.url` is the project's. What a branch *may* override is
-its **credential** — the token, and the username, which must travel with it because a token presented under
-the wrong name is a different identity (`GitCredentials.Answer.Use`). `gitConnectionFor(project, branch, host)`
-already walks branch → project → account and filters by host, which is exactly the rule the operator
-stated; nothing about git needs to change shape.
-
-**One defect found while checking, and it is in this plan's scope:** the git window asks for the host as
-free text although `connectionShown` already knows the project's remote host. A typo there produces the
-*withheld* sentence at push time — correct, but late. The window should open on the project's remote host
-and say where the value came from.
+**Shipped `chat.json` names no key**, so a fresh install refuses by saying a key is missing (the sentence
+`KeyRow` already has) instead of pointing at a row that does not exist.
 
 ### Steps
 

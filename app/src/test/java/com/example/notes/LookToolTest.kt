@@ -50,8 +50,7 @@ class LookToolTest {
         log = AgentLog.open(File(ws.accountDir, "shopping"))
     }
 
-    private fun tools(sees: (() -> Boolean)? = null) =
-        AgentTools(ws, "shopping", git, log, modelSees = sees)
+    private fun tools() = AgentTools(ws, "shopping", git, log)
 
     /** A solid-colour PNG in the project, at the path `look` will be told. */
     private fun picture(width: Int, height: Int, path: String = "shot.png"): File {
@@ -77,7 +76,7 @@ class LookToolTest {
         git = git,
         log = log,
         door = ScriptedDoor(),
-        model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high"),
+        model = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high"),
         limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
     )
 

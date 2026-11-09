@@ -194,6 +194,10 @@ object IndexQueue {
             embedder = wire.embedder,
             embedding = { wire.models()?.embedding },
             rerank = { wire.models()?.rerank },
+            // **The folder, read per call**, because a template can be edited while this app runs and
+            // the pointer only names it. Wired here rather than inside `SemanticSearch` so that class
+            // keeps taking facts rather than reaching for a store.
+            schema = { name -> Schemas.read(wire.ws.accountDir, name) },
         )
         val result = try {
             engine.index(Deadline(PASS_MS))

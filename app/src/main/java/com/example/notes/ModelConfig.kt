@@ -6,38 +6,28 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * One model the agent may use, and the endpoints it may be pinned to.
+ * **What a request says about itself**: the model it asks for, how hard it should think, and where it
+ * goes.
  *
- * A provider is a **tag**, not a name: `deepinfra/fp8` rather than `deepinfra`. OpenRouter's
- * routing documents that a base slug matches *every* endpoint of that provider ("dropping the
- * tier never matches a tier endpoint"), so a request pinned to a bare name is still routed among
- * that provider's several endpoints — which is not a pin, it is autorouting one step narrower.
- * Since the app promises no fallback and no autorouting, the thing that is stored has to be the
- * thing that is sent.
- */
-data class ModelChoice(
-    val id: String,
-    val providers: List<String>,
-)
-
-/**
- * The three values the agent is built from: which model, which endpoint, how hard it thinks.
+ * Three fields, and there used to be a fourth: `provider`, the OpenRouter endpoint tag the request was
+ * pinned to. It is gone with the catalogue that published the tags — the address *is* the upstream now,
+ * so a sentence that wants the word asks [providerOf] for the host.
  *
- * **The model's window and reply reserve used to live here too**, and they are gone with the ceiling
- * they fed (see `ContextBudget`): the app does not derive a limit from a model any more, so a number
- * about a model's size would be a fact nothing reads. The catalogue still reports them, on the
- * endpoint rows, where they are what a person compares a provider by.
+ * **The model's window and reply reserve were here too**, and they are gone with the ceiling they fed
+ * (see `ContextBudget`): the app does not derive a limit from a model, so a number about a model's size
+ * would be a fact nothing reads.
  */
 data class ActiveModel(
     val model: String,
-    val provider: String,
     val effort: String,
     /**
      * **Where the requests go** — the connection's own address, not the vendor's.
      *
-     * This is the field that makes the app host-agnostic for models, and it is the reason [provider]
-     * stops being a pin: OpenRouter's `provider.only` chose one upstream behind one fixed URL, and a
-     * base URL *is* the upstream. Whatever speaks `POST /chat/completions` can be a connection.
+     * This is the field that makes the app host-agnostic for models, and it is why the provider tag is
+     * gone: OpenRouter's `provider.only` chose one upstream behind one fixed URL, and a base URL *is*
+     * the upstream. Whatever speaks `POST /chat/completions` can be a connection — and a person who
+     * wants a particular downstream writes `"provider": {"only": [...]}` in the request shape, which is
+     * a body field and therefore needs no code at all.
      *
      * **A default rather than a required field**, so every config written before this existed keeps
      * working and means exactly what it meant — and so a person editing `model_conf.json` by hand does
@@ -77,27 +67,62 @@ fun chatEndpoint(baseUrl: String): String =
  * mismatch is "re-index needed" rather than a comparison.
  */
 data class PickedModel(
-    val model: String,
-    val provider: String,
-    /** The embedding dimension. Null for a chat or rerank model, which have no such choice. */
+    /**
+     * **The template this points at** — a file name in `.muffy/schemas/`, like `embedding.json`.
+     *
+     * A name rather than an id, because the thing that decides where the call goes and what it says is
+     * the file. That is the operator's 2026-11-09 decision: *"rerank and embedding pickers can also just
+     * reference a template file from this folder"*. The name is stored rather than the whole request so
+     * that editing the template changes the behaviour of every worktree that names it — which is the
+     * point of having one folder.
+     */
+    val schema: String,
+    /**
+     * **The size the index was built at**, when the job has one.
+     *
+     * It stays a number here rather than a literal in the file because it is a property of *this phone's
+     * index*: the template fills `{{dimensions}}` at call time, and the index that is compared against
+     * needs the value that was actually used. Null for a rerank model, which has no such parameter.
+     */
     val dimensions: Int? = null,
-    /** The endpoints allowed for this model, in the order the person put them. */
-    val providers: List<String> = emptyList(),
 ) {
     /**
-     * What decides the **vectors** this choice produces: the model and the size, and nothing else.
+     * What decides the **vectors** this choice produces: the template and the size, and nothing else.
      *
-     * **The endpoint is deliberately absent.** It says where a request is sent, not where the numbers
-     * come from, so moving a model to another provider keeps its index valid — and comparing whole
-     * [PickedModel] values instead would have asked a person to rebuild every project for a change of
-     * route. Two models at the same size are still two spaces: the size being equal does not make
-     * their vectors comparable.
+     * **The address inside the template is deliberately absent.** It says where a request is sent, not
+     * where the numbers come from, so pointing the same file at another server keeps the index valid —
+     * and comparing whole [PickedModel] values instead would have asked a person to rebuild every
+     * project for a change of route. Two templates producing different vectors are still different
+     * spaces even at the same size: the size being equal does not make their vectors comparable, so the
+     * *name* is part of the identity.
      */
-    fun space(): Pair<String, Int?> = model to dimensions
+    fun space(): Pair<String, Int?> = schema to dimensions
 }
 
 /**
- * `model_conf.json` at the account root: the catalogue and the choice.
+ * **Which of the two models that are not the chat model** — the one that embeds, and the one that
+ * reranks.
+ *
+ * Two values rather than three: `CatalogueKind` had a `CHAT` member because the picker's path was a
+ * parameter, and there is no picker and no path any more. The label is here so a sentence that says
+ * "chose X as the embedding model" does not have to spell the words at the call site.
+ */
+/**
+ * **The embedding sizes this build offers**, in the order the dimension row cycles them.
+ *
+ * `qwen/qwen3-embedding-8b` answers 1024, 2048 or 4096 on demand — measured, not assumed — which is why
+ * the size is a property of the *choice* rather than of the model. A template whose server answers others
+ * still works: the number is filled into `{{dimensions}}` and the server decides whether it can.
+ */
+val SCHEMA_DIMENSIONS = listOf(1024, 2048, 4096)
+
+enum class PickedKind(val label: String) {
+    EMBEDDING("embedding model"),
+    RERANK("rerank model"),
+}
+
+/**
+ * `model_conf.json` at the account root: the choice, and the two models that build and order vectors.
  *
  * **The file is the only store.** The settings rows and the picker are editors of it, so there
  * is no second copy of the same three values to disagree with the first.
@@ -109,30 +134,30 @@ data class PickedModel(
  */
 data class ModelConfig(
     val active: ActiveModel,
-    val models: List<ModelChoice>,
     /** The model that turns text into vectors, and the dimension to ask it for. */
     val embedding: PickedModel? = null,
     /** The model that reorders search results. */
     val rerank: PickedModel? = null,
     /**
-     * **The connection this account's models are reached through** — its base URL.
+     * **The address the embedding and rerank calls go to** — not the chat model's.
      *
-     * **Kept beside `active` rather than inside it, and that is the point.** The chat model is one
-     * choice among several, and the *account's* default is what a branch inherits
-     * (`PLAN-credentials` §3.5); the address is a property of what answers, so it sits with the file
-     * rather than with one row of it. Moving the chat model to another id must not move the address,
-     * and moving to another provider must not silently keep the old one's URL.
+     * The chat model's address is a *scope's* (`ActiveModel.baseUrl`, resolved by `wiredFor`), because
+     * a branch may talk to a different server than its project. The two models that build vectors are
+     * the other way round on purpose: there is one index per worktree and one vector space per
+     * project (`PickedModel.space`), so the way they are reached is a property of the account and
+     * cannot be overridden deeper without silently mixing spaces.
      *
      * Reading is forgiving: a file written before this existed answers with the shipped default.
      */
     val baseUrl: String = OPENROUTER_BASE,
 ) {
-    /** The endpoints allowed for [model], in the order the person put them. */
-    fun providersOf(model: String): List<String> =
-        models.firstOrNull { it.id == model }?.providers.orEmpty()
-
-    /** What a row shows at a glance. */
-    fun summary(): String = "${active.model} · ${active.provider} · ${active.effort}"
+    /**
+     * What a row shows at a glance — **the model, the host it is asked at, and the effort.**
+     *
+     * The host rather than a provider tag: there are no tags left to print, and a sentence that named
+     * one would be naming a thing the app no longer stores.
+     */
+    fun summary(): String = "${active.model} · ${providerOf(active.baseUrl)} · ${active.effort}"
 }
 
 /**
@@ -154,26 +179,8 @@ object ModelConfigFile {
     /** The model the app ships set up, measured against OpenRouter on 2026-10-25. */
     const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 
-    /**
-     * Its endpoints, as tags.
-     *
-     * `deepinfra/fp8/priority` is deliberately absent: it is the same provider's paid tier at
-     * $0.1470/M input against $0.0980 for the standard one, and a default should be the boring
-     * one. `/flex` is here beside `/fp8` rather than instead of it, because it is a different
-     * service tier at a different price ($0.0784 against $0.0980) and choosing between them is
-     * the person's, not the app's.
-     */
-    val DEFAULT_PROVIDERS = listOf(
-        "deepseek",
-        "deepinfra/fp8",
-        "deepinfra/fp8/flex",
-        "decart/fp4",
-        "cloudflare",
-    )
-
     fun default(): ModelConfig = ModelConfig(
-        active = ActiveModel(DEFAULT_MODEL, "deepseek", "high"),
-        models = listOf(ModelChoice(DEFAULT_MODEL, DEFAULT_PROVIDERS)),
+        active = ActiveModel(DEFAULT_MODEL, "high"),
         baseUrl = OPENROUTER_BASE,
     )
 
@@ -230,19 +237,10 @@ object ModelConfigFile {
         put("version", VERSION)
         put("active", JSONObject().apply {
             put("model", config.active.model)
-            put("provider", config.active.provider)
             put("effort", config.active.effort)
             // **Nothing about the model's size is written any more.** A file that still has those
             // keys is read without them, which is why the reader ignores them rather than failing:
             // the app stopped clamping, so a number nobody uses is not worth a migration.
-        })
-        put("models", JSONArray().apply {
-            config.models.forEach { choice ->
-                put(JSONObject().apply {
-                    put("id", choice.id)
-                    put("providers", JSONArray(choice.providers))
-                })
-            }
         })
         // **Only when chosen.** A null written as `{}` would read back as a model with no id, and
         // the difference between "no embedding model" and "an empty one" is the difference between
@@ -257,16 +255,14 @@ object ModelConfigFile {
 
     /** One chosen model as JSON, with the dimension only when the job has one. */
     private fun picked(one: PickedModel): JSONObject = JSONObject().apply {
-        put("model", one.model)
-        put("provider", one.provider)
-        put("providers", JSONArray(one.providers))
+        put("schema", one.schema)
         one.dimensions?.let { put("dimensions", it) }
     }
 
     /**
      * Parses and checks the file. Failures name the place, because the person typing them is
-     * the only one who can fix them: `line 7` for a syntax error, `active.provider` for a value
-     * that does not hold together.
+     * the only one who can fix them: `line 7` for a syntax error, `active.model` for a value that
+     * does not hold together.
      */
     fun parse(text: String): Result<ModelConfig> {
         val root = try {
@@ -285,74 +281,19 @@ object ModelConfigFile {
         val activeObject = root.optJSONObject("active")
             ?: return Result.failure(IllegalArgumentException("active must be an object"))
 
-        val modelsArray = root.optJSONArray("models")
-            ?: return Result.failure(IllegalArgumentException("models must be a list"))
-
-        val models = ArrayList<ModelChoice>(modelsArray.length())
-        for (i in 0 until modelsArray.length()) {
-            val entry = modelsArray.optJSONObject(i)
-                ?: return Result.failure(IllegalArgumentException("models[$i] must be an object"))
-            val id = entry.optString("id").trim()
-            if (id.isEmpty()) {
-                return Result.failure(IllegalArgumentException("models[$i].id is empty"))
-            }
-            val providersRaw = entry.optJSONArray("providers")
-                ?: return Result.failure(
-                    IllegalArgumentException("models[$i].providers must be a list")
-                )
-            val providers = ArrayList<String>(providersRaw.length())
-            for (j in 0 until providersRaw.length()) {
-                val tag = providersRaw.optString(j).trim()
-                if (tag.isEmpty()) {
-                    return Result.failure(
-                        IllegalArgumentException("models[$i].providers[$j] is empty")
-                    )
-                }
-                if (tag.endsWith("/")) {
-                    return Result.failure(
-                        IllegalArgumentException(
-                            "models[$i].providers[$j] ends with a slash — a provider is a tag " +
-                                "like \"deepinfra/fp8\", not a prefix"
-                        )
-                    )
-                }
-                if (tag !in providers) providers.add(tag)
-            }
-            if (providers.isEmpty()) {
-                return Result.failure(
-                    IllegalArgumentException("models[$i].providers is empty — a model needs one")
-                )
-            }
-            if (models.none { it.id == id }) models.add(ModelChoice(id, providers))
-        }
-        if (models.isEmpty()) {
-            return Result.failure(IllegalArgumentException("models is empty — add one"))
-        }
-
         val model = activeObject.optString("model").trim()
-        val provider = activeObject.optString("provider").trim()
         val effort = activeObject.optString("effort").trim()
 
         if (model.isEmpty()) {
             return Result.failure(IllegalArgumentException("active.model is empty"))
         }
-        val chosen = models.firstOrNull { it.id == model }
-            ?: return Result.failure(
-                IllegalArgumentException("active.model \"$model\" is not in models")
-            )
-        if (provider.isEmpty()) {
-            return Result.failure(IllegalArgumentException("active.provider is empty"))
-        }
-        if (provider !in chosen.providers) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "active.provider \"$provider\" is not one of that model's providers"
-                )
-            )
-        }
-        if (effort.isEmpty()) {
-            return Result.failure(IllegalArgumentException("active.effort is empty"))
-        }
+        // **An empty effort is allowed now, and it means "send none".** The shape's second rule
+        // already removes a key whose placeholder is blank, so a model that refuses
+        // `reasoning_effort` is served by leaving this empty — which is a statement, not a gap.
+        //
+        // **`provider` is read and dropped when present**, like the window and the reply reserve: a
+        // file the previous build wrote still names one, the address is the upstream now, and a
+        // migration for a word nobody routes by would be work spent on nothing.
 
         // **The two optional blocks, read only when present.** A block that is there and wrong is a
         // refusal like any other, because a config that silently dropped a model the person chose
@@ -381,10 +322,11 @@ object ModelConfigFile {
                 ),
             )
         }
+        // **The model is read before the address**, because the address is what the model is asked
+        // at and a config with no model cannot be asked anything at all.
         return Result.success(
             ModelConfig(
-                ActiveModel(model, provider, effort),
-                models,
+                ActiveModel(model, effort, base.ifEmpty { OPENROUTER_BASE }),
                 embedding = embedding,
                 rerank = rerank,
                 baseUrl = base.ifEmpty { OPENROUTER_BASE },
@@ -393,33 +335,28 @@ object ModelConfigFile {
     }
 
     /**
-     * One optional chosen-model block, or null when the file has none.
+     * **One pointer at a template**, or null when the file has none.
      *
-     * **A block that is present must be complete.** `{"model":"x"}` with no provider is not a
-     * half-chosen model, it is a file someone edited wrongly, and the refusal names the place —
-     * `embedding.provider` — because that is what the person has to fix.
+     * The key is `schema` — a file name in `.muffy/schemas/` — and **its absence is what turns the
+     * feature off.** An empty string is a file somebody edited wrongly rather than a model they have not
+     * chosen yet, so it is refused with the place named, the same rule `model_conf.json` has always had.
+     *
+     * **Nothing is checked against the folder here.** A template can be renamed or deleted after the
+     * pointer is written, and the call site that reads the file is where that is reported — it is the
+     * place that knows which job the template was for. Refusing here would make a missing file into a
+     * config that will not load, which is a worse answer than a feature saying "that template is gone".
      */
     private fun pickedIn(root: JSONObject, key: String): Result<PickedModel?> {
         val one = root.optJSONObject(key) ?: return Result.success(null)
-        val model = one.optString("model").trim()
-        if (model.isEmpty()) {
-            return Result.failure(IllegalArgumentException("$key.model is empty"))
+        val schema = one.optString("schema").trim()
+        if (schema.isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException("$key.schema is empty — name a template, or remove the block"),
+            )
         }
-        val provider = one.optString("provider").trim()
-        if (provider.isEmpty()) {
-            return Result.failure(IllegalArgumentException("$key.provider is empty"))
-        }
-        val providersRaw = one.optJSONArray("providers")
-        val providers = ArrayList<String>(providersRaw?.length() ?: 0)
-        if (providersRaw != null) {
-            for (j in 0 until providersRaw.length()) {
-                val tag = providersRaw.optString(j).trim()
-                if (tag.isNotEmpty()) providers.add(tag)
-            }
-        }
-        // **The dimension, when the file names one.** Not checked against a list here: a model may
-        // support dimensions this build has never heard of, and refusing them would make the file
-        // less capable than the API. A value that is not a positive number is a typo, though.
+        // **The dimension, when the file names one.** Not checked against a list: a model may support
+        // dimensions this build has never heard of, and refusing them would make the file less capable
+        // than the server. A value that is not a positive number is a typo, though.
         val dimensions = if (one.has("dimensions")) {
             val value = one.optInt("dimensions", -1)
             if (value <= 0) {
@@ -431,7 +368,7 @@ object ModelConfigFile {
         } else {
             null
         }
-        return Result.success(PickedModel(model, provider, dimensions, providers))
+        return Result.success(PickedModel(schema, dimensions))
     }
 
     /**
@@ -463,36 +400,13 @@ object ModelConfigFile {
     }
 
     /**
-     * The effort to use when the chosen model does not declare the chosen one.
+     * **The effort ladder is gone with the catalogue that published it.**
      *
-     * "It moves down to a supported one, and the operator can raise it": the highest supported
-     * effort **at or below** what was asked, and when the model's ladder starts higher than that
-     * (a model offering only `high` and `max`), the lowest it has — because there is nothing
-     * below to move down to, and refusing the model would be the app overruling a choice it was
-     * given. Returns null when the model declares nothing, in which case nothing is sent.
+     * `effortFor(supported, asked)` used to move a request down to an effort the *endpoint* declared,
+     * and `effortRank` was the order it moved in. Both needed the catalogue's `supported_efforts`,
+     * which is OpenRouter's addition — OpenAI defines exactly one `reasoning_effort` and no way to
+     * ask a server which values it takes. So the effort is now what the person typed: a value the
+     * server does not know is a request it refuses, in its own words, and the fix is one word in the
+     * window rather than a floor the app chose silently.
      */
-    fun effortFor(supported: List<String>, asked: String): String? {
-        if (supported.isEmpty()) return null
-        if (asked in supported) return asked
-        val rank = effortRank(asked)
-        val below = supported.filter { effortRank(it) in 0..rank }.maxByOrNull { effortRank(it) }
-        return below ?: supported.minByOrNull { effortRank(it) }
-    }
-
-    /**
-     * How hard a named effort is, so "down" means something.
-     *
-     * The names are a ladder rather than a set: a model that offers `low` and `max` has nothing
-     * in between, and a request for `high` has to land on one of them. Unknown names rank below
-     * every known one, so a model with an effort this app has never seen is still placed
-     * somewhere instead of throwing.
-     */
-    fun effortRank(name: String): Int = when (name.trim().lowercase()) {
-        "none", "off", "minimal" -> 0
-        "low" -> 1
-        "medium", "mid" -> 2
-        "high" -> 3
-        "max", "maximum" -> 4
-        else -> -1
-    }
 }

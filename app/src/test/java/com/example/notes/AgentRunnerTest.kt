@@ -102,7 +102,7 @@ class AgentRunnerTest {
         ws = ws,
         git = git,
         settings = settings,
-        wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+        wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
         door = { _, _ -> door },
         notify = { notices += it },
     ).also { runners += it }
@@ -391,7 +391,7 @@ class AgentRunnerTest {
             ws = ws,
             git = git,
             settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door },
             notify = { notices += it },
             bg = bg,
@@ -433,7 +433,7 @@ class AgentRunnerTest {
         )
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -471,7 +471,7 @@ class AgentRunnerTest {
         )
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -520,7 +520,7 @@ class AgentRunnerTest {
         val door = ScriptedDoor(Reply("read it"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -554,7 +554,7 @@ class AgentRunnerTest {
         val door = ScriptedDoor(Reply("both read"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -584,7 +584,7 @@ class AgentRunnerTest {
         val door = ScriptedDoor(Reply("now I can"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -609,7 +609,7 @@ class AgentRunnerTest {
         val door = ScriptedDoor(Reply("no"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
@@ -631,7 +631,7 @@ class AgentRunnerTest {
         val door = ScriptedDoor(Reply("done"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
-            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")) },
+            wired = { _, _ -> Wired.of(ActiveModel("deepseek/deepseek-v4.1-flash-1017", "high")) },
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 

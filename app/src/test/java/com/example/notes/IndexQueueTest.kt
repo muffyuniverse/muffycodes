@@ -276,7 +276,7 @@ class IndexQueueTest {
      * `Unresolved reference`, which reads like a missing import and is a missing `val`.
      */
     private fun Config(embedding: PickedModel?) = ModelConfig(
-        active = ActiveModel("chat/model", "provider", "high"),
+        active = ActiveModel("chat/model", "high"),
         models = emptyList(),
         embedding = embedding,
     )
