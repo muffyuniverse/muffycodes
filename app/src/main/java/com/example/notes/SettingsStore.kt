@@ -307,61 +307,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         )
     }
 
-    /**
-     * Whether text the agent reads from outside the app is scanned for injected instructions.
-     *
-     * **On by default**, because the scanner is the app's only defence against a page that says "ignore your
-     * instructions" — and a defence a person has to find and switch on is a defence that is off.
-     *
-     * Separate from [scanAt] on purpose: a threshold of zero also means "off", and a person who wants to turn
-     * the scanner back on should not have to remember what the number used to be.
-     */
-    var scanAllowed: Boolean by mutableStateOf(prefs.getBoolean(KEY_SCAN, true))
-        private set
-
-    /** Turns the scanner on or off. */
-    fun keepScan(on: Boolean) {
-        Trace.tap("scan", if (on) "on" else "off")
-        scanAllowed = on
-        prefs.edit().putBoolean(KEY_SCAN, on).apply()
-        Trace.said(
-            if (on) {
-                "text from the web and from servers is scanned before the agent reads it"
-            } else {
-                "text from the web and from servers reaches the agent unscanned"
-            },
-        )
-    }
-
-    /**
-     * The injection scanner's threshold, as a percentage: a section scoring at or above it is cut.
-     *
-     * **Zero is off**, and that is why the setting is a number rather than a switch — the design's own
-     * decision is *"0.8 default, per-account"*, and a person who wants it stricter or looser should be able to
-     * say so without a second control.
-     *
-     * It is read per call like the other limits, so a change applies to the next page read rather than to the
-     * runner built before it.
-     */
-    val scanAt: Int get() = prefs.getInt(KEY_SCAN_AT, DEFAULT_SCAN_AT)
-
-    /** The threshold as the fraction [Scanner] compares against, so the conversion is in one place. */
-    val scanThreshold: Double get() = scanAt / 100.0
-
-    /** Sets the threshold, in whole percents. */
-    fun keepScanAt(percent: Int) {
-        val clean = percent.coerceIn(0, 100)
-        Trace.tap("scan at", "$clean%")
-        prefs.edit().putInt(KEY_SCAN_AT, clean).apply()
-        Trace.said(
-            if (clean == 0) {
-                "text from the web and from servers is not scanned"
-            } else {
-                "a section scoring $clean% or more is cut out of what the agent reads"
-            },
-        )
-    }
-
     /** What [keepBrowseSeconds] last set, in seconds, for the field to show. */
     val browseSeconds: Int get() = prefs.getInt(KEY_BROWSE_SECONDS, DEFAULT_BROWSE_SECONDS)
 
@@ -779,12 +724,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MIN_FETCH_MB = 1
     const val MAX_FETCH_MB = 1024
 
-    /**
-     * The scanner's default threshold, in percents — **the design's own number**, from
-     * `docs/COUNTERPROPOSAL-III-search-mcp-articles.md` §2: high enough not to cut prose *about* prompt
-     * injection, low enough to cut the thing.
-     */
-    const val DEFAULT_SCAN_AT = 80
     const val MIN_BROWSE_SECONDS = 5
     const val MAX_BROWSE_SECONDS = 180
 
@@ -811,14 +750,8 @@ class SettingsStore(context: Context, name: String = "settings") {
      */
     const val KEY_BROWSE_PRIVATE = "agent_browse_private"
 
-    /** The scanner's threshold, as a percentage. A different key from the browse limit, which is seconds. */
-    const val KEY_SCAN_AT = "agent_scan_at"
-
     /** Whether downloading is allowed at all. */
     const val KEY_FETCH = "agent_fetch"
-
-    /** Whether the scanner runs at all — separate from its threshold, because zero also means "off". */
-    const val KEY_SCAN = "agent_scan"
     const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
 
     const val KEY_FETCH_MB = "agent_fetch_mb"

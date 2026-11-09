@@ -242,12 +242,13 @@ object Schemas {
     }
 
     /**
-     * The three requests the app ships, one per kind — **and each is a complete request**, address and
-     * model included, because a template that left them out could not be sent.
+     * **The one request the app ships**, and it is a complete request: address and model included,
+     * because a template that left them out could not be sent.
      *
-     * `chat.json` is the OpenAI shape this app has always sent, with the model and effort as literals
-     * where they used to be placeholders. The two others follow the same rule: the model is written
-     * down, and only what the app knows at call time is a placeholder.
+     * It was three — one per kind — until the embedding and rerank calls went with the index
+     * (`docs/REMOVED-2026-11-09-semantic-search-and-scanner.md`). The rule the other two followed is
+     * the rule this one still follows: the model is written down, and only what the app knows at call
+     * time is a placeholder.
      */
     fun shipped(): List<Pair<String, Schema>> = listOf(
         "chat.json" to Schema(
@@ -265,16 +266,6 @@ object Schemas {
                 // install has no row to name — and absent means "send no Authorization header at all",
                 // which is the honest state of a phone that has not been given a key yet.
             ),
-        ),
-        "embedding.json" to Schema(
-            address = OPENROUTER_BASE,
-            url = Shape.EMBEDDING.url,
-            body = Shape.EMBEDDING.literal(),
-        ),
-        "rerank.json" to Schema(
-            address = OPENROUTER_BASE,
-            url = Shape.RERANK.url,
-            body = Shape.RERANK.literal(),
         ),
     )
 }

@@ -54,102 +54,15 @@ fun chatEndpoint(baseUrl: String): String =
     Shape.CHAT.address(baseUrl.trim().ifEmpty { OPENROUTER_BASE })
 
 /**
- * A model chosen for one job, **where the job decides what the third value means.**
+ * `model_conf.json` at the account root: **the chat model, and what effort it is asked for.**
  *
- * The three catalogues are the same shape and their choices are not: a chat model has an effort
- * ladder, an embedding model has **dimensions**, and a rerank model has neither. The operator's
- * instruction is what settles the third one — *"dims can replace effort screen for embedding
- * model"* — so `extra` is named for what it holds rather than pretending the three are the same.
- *
- * **The dimension is a request parameter, not a property of the model.** `qwen/qwen3-embedding-8b`
- * answers 1024, 2048 or 4096 on demand (measured), so it belongs beside the id: the two places that
- * build an embedder have no catalogue to ask, and an index stores the dimension it was built at, so a
- * mismatch is "re-index needed" rather than a comparison.
- */
-data class PickedModel(
-    /**
-     * **The template this points at** — a file name in `shared/schemas/`, like `embedding.json`.
-     *
-     * A name rather than an id, because the thing that decides where the call goes and what it says is
-     * the file. That is the operator's 2026-11-09 decision: *"rerank and embedding pickers can also just
-     * reference a template file from this folder"*. The name is stored rather than the whole request so
-     * that editing the template changes the behaviour of every worktree that names it — which is the
-     * point of having one folder.
-     */
-    val schema: String,
-    /**
-     * **The size the index was built at**, when the job has one.
-     *
-     * It stays a number here rather than a literal in the file because it is a property of *this phone's
-     * index*: the template fills `{{dimensions}}` at call time, and the index that is compared against
-     * needs the value that was actually used. Null for a rerank model, which has no such parameter.
-     */
-    val dimensions: Int? = null,
-) {
-    /**
-     * What decides the **vectors** this choice produces: the template and the size, and nothing else.
-     *
-     * **The address inside the template is deliberately absent.** It says where a request is sent, not
-     * where the numbers come from, so pointing the same file at another server keeps the index valid —
-     * and comparing whole [PickedModel] values instead would have asked a person to rebuild every
-     * project for a change of route. Two templates producing different vectors are still different
-     * spaces even at the same size: the size being equal does not make their vectors comparable, so the
-     * *name* is part of the identity.
-     */
-    fun space(): Pair<String, Int?> = schema to dimensions
-}
-
-/**
- * **Which of the two models that are not the chat model** — the one that embeds, and the one that
- * reranks.
- *
- * Two values rather than three: `CatalogueKind` had a `CHAT` member because the picker's path was a
- * parameter, and there is no picker and no path any more. The label is here so a sentence that says
- * "chose X as the embedding model" does not have to spell the words at the call site.
- */
-/**
- * **The embedding sizes this build offers**, in the order the dimension row cycles them.
- *
- * `qwen/qwen3-embedding-8b` answers 1024, 2048 or 4096 on demand — measured, not assumed — which is why
- * the size is a property of the *choice* rather than of the model. A template whose server answers others
- * still works: the number is filled into `{{dimensions}}` and the server decides whether it can.
- */
-val SCHEMA_DIMENSIONS = listOf(1024, 2048, 4096)
-
-enum class PickedKind(val label: String) {
-    EMBEDDING("embedding model"),
-    RERANK("rerank model"),
-}
-
-/**
- * `model_conf.json` at the account root: the choice, and the two models that build and order vectors.
- *
- * **The file is the only store.** The settings rows and the picker are editors of it, so there
- * is no second copy of the same three values to disagree with the first.
- *
- * **[embedding] and [rerank] are nullable, and that is the honest shape.** A config written before
- * this app could search has no embedding model, and the right answer is "not chosen yet" — not a
- * default slug silently picked on the person's behalf, which would be a model choice they never
- * made and cannot see. `null` reads as "no embedding model", and the search feature says so.
+ * That is all that is left of it. It used to hold the embedding and rerank models too, and the
+ * address they were reached at; those went with the index (§"what was removed", 2026-11-09), which
+ * leaves one choice in a file of its own. §4 of the credentials plan finishes the job: the choice
+ * belongs to a scope in the vault, and then this file has nothing to hold at all.
  */
 data class ModelConfig(
     val active: ActiveModel,
-    /** The model that turns text into vectors, and the dimension to ask it for. */
-    val embedding: PickedModel? = null,
-    /** The model that reorders search results. */
-    val rerank: PickedModel? = null,
-    /**
-     * **The address the embedding and rerank calls go to** — not the chat model's.
-     *
-     * The chat model's address is a *scope's* (`ActiveModel.baseUrl`, resolved by `wiredFor`), because
-     * a branch may talk to a different server than its project. The two models that build vectors are
-     * the other way round on purpose: there is one index per worktree and one vector space per
-     * project (`PickedModel.space`), so the way they are reached is a property of the account and
-     * cannot be overridden deeper without silently mixing spaces.
-     *
-     * Reading is forgiving: a file written before this existed answers with the shipped default.
-     */
-    val baseUrl: String = OPENROUTER_BASE,
 ) {
     /**
      * What a row shows at a glance — **the model, the host it is asked at, and the effort.**
@@ -179,10 +92,7 @@ object ModelConfigFile {
     /** The model the app ships set up, measured against OpenRouter on 2026-10-25. */
     const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017"
 
-    fun default(): ModelConfig = ModelConfig(
-        active = ActiveModel(DEFAULT_MODEL, "high"),
-        baseUrl = OPENROUTER_BASE,
-    )
+    fun default(): ModelConfig = ModelConfig(active = ActiveModel(DEFAULT_MODEL, "high"))
 
     fun file(accountDir: File): File = File(accountDir, NAME)
 
@@ -239,21 +149,6 @@ object ModelConfigFile {
             put("model", config.active.model)
             put("effort", config.active.effort)
         })
-        // **Only when chosen.** A null written as `{}` would read back as a model with no id, and
-        // the difference between "no embedding model" and "an empty one" is the difference between
-        // a feature that is off and a config that is broken.
-        config.embedding?.let { put("embedding", picked(it)) }
-        config.rerank?.let { put("rerank", picked(it)) }
-        // **Written only when it is not the shipped one.** A file the app writes stays the file it
-        // wrote before, so an OpenRouter account's config does not sprout an address it never chose —
-        // and the absence of the field keeps meaning "the default", not "empty".
-        if (config.baseUrl != OPENROUTER_BASE) put("baseUrl", config.baseUrl)
-    }
-
-    /** One chosen model as JSON, with the dimension only when the job has one. */
-    private fun picked(one: PickedModel): JSONObject = JSONObject().apply {
-        put("schema", one.schema)
-        one.dimensions?.let { put("dimensions", it) }
     }
 
     /**
@@ -292,80 +187,14 @@ object ModelConfigFile {
         // says nothing about the rest, so a file edited by hand (a comment, a leftover name) loads
         // instead of refusing — refusing would make the file unopenable by the app that wrote it.
 
-        // **The two optional blocks, read only when present.** A block that is there and wrong is a
-        // refusal like any other, because a config that silently dropped a model the person chose
-        // would leave search using nothing while the file plainly names one.
-        var failed: Throwable? = null
-        val embedding = pickedIn(root, "embedding").getOrElse {
-            failed = it
-            null
-        }
-        if (failed != null) return Result.failure(failed!!)
-        val rerank = pickedIn(root, "rerank").getOrElse {
-            failed = it
-            null
-        }
-        if (failed != null) return Result.failure(failed!!)
-        // **The address, if the file carries one.** Absent means the shipped default, which is what
-        // every config written before this field existed means — and what a person who typed nothing
-        // would expect. A value that is present must look like an address, because "openai" in this
-        // field would produce a relative URL and an error nobody could act on.
-        val base = root.optString("baseUrl").trim()
-        if (base.isNotEmpty() && !base.startsWith("http://") && !base.startsWith("https://")) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "baseUrl must start with http:// or https:// — it is an address, " +
-                        "like https://openrouter.ai/api/v1",
-                ),
-            )
-        }
+        // **A `baseUrl`, `embedding` or `rerank` block is ignored rather than refused**, and that is
+        // the one place this parser is forgiving: a file written by the build before this one holds
+        // them, and refusing to load it would be refusing a person's own config over a field that no
+        // longer means anything. The chat model's address is `active.baseUrl`, which is read above.
+
         // **The model is read before the address**, because the address is what the model is asked
         // at and a config with no model cannot be asked anything at all.
-        return Result.success(
-            ModelConfig(
-                ActiveModel(model, effort, base.ifEmpty { OPENROUTER_BASE }),
-                embedding = embedding,
-                rerank = rerank,
-                baseUrl = base.ifEmpty { OPENROUTER_BASE },
-            ),
-        )
-    }
-
-    /**
-     * **One pointer at a template**, or null when the file has none.
-     *
-     * The key is `schema` — a file name in `shared/schemas/` — and **its absence is what turns the
-     * feature off.** An empty string is a file somebody edited wrongly rather than a model they have not
-     * chosen yet, so it is refused with the place named, the same rule `model_conf.json` has always had.
-     *
-     * **Nothing is checked against the folder here.** A template can be renamed or deleted after the
-     * pointer is written, and the call site that reads the file is where that is reported — it is the
-     * place that knows which job the template was for. Refusing here would make a missing file into a
-     * config that will not load, which is a worse answer than a feature saying "that template is gone".
-     */
-    private fun pickedIn(root: JSONObject, key: String): Result<PickedModel?> {
-        val one = root.optJSONObject(key) ?: return Result.success(null)
-        val schema = one.optString("schema").trim()
-        if (schema.isEmpty()) {
-            return Result.failure(
-                IllegalArgumentException("$key.schema is empty — name a template, or remove the block"),
-            )
-        }
-        // **The dimension, when the file names one.** Not checked against a list: a model may support
-        // dimensions this build has never heard of, and refusing them would make the file less capable
-        // than the server. A value that is not a positive number is a typo, though.
-        val dimensions = if (one.has("dimensions")) {
-            val value = one.optInt("dimensions", -1)
-            if (value <= 0) {
-                return Result.failure(
-                    IllegalArgumentException("$key.dimensions must be a positive whole number"),
-                )
-            }
-            value
-        } else {
-            null
-        }
-        return Result.success(PickedModel(schema, dimensions))
+        return Result.success(ModelConfig(ActiveModel(model, effort, base.ifEmpty { OPENROUTER_BASE })))
     }
 
     /**

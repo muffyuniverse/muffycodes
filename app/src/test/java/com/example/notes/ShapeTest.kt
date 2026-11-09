@@ -100,31 +100,6 @@ class ShapeTest {
     }
 
     @Test
-    fun `the embedding and rerank presets are the bodies the app always built`() {
-        // The two calls that are hard-coded to one vendor's shape today, and the reason the shape
-        // mechanism is not speculative: these are what stop a phone being pointed at Ollama, at LM
-        // Studio, or at somebody's own reranker.
-        val embedded = Shape.EMBEDDING.bodyOf(
-            mapOf("model" to "qwen/qwen3-embedding-8b", "input" to JSONArray(listOf("one", "two"))),
-        )
-        assertEquals("qwen/qwen3-embedding-8b", embedded.getString("model"))
-        assertEquals(2, embedded.getJSONArray("input").length())
-        assertFalse("no dimensions unless one was chosen", embedded.has("dimensions"))
-
-        val sized = Shape.EMBEDDING.bodyOf(
-            mapOf("model" to "m", "input" to JSONArray(listOf("one")), "dimensions" to 1024),
-        )
-        assertEquals("a chosen dimension is sent", 1024, sized.getInt("dimensions"))
-
-        val ranked = Shape.RERANK.bodyOf(
-            mapOf("model" to "m", "query" to "what is a vault", "documents" to JSONArray(listOf("a", "b"))),
-        )
-        assertEquals("what is a vault", ranked.getString("query"))
-        assertEquals(2, ranked.getJSONArray("documents").length())
-        assertEquals("and the three fields are its whole body", 3, ranked.length())
-    }
-
-    @Test
     fun `a false and a zero are values, and stay`() {
         // **"Empty" means blank, not falsy.** `stream: false` is a decision and `max_tokens: 0` is a
         // number somebody may mean; removing them would turn a statement into an absence.
@@ -216,8 +191,8 @@ class ShapeTest {
         )
         assertEquals(
             "a path is all the shape adds",
-            "http://192.168.1.9:8000/v1/embeddings",
-            Shape.EMBEDDING.address("http://192.168.1.9:8000/v1"),
+            "http://192.168.1.9:8000/v1/rerank",
+            Shape("rerank", Shape.CHAT.body).address("http://192.168.1.9:8000/v1"),
         )
     }
 

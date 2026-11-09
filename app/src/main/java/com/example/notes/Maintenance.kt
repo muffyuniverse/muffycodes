@@ -5,12 +5,9 @@ import java.io.File
 /**
  * **The housekeeping that a save is too expensive to do.**
  *
- * Two acts, and neither touches a commit:
+ * One act, and it does not touch a commit:
  *
- * 1. **the sweep** — delete the index rows of saved versions whose content no commit reaches any
- *    more. A prune rebuilds the chain with identical trees, so the blobs of the dropped commits are
- *    now unreachable, and a row naming one would be a search hit nobody can read;
- * 2. **the picture store** — delete the bytes in `.git/lfs/objects` that no pointer names any more.
+ * **the picture store** — delete the bytes in `.git/lfs/objects` that no pointer names any more.
  *    `git gc` does not know that directory exists, so without this a deleted picture's bytes stay on
  *    the phone for ever. It is proportional to what is stored rather than to the whole repository,
  *    which is why it is safe to run here and a full `gc` is not.
@@ -21,14 +18,8 @@ import java.io.File
  * pure cost. So the things that strand content **say so** — a save that touched a picture, and
  * `pull` — by writing a marker into the project's `agent/` folder, and this
  * pass runs only where one is waiting. The marker is deleted only when the pass finished, so a crash
- * or a killed process re-runs it on the next start. Both halves are idempotent: a sweep deletes rows,
- * the store sweep deletes files, and doing either twice is doing it once.
- *
- * ## Why the order matters
- *
- * **The index sweep reads the repository's trees**, and it does so before anything deletes bytes — the
- * two are independent today, but the order is kept because a future collector that pruned the object
- * database would destroy the evidence the sweep needs.
+ * or a killed process re-runs it on the next start. The sweep is idempotent: doing it twice is doing
+ * it once.
  *
  * ## Why the guards are what they are
  *
@@ -52,9 +43,7 @@ object Maintenance {
         val project: String,
         /** Why it was asked for — `"prune"` or `"pull"`. */
         val why: String,
-        /** Rows swept, vectors released, and whether the collection ran. */
-        val rows: Int,
-        val vectors: Int,
+        /** Whether the picture store was read at all. */
         val collected: Boolean,
         /**
          * Bytes of stored picture data the sweep reclaimed.
@@ -74,18 +63,12 @@ object Maintenance {
         fun said(): String {
             if (stopped != null) return "housekeeping did not finish: $stopped"
             if (!tried) return "there is no repository here, so there was nothing to collect"
-            val swept = when {
-                rows == 0 -> "no index rows were left behind"
-                rows == 1 -> "1 index row was left behind"
-                else -> "$rows index rows were left behind"
-            }
-            val released = if (vectors == 0) "" else ", releasing $vectors vector(s)"
-            val gc = if (collected) "; the picture store was swept" else ""
+            val gc = if (collected) "the picture store was swept" else "the picture store was not read"
             // **Named in the sentence, because it is invisible otherwise.** A picture's old versions
             // are the largest thing this app ever deletes, and a pass that reclaimed them silently
             // would look exactly like a pass that reclaimed nothing.
             val space = if (freed <= 0L) "" else "; ${Fetcher.size(freed)} of picture data was removed"
-            return "$swept$released$gc$space"
+            return "$gc$space"
         }
     }
 
@@ -163,7 +146,7 @@ object Maintenance {
                 // that got the lock would hold it for a minute with an agent's next commit behind it.
                 if (busy(project, branch)) {
                     out += Done(
-                        AgentSession.keyOf(project, branch), why, 0, 0, false,
+                        AgentSession.keyOf(project, branch), why, false,
                         stopped = "its agent is switched on",
                     )
                     continue
@@ -174,7 +157,7 @@ object Maintenance {
         return out
     }
 
-    /** One project: sweep, collect, clear the marker — **in that order, and only on success.** */
+    /** One project: sweep the picture store, clear the marker — **in that order, and only on success.** */
     private fun one(
         ws: Workspace,
         project: String,
@@ -182,8 +165,6 @@ object Maintenance {
         dir: File,
         deadline: Deadline,
     ): Done {
-        var rows = 0
-        var vectors = 0
         var collected = false
         var freed = 0L
         var stopped: String? = null
@@ -191,68 +172,38 @@ object Maintenance {
         // **The lock is taken without waiting.** A commit in flight is milliseconds away from done,
         // and a marker that waits for it is a marker that gets collected on the next start anyway.
         val held = RepoLocks.tryHold(dir, "maintenance", 0L) {
-            val index = try {
-                SearchIndex.open(dir)
+            val repo = try {
+                GitService.openExisting(dir)
             } catch (e: Throwable) {
-                stopped = "the index could not be opened: ${reason(e)}"
+                null
+            }
+            if (repo == null) {
+                // **Not a failure.** A folder with no history has nothing stranded, so it is
+                // finished — and its marker has to go, or this pass would ask the same question at
+                // every start for ever.
                 return@tryHold
             }
-            try {
-                val repo = try {
-                    GitService.openExisting(dir)
-                } catch (e: Throwable) {
-                    null
-                }
-                if (repo == null) {
-                    // **Not a failure.** A folder with no history has nothing stranded and no index
-                    // rows to sweep, so it is finished — and its marker has to go, or this pass
-                    // would ask the same question at every start for ever.
-                    //
-                    // **There is still an index to empty of versions.** A project cloned and then
-                    // re-created has one; leaving rows that no commit reaches is exactly what this
-                    // pass exists to remove, and "no repository" is the strongest case of it.
-                    val (swept, released) = index.sweep(emptySet())
-                    rows = swept
-                    vectors = released
-                    return@tryHold
-                }
-                repo.use {
-                    repository = true
-                    // **The reachable set first**, because the collection destroys the evidence.
-                    val reachable = try {
-                        reachableBlobs(it, deadline)
-                    } catch (e: StoppedException) {
-                        stopped = "the time limit ran out while reading the history"
-                        return@use
-                    } catch (e: Throwable) {
-                        stopped = "the history could not be read: ${reason(e)}"
-                        return@use
-                    }
-                    val (swept, released) = index.sweep(reachable)
-                    rows = swept
-                    vectors = released
-                    // **The picture store, not the object database.** A pointer's bytes are not in
-                    // the object database: they live in `.git/lfs/objects`, which `gc` has never
-                    // looked inside. Reachability is read from the pointers in the trees, so a file
-                    // whose oid no commit names is by definition dead. Zero means there was nothing
-                    // to reclaim, which is a different answer from "it could not run".
-                    val reclaimed = LfsStore.sweep(it)
-                    // **`-1` is "it refused", not "-1 bytes".** A store holding objects that no
-                    // commit names is a repository whose pointers could not be read; deleting on
-                    // that answer would destroy every picture, so the sweep declines and this
-                    // reports that it did not run rather than inventing a number.
-                    freed = if (reclaimed < 0) 0L else reclaimed
-                    collected = reclaimed >= 0
-                    if (!collected) stopped = "the picture store could not be read"
-                }
-            } finally {
-                index.close()
+            repo.use {
+                repository = true
+                // **The picture store, not the object database.** A pointer's bytes are not in the
+                // object database: they live in `.git/lfs/objects`, which `gc` has never looked
+                // inside. Reachability is read from the pointers in the trees, so a file whose oid no
+                // commit names is by definition dead. Zero means there was nothing to reclaim, which
+                // is a different answer from "it could not run".
+                val reclaimed = LfsStore.sweep(it)
+                // **`-1` is "it refused", not "-1 bytes".** A store holding objects that no commit
+                // names is a repository whose pointers could not be read; deleting on that answer
+                // would destroy every picture, so the sweep declines and this reports that it did
+                // not run rather than inventing a number.
+                freed = if (reclaimed < 0) 0L else reclaimed
+                collected = reclaimed >= 0
+                if (!collected) stopped = "the picture store could not be read"
             }
         }
         if (!held) {
-            return Done(project, why, 0, 0, false, stopped = "the project was busy, so it will try next time")
+            return Done(project, why, false, stopped = "the project was busy, so it will try next time")
         }
-        val done = Done(project, why, rows, vectors, collected, freed, stopped, tried = repository)
+        val done = Done(project, why, collected, freed, stopped, tried = repository)
         // **The marker goes only when the work did.** A failed collection keeps it, so the next start
         // asks again rather than silently never collecting.
         if (stopped == null) {
@@ -270,34 +221,6 @@ object Maintenance {
         return done
     }
 
-    /**
-     * Every blob the current branch still reaches.
-     *
-     * **A tree walk over every commit, not a diff**, because the question is "what exists", not "what
-     * changed": a file that has not been touched in a hundred commits is still reachable, and asking
-     * only about changes would sweep its rows.
-     */
-    private fun reachableBlobs(repo: org.eclipse.jgit.lib.Repository, deadline: Deadline): Set<String> {
-        val head = repo.resolve("HEAD") ?: return emptySet()
-        val out = mutableSetOf<String>()
-        org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
-            walk.markStart(walk.parseCommit(head))
-            for (commit in walk) {
-                deadline.check("maintenance")
-                org.eclipse.jgit.treewalk.TreeWalk(repo).use { tree ->
-                    tree.addTree(commit.tree)
-                    tree.isRecursive = true
-                    while (tree.next()) {
-                        // **A submodule is a commit id in a tree, not a blob** — adding it to the
-                        // reachable set would be a blob id that is never a chunk's version.
-                        if (tree.getFileMode(0) == org.eclipse.jgit.lib.FileMode.GITLINK) continue
-                        out += tree.getObjectId(0).name
-                    }
-                }
-            }
-        }
-        return out
-    }
 
     /** A reason from a [Throwable], never empty, because "null" is not a sentence. */
     private fun reason(e: Throwable?): String {

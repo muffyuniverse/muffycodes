@@ -123,7 +123,6 @@ object AgentWiring {
             workspace = ws,
             tokenProvider = { credentials.token(login) },
             authorProvider = { author },
-            index = { project, branch, why -> IndexQueue.want(project, why, branch) },
             // **The same rule the screen's `ProjectGit` follows**, because the agent's push is the
             // same push: a project on another host authenticates with its own secret for that host.
             vaultToken = { project, branch, host ->
@@ -136,18 +135,6 @@ object AgentWiring {
             // `feature` must present the credential that branch holds, not the project's — a token a
             // host limits to one branch is a credential a branch owns.
             gitConnection = { project, branch, host -> credentials.gitConnectionFor(project, branch, host) },
-        )
-        // **The indexer, wired before anything can commit.** Both the runner and the screen build a
-        // `ProjectGit`, and either of them can be the first to save something, so both wire this —
-        // `configure` is idempotent and this is the same account, key and model file either way.
-        IndexQueue.configure(
-            ws = ws,
-            embedder = Embedder.openRouter(
-                key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
-                baseUrl = { ModelConfigFile.load(ws.accountDir).getOrNull()?.baseUrl ?: OPENROUTER_BASE },
-            ),
-            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
-            context = app,
         )
         // The model is read per request, not once: a person who changes the model while the
         // service is running expects the next poll to use it, and a runner built at boot with a
@@ -175,27 +162,6 @@ object AgentWiring {
             // so a test can be a store without a keystore.
             mcp = Mcp.http(),
             credentials = credentials,
-            // **The real embedder, over the same key the chat model uses.** One key per account is the
-            // operator's rule, and a second key for vectors would be a second thing to rotate, leak or
-            // forget. Reading it per call means pasting a new key reaches the next search, not the next
-            // launch.
-            embedder = Embedder.openRouter(
-                key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
-            ),
-            // **The whole config, read per call, not just the two rows.** `SemanticSearch` asks it for
-            // its `embedding` and `rerank` at the moment of the search, so a person who changes either
-            // while the agent is idle is answered by the choice in force.
-            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
-            // **The real scanner, and the account's own threshold.** Read per call, like the other limits: a
-            // person who moves the number while an agent is idle means the next page read.
-            // **The account's own answer, read per call.** A threshold of zero and the switch being off are
-            // two ways to say "do not scan", and the switch is checked here so the number survives it — a
-            // person who turns the scanner back on should not have to remember what it used to be.
-            scanner = Scanner.openRouter(
-                key = { credentials.modelKey(login) },
-                threshold = { if (settings.scanAllowed) settings.scanThreshold else 0.0 },
-                baseUrl = { ModelConfigFile.load(ws.accountDir).getOrNull()?.baseUrl ?: OPENROUTER_BASE },
-            ),
             httpAllowed = { settings.httpAllowed },
             // **Read per call, so a cap lowered while the agent is idle applies to the next request**
             // rather than to the runner built before the person changed it.

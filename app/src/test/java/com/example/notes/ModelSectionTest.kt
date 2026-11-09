@@ -21,12 +21,12 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * **The model block, painted for real — and it is now a list of files.**
+ * **The model block, painted for real — and it is one row now.**
  *
- * The three pickers (model, provider, effort) are gone with the catalogue that fed them, so what is left
- * to ask is one question: does the screen name the templates in the folder, and does a press write the
- * pointer it promised? Everything about *which* model a template asks for belongs to the file, so the
- * tests that used to drive a picker are replaced by tests that drive a file list.
+ * The three pickers (model, provider, effort) went with the catalogue that fed them, and the embedding
+ * and rerank pointers went with the index (2026-11-09). What is left to ask is smaller and still worth
+ * asking: does the screen name the templates in the folder, does a damaged file say so without being
+ * replaced, and is the key never on the screen.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -88,12 +88,11 @@ class ModelSectionTest {
     }
 
     @Test
-    fun `a folder with one template says one, not three`() {
-        // The count is read, not remembered: a person who deletes two in the browser comes back to a row
-        // that says so. This is the assertion that would fail if the list were cached at construction.
+    fun `a folder with one template says one`() {
+        // The count is read, not remembered: a person who deletes one in the browser comes back to a
+        // row that says so. This is the assertion that would fail if the list were cached at
+        // construction.
         Schemas.ensure(app)
-        Schemas.remove(app, "embedding.json")
-        Schemas.remove(app, "rerank.json")
         compose.setContent { Section() }
 
         compose.onNodeWithText("1 template — tap to edit").assertIsDisplayed()
@@ -120,109 +119,6 @@ class ModelSectionTest {
         for (gone in listOf("Model", "Provider", "Effort", "Rates")) {
             compose.onNodeWithText(gone).assertDoesNotExist()
         }
-    }
-
-    // ---- the two vector models point at files ----------------------------------
-
-    @Test
-    fun `the embedding and rerank rows say not chosen before anything is`() {
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Embedding model").assertIsDisplayed()
-        compose.onNodeWithText("Rerank model").assertIsDisplayed()
-        // Both unnamed, which is the honest state of a fresh account — and the search feature says so
-        // rather than inventing a template on the person's behalf. **Counted, not found once**: two rows
-        // say it, and `onNodeWithText` refuses to pick between them.
-        compose.onAllNodesWithText("not chosen").assertCountEquals(2)
-    }
-
-    @Test
-    fun `choosing an embedding template writes its name and the size, not a model id`() {
-        write("mine.json")
-        scene.viewModel.setEmbeddingSchema("mine.json")
-        compose.setContent { Section() }
-
-        // **The pointer is a file name.** That is what makes editing the file change the behaviour of
-        // every worktree that names it, which is the point of having one folder.
-        assertEquals("mine.json", scene.viewModel.modelConfig.embedding?.schema)
-        // And the size is kept beside it, because the index that is compared against was built at a
-        // size the template's `{{dimensions}}` cannot tell us.
-        assertEquals(1024, scene.viewModel.modelConfig.embedding?.dimensions)
-        compose.onNodeWithText("mine.json").assertIsDisplayed()
-    }
-
-    @Test
-    fun `a rerank template is given no size, because the job has none`() {
-        write("rank.json", Schema("https://x.test/v1", url = "rerank", body = org.json.JSONObject("{}")))
-        scene.viewModel.setRerankSchema("rank.json")
-
-        assertEquals("rank.json", scene.viewModel.modelConfig.rerank?.schema)
-        // A `dimensions` the server never asked for is a field it may refuse.
-        assertEquals(null, scene.viewModel.modelConfig.rerank?.dimensions)
-    }
-
-    @Test
-    fun `a new size asks first and says what the rebuild costs`() {
-        // **Not a preference**: the vectors on disk are in the old template's coordinate system, and a
-        // cosine between two of those looks like a score. So the question is drawn before anything is
-        // written, and the person can say no.
-        write("a.json")
-        scene.viewModel.setEmbeddingSchema("a.json")
-        scene.viewModel.cycleEmbeddingDimensions()
-
-        // A different size is a different space, so it is pending rather than applied.
-        assertEquals(null, scene.viewModel.modelConfig.embedding?.dimensions?.takeIf { it == 2048 })
-        assertTrue(
-            "the sentence names the size and the cost: ${scene.viewModel.pendingPickedSaid}",
-            scene.viewModel.pendingPickedSaid.contains("2048") &&
-                scene.viewModel.pendingPickedSaid.contains("rebuilds"),
-        )
-    }
-
-    @Test
-    fun `declining keeps the template that works`() {
-        write("a.json")
-        scene.viewModel.setEmbeddingSchema("a.json")
-        scene.viewModel.cycleEmbeddingDimensions()
-        scene.viewModel.cancelPicked()
-
-        assertEquals("a.json", scene.viewModel.modelConfig.embedding?.schema)
-        assertEquals("and its size", 1024, scene.viewModel.modelConfig.embedding?.dimensions)
-    }
-
-    @Test
-    fun `agreeing writes the new size`() {
-        write("a.json")
-        scene.viewModel.setEmbeddingSchema("a.json")
-        scene.viewModel.cycleEmbeddingDimensions()
-        scene.viewModel.confirmPicked()
-
-        assertEquals(2048, scene.viewModel.modelConfig.embedding?.dimensions)
-    }
-
-    @Test
-    fun `a different template for the same job asks, because it may be another model`() {
-        // The pointer's name is part of the space (`PickedModel.space`), so pointing at another file is
-        // a new coordinate system until the person says so — even if both files happen to name the same
-        // model, because the app cannot read "happens to" anywhere it could check.
-        write("a.json")
-        write("b.json")
-        scene.viewModel.setEmbeddingSchema("a.json")
-        scene.viewModel.setEmbeddingSchema("b.json")
-
-        assertEquals("a.json is still the one in force", "a.json", scene.viewModel.modelConfig.embedding?.schema)
-        assertTrue(scene.viewModel.pendingPickedSaid.isNotEmpty())
-    }
-
-    @Test
-    fun `clearing the embedding pointer turns the feature off rather than picking one`() {
-        write("a.json")
-        scene.viewModel.setEmbeddingSchema("a.json")
-
-        scene.viewModel.clearPicked(PickedKind.EMBEDDING)
-
-        // Null, not a default: a model choice nobody made is worse than a feature that says it is off.
-        assertEquals(null, scene.viewModel.modelConfig.embedding)
     }
 
     // ---- the file, and the key ------------------------------------------------

@@ -171,8 +171,8 @@ private sealed interface Pending {
  * same question asked from two screens.
  */
 internal fun scopeOf(project: String?, branch: String?): SecretScope = when {
-    // **No project is the account**, which is the widest place a chat model may live — a general entry
-    // is the app-wide embedding key and never answers a chat.
+    // **No project is the account**, which is the widest place a chat model may live. Nothing wider
+    // answers a chat: a request is made *as* somebody, and the log says who spent the tokens.
     project == null -> SecretScope.Account
     branch == null || branch == AgentSession.MAIN -> SecretScope.Project(project)
     else -> SecretScope.Branch(project, branch)

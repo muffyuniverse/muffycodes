@@ -20,7 +20,7 @@ import java.io.File
  * |---|---|
  * | `<account>/<project>/` | renamed, or copied |
  * | `<account>/.muffy/worktrees/<project>/` | the same, then **repointed** ([Worktrees.repoint]) |
- * | the repository | travels with the folder, `search.db` included — the index describes the files, and they are the same files |
+ * | the repository | travels with the folder — the history describes the files, and they are the same files |
  * | `shared/` | **not moved.** A unit a person wrote is theirs, and copying a file is the browser's Copy |
  * | the request history | **not moved.** It is what this account's key spent |
  *

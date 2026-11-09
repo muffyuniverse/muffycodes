@@ -10,7 +10,7 @@ import org.junit.Test
  * **What an MCP article says, and what the app will not let it say.**
  *
  * No socket anywhere in this file. The parser is a pure function of an article's text, and the transport is
- * the one part that is not tested here at all — which is the same split `Fetcher` and `Embedder` have, and
+ * the one part that is not tested here at all — which is the same split `Fetcher` has, and
  * the same reason: a feature that could only be checked by reaching a server is a feature checked by hand.
  */
 class McpTest {
@@ -232,7 +232,7 @@ class McpTest {
     @Test
     fun `a tool call's text parts are joined and its other parts are named`() {
         // **Not dropped in silence.** A result quietly missing an image is a result that lies about its own
-        // contents — the same rule as a page whose sections were removed by the scanner.
+        // contents.
         val answer = textOf(
             """
             {"content":[

@@ -118,9 +118,9 @@ class MaintenanceTest {
     @Test
     fun `a marker in a branch's tree is collected, and main's is not touched`() {
         // **Each tree keeps its own `agent/`**, so a marker written into a branch's worktree was one
-        // the pass never saw: housekeeping would report nothing to do for ever while a branch's index
-        // grew. Both halves are asserted, because "the branch was collected" alone would pass if the
-        // pass had collected *everything* wholesale.
+        // the pass never saw: housekeeping would report nothing to do for ever while that tree's
+        // markers piled up. Both halves are asserted, because "the branch was collected" alone would
+        // pass if the pass had collected *everything* wholesale.
         repository(2)
         val worktrees = Worktrees(ws)
         // **A branch and its tree, made the way the app makes them.** `createBranch` needs a repository
@@ -143,44 +143,7 @@ class MaintenanceTest {
         assertFalse("its marker is gone", Maintenance.waiting(tree))
     }
 
-    // ---- 2. the sweep, and its order ---------------------------------------
-
-    @Test
-    fun `a row whose content no commit reaches is swept, and the current file is kept`() {
-        repository(3)
-        val dir = ws.projectDir("shopping")
-        val index = SearchIndex.open(dir)
-        try {
-            index.declare("test/embed", 4).getOrThrow()
-            // The current file's text, which a prune says nothing about.
-            index.put("milk.txt", "", Chunker.split("the milk went sour\n")) { texts ->
-                Result.success(texts.map { FloatArray(4) { 1f } })
-            }.getOrThrow()
-            // A saved version that no commit in this repository reaches — what a rewritten history
-            // leaves behind.
-            index.put("milk.txt", "1".repeat(40), Chunker.split("a version nobody saved\n")) { texts ->
-                Result.success(texts.map { FloatArray(4) { 2f } })
-            }.getOrThrow()
-        } finally {
-            index.close()
-        }
-        Maintenance.mark(dir, "the history was shortened")
-
-        val done = Maintenance.run(ws).first()
-
-        assertEquals("one row swept: ${done.said()}", 1, done.rows)
-        val after = SearchIndex.open(dir)
-        try {
-            assertTrue(
-                "the ghost version is gone",
-                after.versions().none { it.second == "1".repeat(40) },
-            )
-            val current = after.nearest(FloatArray(4) { 1f }, 10, history = false).getOrThrow()
-            assertTrue("and the current file's row survives a prune", current.isNotEmpty())
-        } finally {
-            after.close()
-        }
-    }
+    // ---- 2. the picture store ----------------------------------------------
 
     @Test
     fun `the marker goes when the work finished`() {
@@ -195,8 +158,8 @@ class MaintenanceTest {
 
     @Test
     fun `a project with no repository still clears its marker`() {
-        // **The honest outcome.** A folder with no history has nothing to collect and no index rows
-        // to sweep, so the marker would otherwise be retried at every start for ever.
+        // **The honest outcome.** A folder with no history has no picture store to sweep, so the
+        // marker would otherwise be retried at every start for ever.
         val dir = ws.projectDir("shopping")
         write("milk.txt", "the milk went sour\n")
         Maintenance.mark(dir, "the history was shortened")

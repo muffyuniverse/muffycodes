@@ -152,7 +152,7 @@ data class McpServer(
 /**
  * **Talking to an MCP server, over streamable HTTP.**
  *
- * An interface for the same reason [com.example.notes.browser.Browser], [Fetcher] and [Embedder] are: the
+ * An interface for the same reason [com.example.notes.browser.Browser] and [Fetcher] are: the
  * suite never opens a socket. Every test of the tool is a fake that answers JSON it already knows, and the
  * real client is exercised by using the app.
  *
@@ -192,8 +192,8 @@ interface Mcp {
              *
              * **`content` is a list of parts, and only some of them are text.** A part that is not is
              * *named* rather than dropped, because a result quietly missing a piece lies about its own
-             * contents — the same rule as a page whose sections the scanner removed. An image's base64 is
-             * deliberately not rendered: it is the whole context spent on a picture.
+             * contents. An image's base64 is deliberately not rendered: it is the whole context
+             * spent on a picture.
              */
             fun read(result: JSONObject): Answer {
                 val parts = result.optJSONArray("content")
@@ -433,8 +433,8 @@ private class HttpMcp(private val connectMs: Int, private val readMs: Int) : Mcp
      * The JSON in [text], whether it came as `application/json` or as one `data:` line of an event stream.
      *
      * **The `id` is checked rather than trusted**: a server may answer a notification, and taking the first
-     * object that parses would then return the wrong message — the same class of bug as an embedding vector
-     * attached to the wrong chunk.
+     * object that parses would then return the wrong message — the same class of bug as an answer attached
+     * to the question before it.
      */
     private fun json(text: String): JSONObject {
         val body = text.trim()

@@ -51,7 +51,7 @@ data class ConnectionDraft(
     val forget: String = "",
     /** Where the app trims the context, or blank to inherit. Zero means the trim is off. */
     val trim: String = "",
-    /** The shape editor's kind: one server answers three requests, and each has its own body. */
+    /** The shape editor's kind. One kind is left, and it is the chat turn's own body. */
     val shapeKind: ShapeKind = ShapeKind.CHAT,
     /** The shape's path on the address, or blank for the app's preset. */
     val shapeUrl: String = "",

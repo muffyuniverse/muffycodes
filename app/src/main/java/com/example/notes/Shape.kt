@@ -42,7 +42,11 @@ import org.json.JSONObject
  *    than a predictability rule.
  */
 /**
- * The three kinds of request the app makes, each with the placeholders it can fill.
+ * The kinds of request the app makes, each with the placeholders it can fill.
+ *
+ * **Two of the three are gone** (2026-11-09): `EMBEDDING` and `RERANK` described the calls the vector
+ * index made, and the index went with them. What is left is the chat turn — which is the only request
+ * a person writes a template for.
  *
  * **Top level rather than nested in [Shape]'s companion object**, because a classifier declared
  * inside a companion is `Shape.Companion.Kind` from another file - and the store, which reads a shape
@@ -52,11 +56,6 @@ enum class ShapeKind(val names: Set<String>) {
     /** The chat turn: a conversation, its tools, its effort and its size. */
     CHAT(setOf("model", "messages", "tools", "tool_choice", "stream", "effort", "max_tokens")),
 
-    /** One or more texts in, one vector each out. */
-    EMBEDDING(setOf("model", "input", "dimensions")),
-
-    /** A query and some documents in, a score each out. */
-    RERANK(setOf("model", "query", "documents")),
 }
 
 data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = ShapeKind.CHAT) {
@@ -130,38 +129,8 @@ data class Shape(val url: String, val body: JSONObject, val kind: ShapeKind = Sh
             ),
         )
 
-        val EMBEDDING = Shape(
-            kind = ShapeKind.EMBEDDING,
-            url = "embeddings",
-            body = JSONObject(
-                """
-                {
-                  "model": "{{model}}",
-                  "input": "{{input}}",
-                  "dimensions": "{{dimensions}}"
-                }
-                """.trimIndent(),
-            ),
-        )
-
-        val RERANK = Shape(
-            kind = ShapeKind.RERANK,
-            url = "rerank",
-            body = JSONObject(
-                """
-                {
-                  "model": "{{model}}",
-                  "query": "{{query}}",
-                  "documents": "{{documents}}"
-                }
-                """.trimIndent(),
-            ),
-        )
-
         fun preset(kind: ShapeKind): Shape = when (kind) {
             ShapeKind.CHAT -> CHAT
-            ShapeKind.EMBEDDING -> EMBEDDING
-            ShapeKind.RERANK -> RERANK
         }
 
         /**

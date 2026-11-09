@@ -178,89 +178,26 @@ class ModelConfigTest {
         assertEquals("model_conf.json", ModelConfigFile.file(account).name)
     }
 
-    // ---- the two models that are not the chat model -------------------------
+    // ---- the blocks the file no longer has ---------------------------------
 
     @Test
-    fun `an embedding pointer keeps its dimension, and a file without one keeps no dimension`() {
-        // **The dimension is a request parameter, so it is stored with the pointer**: the index built
-        // from it has no template to ask at the moment it compares. A file that names no dimension is
-        // not an error; it is a config from before this app could embed, and the row says "not chosen"
-        // rather than inventing a size.
-        val config = ModelConfigFile.default().copy(
-            embedding = PickedModel(schema = "embedding.json", dimensions = 1024),
-        )
-        val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
-
-        assertEquals("the template", "embedding.json", read.embedding?.schema)
-        assertEquals("its size", 1024, read.embedding?.dimensions)
-        // **A name, not a model id and not an endpoint tag.** Reading it back as the same pair is the
-        // whole of what the file promises: the folder is where the request lives now.
-        assertEquals(PickedModel("embedding.json", 1024), read.embedding)
-    }
-
-    @Test
-    fun `a config with no embedding model says so instead of guessing one`() {
-        // **`null` is the honest answer.** A default slug picked on the person's behalf would be a
-        // model choice they never made and cannot see — and search would then spend money on a model
-        // nobody chose. The row says "not chosen", and the feature is off.
-        val read = ModelConfigFile.parse(ModelConfigFile.text(ModelConfigFile.default()))
-            .getOrThrow()
-
-        assertNull("no embedding model", read.embedding)
-        assertNull("and no rerank model", read.rerank)
-    }
-
-    @Test
-    fun `a half-written embedding block is refused by name`() {
-        // A block that is there and incomplete is a file someone edited wrongly, and the refusal has
-        // to say which key — `embedding.schema` is the sentence that lets them fix it.
-        val text = """
-            {"version":1,
-             "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
-             "models":[{"id":"deepseek/deepseek-v4.1-flash-1017","providers":["deepseek"]}],
-             "embedding":{"dimensions":1024}}
+    fun `an old file with embedding, rerank and baseUrl still loads`() {
+        // **Ignored, not refused.** The build before this one wrote those blocks, and refusing a
+        // person's own config over a field that no longer means anything would be a file the app that
+        // wrote it can no longer open. The chat model's address is `active.baseUrl`, which is read.
+        val old = """
+            {
+              "version": 1,
+              "active": { "model": "deepseek/deepseek-v4.1-flash-1017", "effort": "high" },
+              "embedding": { "schema": "embedding.json", "dimensions": 1024 },
+              "rerank": { "schema": "rerank.json" },
+              "baseUrl": "https://openrouter.ai/api/v1"
+            }
         """.trimIndent()
 
-        val read = ModelConfigFile.parse(text)
+        val read = ModelConfigFile.parse(old).getOrThrow()
 
-        assertTrue("it is refused", read.isFailure)
-        assertTrue(
-            "and names the key: ${read.exceptionOrNull()?.message}",
-            read.exceptionOrNull()?.message.orEmpty().contains("embedding.schema"),
-        )
-    }
-
-    @Test
-    fun `a dimension that is not a positive number is refused`() {
-        // **A typo, not a size.** Zero or negative cannot be a vector length, and silently treating
-        // it as "not set" would build an index at whatever the model defaulted to — an index the
-        // person believes is 1024 and is not.
-        val text = """
-            {"version":1,
-             "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
-             "embedding":{"schema":"embedding.json","dimensions":0}}
-        """.trimIndent()
-
-        val read = ModelConfigFile.parse(text)
-
-        assertTrue("it is refused", read.isFailure)
-        assertTrue(
-            "and says what is wrong: ${read.exceptionOrNull()?.message}",
-            read.exceptionOrNull()?.message.orEmpty().contains("dimensions"),
-        )
-    }
-
-    @Test
-    fun `a rerank choice has no dimension and is not given one`() {
-        // **The three jobs are not the same shape**, and a rerank model has no third value. Writing
-        // one anyway would put a number in the file that nothing reads and a later reader would try
-        // to honour.
-        val config = ModelConfigFile.default().copy(
-            rerank = PickedModel(schema = "rerank.json"),
-        )
-        val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
-
-        assertEquals("the template", "rerank.json", read.rerank?.schema)
-        assertNull("and no dimension", read.rerank?.dimensions)
+        assertEquals("the chat model still loads", "deepseek/deepseek-v4.1-flash-1017", read.active.model)
+        assertEquals("and the app writes the file without them", 1, ModelConfigFile.text(read).split("embedding").size - 1)
     }
 }

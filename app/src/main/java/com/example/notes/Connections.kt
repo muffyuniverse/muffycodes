@@ -47,12 +47,13 @@ package com.example.notes
  * refusal — but a key sent to the wrong host cannot be un-sent. So this is not a guard on the person's
  * numbers; it is the vault's own boundary, which is why it is the only one that survived.
  *
-### Why the general scope is last, and only for embeddings
+ * ### Why the general scope is last
  *
- * An embedding model is a fact about the app rather than about a person: there is one vector space per
- * app, and an index built by one identity has to be readable by the next. So `llm` may be stored
- * generally — and only for the two calls that are app-wide (embedding and rerank). Chat is never
- * general, because a chat request is made *as* somebody and the log says who spent the tokens.
+ * **Nothing this build does needs it.** It existed for the embedding and rerank calls, which were
+ * app-wide rather than somebody's — one vector space per app — and they went with the index
+ * (2026-11-09). Chat is never general: a chat request is made *as* somebody and the log says who spent
+ * the tokens. The rung is left in place with no consumer, which is a question for the minting step
+ * (§3.11 N6) rather than something to remove quietly here.
  */
 enum class ConnKind {
     /** The token a repository is pushed, pulled and `ls-remote`d with. */
@@ -73,11 +74,11 @@ enum class ConnKind {
  * **The shape travels with the pair** ([Shape]), because it is a fact about the same server: a
  * different address means a different shape, and half of one is a request that cannot be sent.
  *
- * **[shapes] is a map, not one shape, because one server answers three kinds of request** — a chat
- * completion, an embedding, a rerank — and each has its own path and its own body. One shape per
- * connection would have had to be the chat's, and then a self-hosted server would have been told how
- * to answer a chat and nothing else. A kind that is missing falls back to the app's preset for it,
- * which is exactly what a connection to a compatible server needs.
+ * **[shapes] is a map, and it holds one kind now: the chat completion.** It was a map because one
+ * server answered three kinds of request — a chat completion, an embedding, a rerank — each with its
+ * own path and body; the last two went with the index (2026-11-09). The map stays because it is the
+ * vault's stored shape and not the app's: a connection written by another build still reads, and a
+ * kind that is missing falls back to the app's preset for it.
  */
 data class Connection(
     /**
@@ -365,8 +366,8 @@ data class Wired(
  * **[project] may be null for a turn that belongs to no worktree.** The chain then starts at the
  * account, which is the honest answer rather than an invented branch scope.
  *
- * **The chat chain stops at the account.** A general entry is the app-wide embedding key; a chat request
- * is made *as* somebody, so nothing wider may choose its model or answer its key.
+ * **The chat chain stops at the account.** A chat request is made *as* somebody, so nothing wider may
+ * choose its model or answer its key.
  *
  * ### What is deliberately not here
  *

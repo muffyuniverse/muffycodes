@@ -390,11 +390,6 @@ class Scenario(
         // own tests (`MaintenanceTest`) and its own seam; a feature test that started one would be
         // measuring a background walk of a temp folder.
         housekeeping = false,
-        // **No socket.** Every commit asks the index queue for a pass, and a live embedder would
-        // open a connection to OpenRouter with a twenty-second timeout on a thread nothing waits
-        // for. `NONE` refuses in a sentence the pass records, which is what a build with no
-        // credentials does.
-        embedder = Embedder.NONE,
     )
 
     val login: String get() = AppViewModel.TEST_ACCOUNT
@@ -432,7 +427,6 @@ class Scenario(
         saveDebounceMs = 0,
         signInGitHub = { DiskWho(login) },
         housekeeping = false,
-        embedder = Embedder.NONE,
     )
 
     /**

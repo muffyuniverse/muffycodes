@@ -76,8 +76,8 @@ data class Schema(
     fun problem(kind: ShapeKind? = null): String? =
         // **The url and the placeholders are [Shape]'s rules, asked one at a time.** Not its
         // `problem()`, because that checks the placeholders against the vocabulary of a *kind* — and a
-        // kind-less check (what the editor wants while a file is half written) must not call an
-        // embedding template's `{{input}}` a mistake.
+        // kind-less check (what the editor wants while a file is half written) must not call a
+        // placeholder a mistake before the kind that defines it is known.
         addressProblem(address)
             ?: numberProblem("target", target)
             ?: numberProblem("forget", forget)
@@ -95,8 +95,8 @@ data class Schema(
         if (key.isNotBlank()) put("key", key)
         put("url", url)
         // **Written only when they are not zero**, so a template that turns a hand off says nothing
-        // about it rather than saying 0 twice — and so an embedding template is not cluttered with
-        // three keys that mean nothing to it.
+        // about it rather than saying 0 twice — and so a template that uses none of the three is not
+        // cluttered with keys that mean nothing to it.
         if (target != 0L) put("target", target)
         if (forget != 0L) put("forget", forget)
         if (trim != 0L) put("trim", trim)

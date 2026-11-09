@@ -389,56 +389,18 @@ class SearchTest {
     // ---- `mode`: what the query means --------------------------------------
 
     @Test
-    fun `mode semantic without a model is refused, and names the setting`() {
-        // **No regex fallback.** The operator's rule: a failure is a reason, not a text search
-        // nobody asked for — because a hedge makes a model believe it searched by meaning when it
-        // searched by wording, and it then acts on an answer to a different question.
-        //
-        // **And no silent nothing when the app has no engine at all.** A tool set built without one —
-        // this test's — must say which setting is missing rather than answer "nothing matches",
-        // which would read as an empty project.
-        write("shopping", "milk.txt", "milk is bought on Saturdays\n")
-
-        val answer = tools().run(call("""{"query":"dairy","mode":"semantic"}"""))
-
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names what is missing: $answer", answer.contains("Embedding model"))
-        assertFalse("and answers nothing at all: $answer", answer.contains("milk.txt"))
-    }
-
-    @Test
-    fun `a semantic scope that names another project is refused by name`() {
-        // **The operator's boundary, refused rather than narrowed**: *"account wide semantic search is
-        // forbidden and scope must be project and lower"*. Answering "nothing matches" about a folder
-        // the engine never looked in is the silent no-op this app treats as a defect, so the refusal
-        // names the project and the folder that can be searched.
-        write("groceries", "list.txt", "milk\n")
-
-        val answer = tools().run(call("""{"scope":"groceries/","query":"milk","mode":"semantic"}"""))
-
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("naming the project it refused: $answer", answer.contains("groceries"))
-        assertTrue("and the one it can search: $answer", answer.contains("shopping/"))
-        assertTrue("and the rule: $answer", answer.contains("per project"))
-    }
-
-    @Test
-    fun `semantic history is answered by the engine rather than refused here`() {
-        // **It used to be a refusal, and the refusal was true.** The index held only the current text
-        // of each file, so `history` would have answered a narrower question under a wider name. The
-        // index holds saved versions now, keyed by their content, so the flag reaches the engine — and
-        // what this tool owes is that it does not stop it on the way.
-        //
-        // The engine's own behaviour is `SemanticSearchTest`'s: this test's job is the boundary, and
-        // the boundary is that a tool set with no engine still refuses with the reason that names the
-        // setting, rather than quietly dropping the flag.
+    fun `mode semantic is refused, and the sentence names the mode that went`() {
+        // **Named, not dropped.** A model repeating a call from an old session is told that searching
+        // by meaning needed an embedding model and an index the app no longer carries, and what a
+        // `query` does now — the alternative is "not a thing", which leaves it guessing whether it
+        // misspelled a mode that still exists.
         val answer = tools().run(
-            call("""{"query":"milk","mode":"semantic","history":true}"""),
+            call("""{"scope":"shopping/","query":"milk","mode":"semantic","history":true}"""),
         )
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and it names the missing setting: $answer", answer.contains("Embedding model"))
-        assertFalse("and never says versions are unindexed: $answer", answer.contains("not indexed"))
+        assertTrue("naming the missing mode: $answer", answer.contains("no `semantic` mode"))
+        assertTrue("and what a query does instead: $answer", answer.contains("matches the text itself"))
     }
 
     @Test
@@ -452,12 +414,11 @@ class SearchTest {
     }
 
     @Test
-    fun `a mode that is neither regex nor semantic is refused, naming both`() {
-        val answer = tools().run(call("""{"query":"milk","mode":"fuzzy"}"""))
+    fun `a mode that is neither regex nor semantic is refused, naming what exists`() {
+        val answer = tools().run(call("""{"scope":"shopping/","query":"milk","mode":"fuzzy"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names the value it cannot take: $answer", answer.contains("fuzzy"))
-        assertTrue("and both it can: $answer", answer.contains("regex") && answer.contains("semantic"))
+        assertTrue("and it says what is on offer: $answer", answer.contains("`mode` is `regex`"))
     }
 
     @Test

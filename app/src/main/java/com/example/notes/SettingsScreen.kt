@@ -577,52 +577,6 @@ fun SettingsScreen(
                     onCheckedChange = { settings.keepHttp(it) },
                 )
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.keepScan(!settings.scanAllowed) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Scan what it reads from outside", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "A page and a server's answer are text someone else wrote, and either " +
-                            "can carry instructions aimed at the agent. On, a guard model scores " +
-                            "each section and the dangerous ones are cut out — the result says how " +
-                            "many went, and the text stays in the session log.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.scanAllowed,
-                    onCheckedChange = { settings.keepScan(it) },
-                )
-            }
-            // **The number only when the switch is on.** A threshold beside a switch that is off is a field
-            // that does nothing, which is the same trap as a preset that is never written.
-            if (settings.scanAllowed) {
-                LengthField(
-                    label = "Cut a section at (percent)",
-                    value = settings.scanAt,
-                    placeholder = "${SettingsStore.DEFAULT_SCAN_AT}",
-                    onValueChange = { settings.keepScanAt(it) },
-                )
-                Text(
-                    text = if (settings.scanAt == 0) {
-                        "Now: off. A page and a server's answer are shown exactly as they arrived, " +
-                            "even with the switch above on. Turn it up to have sections that read " +
-                            "like instructions aimed at the agent cut out."
-                    } else {
-                        "Now: a section scoring " + settings.scanAt + "% or more is cut out of what " +
-                            "the agent reads, and the result says how many went. What was cut stays " +
-                            "in the session log, never in the conversation."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-
             Text("Secrets the agent may use", style = MaterialTheme.typography.titleMedium)
             Text(
                 // **The rule that makes everything else true**, and it is the app's own now rather

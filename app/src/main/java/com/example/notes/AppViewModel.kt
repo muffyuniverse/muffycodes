@@ -76,23 +76,6 @@ class AppViewModel @JvmOverloads constructor(
      * The default is `true`, so the app is unchanged and only a test says otherwise.
      */
     private val housekeeping: Boolean = true,
-    /**
-     * Where a background index pass gets its vectors.
-     *
-     * **The live one by default, and a test passes [Embedder.NONE].** Every commit asks
-     * [IndexQueue] for a pass, so a test that commits anything would otherwise open a socket to
-     * OpenRouter — with a twenty-second connect timeout — on a thread nothing is waiting for. That
-     * is not a fake being substituted for a real thing; it is the real thing happening at the wrong
-     * time, and it makes every such test a test of the network's availability.
-     *
-     * `NONE` is not a silent no-op: a pass that cannot embed says so in its note, which is the same
-     * sentence a build with no credentials shows.
-     *
-     * **Null means "build the live one when a pass first asks"**, which is where the key is read —
-     * `activeLogin` is not initialised until the object is, and a person may add their key after the
-     * app opens.
-     */
-    private val embedder: Embedder? = null,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -446,19 +429,11 @@ class AppViewModel @JvmOverloads constructor(
     private val git: ProjectGit?
         get() = workspace?.let { ws -> projectGit(ws) }
 
-    /**
-     * A [ProjectGit] that asks for an index pass, wired to this account's key and model file.
-     *
-     * **The editor's path needs its own wiring**, because the agent may never have been switched on:
-     * [AgentWiring] configures the same queue, and either being first is enough — `configure` is
-     * idempotent and both describe the same account, key and config. Doing it here, beside the
-     * construction, is what keeps "who indexes" from being a thing a person has to turn on.
-     */
+    /** A [ProjectGit] for this account, wired to the identity and the vault the rest of the app uses. */
     private fun projectGit(ws: Workspace): ProjectGit = ProjectGit(
         workspace = ws,
         tokenProvider = { activeLogin?.let { credentials.token(it) } },
         authorProvider = { author },
-        index = indexer(ws),
         // **A project on another host carries its own key** (PLAN-portable-2026-11-08 §4 P1). The
         // store answers narrowest-first — the project's, then the account's, then the shared one — so a
         // single lambda is the whole of "this project can reach a host this app knows nothing about".
@@ -478,32 +453,6 @@ class AppViewModel @JvmOverloads constructor(
             credentials.gitConnectionFor(project, branch, host)
         },
     )
-
-    /**
-     * The provider a `ProjectGit` asks for an index pass through — **and the wiring that makes the
-     * ask mean something.**
-     *
-     * The two calls are one function on purpose: every place that hands out a `ProjectGit` gets a
-     * queue that has been told where the account is, so there is no arrangement in which a commit
-     * asks a queue that was never configured. Calling it repeatedly is free.
-     */
-    private fun indexer(ws: Workspace): (String, String, String) -> Unit {
-        IndexQueue.configure(
-            ws = ws,
-            // **Built here rather than in the constructor**, because the key is read from
-            // `activeLogin`, which is not initialised until the object is — and because reading it
-            // per pass is right anyway: a person may add their key after the app opens, and the next
-            // pass should find it. A test passes [Embedder.NONE] and never reaches the network.
-            embedder = embedder ?: Embedder.openRouter(
-                key = { activeLogin?.let { credentials.modelKey(it) } },
-                baseUrl = { modelConfig.baseUrl },
-            ),
-            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
-            context = app,
-        )
-        return { project, branch, why -> IndexQueue.want(project, why, branch) }
-    }
-
 
     init {
         // The trace's durable copy lives beside everything else the app owns, in the
@@ -587,10 +536,10 @@ class AppViewModel @JvmOverloads constructor(
                     },
                 )
                 // **Only what did something refreshes the screen.** A start where nothing was
-                // waiting is the normal case; a project whose sweep removed rows has just changed
-                // what a search can answer, so the screens are asked again. The log row is written by
-                // the pass itself, per project, so nothing is lost by not repeating it here.
-                if (done.any { it.rows > 0 }) main.post { refresh() }
+                // waiting is the normal case; a project whose sweep removed picture bytes has just
+                // changed what the storage figure says, so the screens are asked again. The log row
+                // is written by the pass itself, per project, so nothing is lost by not repeating it.
+                if (done.any { it.freed > 0 }) main.post { refresh() }
             } catch (e: Throwable) {
                 // Housekeeping that could not run leaves its markers for the next start.
             }
@@ -1073,138 +1022,6 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * **Points at a template, which is the whole of choosing an embedding or rerank model.**
-     *
-     * The operator: *"rerank and embedding pickers can also just reference a template file from this
-     * folder."* So a `PickedModel` is a file name and a size, and this writes it.
-     *
-     * **A different template is asked about before it happens**, because for an embedding pointer it is
-     * not a preference: the vectors already on disk are in the old template's coordinate system, so
-     * every project's index has to be thrown away and rebuilt. That costs minutes and tokens, so the
-     * person is told and can say no — [pendingPicked] is the question and the screen draws it.
-     *
-     * **A rerank pointer is never that question**, and neither is a change of address inside a template
-     * the pointer already named: the address says where a request goes, not where the vectors come from.
-     */
-    fun setPicked(kind: PickedKind, schema: String, dimensions: Int?) {
-        val clean = schema.trim()
-        if (clean.isEmpty()) return
-        val one = PickedModel(
-            schema = clean,
-            // **The dimension is written beside the pointer, or not at all.** A rerank model has no
-            // such parameter, and a field the server never asked for is one it may refuse.
-            dimensions = if (kind == PickedKind.EMBEDDING) dimensions else null,
-        )
-        val current = modelConfig.embedding
-        if (kind == PickedKind.EMBEDDING && current != null && current.space() != one.space()) {
-            pendingPicked = one
-            return
-        }
-        applyPicked(kind, one)
-    }
-
-    /** Points the embedding job at [schema], keeping the size it is already built at. */
-    fun setEmbeddingSchema(schema: String) = setPicked(
-        PickedKind.EMBEDDING,
-        schema,
-        modelConfig.embedding?.dimensions ?: SCHEMA_DIMENSIONS.first(),
-    )
-
-    /** Points the rerank job at [schema]. A rerank model has no size, by the protocol. */
-    fun setRerankSchema(schema: String) = setPicked(PickedKind.RERANK, schema, null)
-
-    /**
-     * Steps the embedding size through the ones this build knows.
-     *
-     * **A cycle rather than a picker**, because there are three and they are a property of the model: a
-     * dialog for a choice of three would be more taps than the answer is worth. A size the file names
-     * that is not in this list starts the cycle, so a value written by a newer build is not silently
-     * replaced by one this build happens to know.
-     */
-    fun cycleEmbeddingDimensions() {
-        val current = modelConfig.embedding ?: return
-        val steps = (SCHEMA_DIMENSIONS + (current.dimensions ?: 0)).distinct()
-        val at = steps.indexOf(current.dimensions)
-        setPicked(PickedKind.EMBEDDING, current.schema, steps[(at + 1).mod(steps.size)])
-    }
-
-    /**
-     * The embedding model waiting for a person to agree to the rebuild, or null.
-     *
-     * **The question is state rather than a lambda in the dialog**, so the rule — *is this a new
-     * vector space, and what does it cost* — lives in the app layer where a test can ask it.
-     */
-    var pendingPicked: PickedModel? by mutableStateOf(null)
-        private set
-
-    /** What the screen says before an embedding-model change. One sentence, and it is the truth. */
-    val pendingPickedSaid: String
-        get() {
-            val one = pendingPicked ?: return ""
-            val now = modelConfig.embedding
-            return "Pointing the embedding model at ${one.schema}, at ${one.dimensions} dimensions, " +
-                "throws away the index of " +
-                "every project and rebuilds it in the background. That takes several minutes and " +
-                "spends tokens on your key, and until it finishes a search answers with what is " +
-                "already indexed.\n\n" +
-                "The index on disk was built with ${now?.schema ?: "another template"}. Only change " +
-                "if that endpoint has stopped answering — otherwise the index you have works."
-        }
-
-    /** Agreed: the choice is written, every project's index is emptied, and the queue rebuilds them. */
-    fun confirmPicked() {
-        val one = pendingPicked ?: return
-        pendingPicked = null
-        applyPicked(PickedKind.EMBEDDING, one)
-        rebuildIndexes()
-    }
-
-    /** Refused: nothing changes, and the index that works is still the one in force. */
-    fun cancelPicked() {
-        pendingPicked = null
-    }
-
-    private fun applyPicked(kind: PickedKind, one: PickedModel) {
-        val next = when (kind) {
-            PickedKind.EMBEDDING -> modelConfig.copy(embedding = one)
-            PickedKind.RERANK -> modelConfig.copy(rerank = one)
-        }
-        writeModelConfig(next, "Pointed the ${kind.label} at ${one.schema}")
-    }
-
-    /**
-     * Empties every project's index and asks for each to be rebuilt.
-     *
-     * **Both halves in one place, and in this order.** The empty has to come first: a pass opens the
-     * index, sees what it was built with, and refuses a model that differs — so asking first would
-     * queue work that every pass would decline. Emptying also clears the record of which model built
-     * it, which is what lets the new choice be declared ([SearchIndex.clear]).
-     *
-     * **One project at a time, on the worker**: each open is a database handle, and the queue
-     * coalesces the asks anyway.
-     */
-    private fun rebuildIndexes() {
-        val ws = workspace ?: return
-        onWorker {
-            val names = ws.projectNames()
-            for (name in names) {
-                // **Every tree of every project** (§13d): each worktree keeps its own index, so clearing
-                // only main's left every branch holding vectors from the model the person just replaced
-                // — and a search there would compare two spaces.
-                for (branch in Worktrees(ws).branches(name)) {
-                    try {
-                        SearchIndex.open(ws.treeOf(name, branch)).use { it.clear() }
-                    } catch (e: Throwable) {
-                        // A project whose index cannot be emptied still gets a pass; that pass will say
-                        // why in its own note rather than the whole rebuild stopping on one folder.
-                    }
-                    IndexQueue.want(name, "the embedding model changed", branch)
-                }
-            }
-        }
-    }
-
-    /**
      * **The templates in the folder**, read fresh, for the three rows and the dialogs behind them.
      *
      * Read on every call rather than cached: a person writes a template in the editor, comes back, and
@@ -1212,15 +1029,6 @@ class AppViewModel @JvmOverloads constructor(
      * after this screen writes a file.
      */
     fun templateNames(): List<String> = workspace?.let { Schemas.ensure(it.systemDir) }.orEmpty()
-
-    /** Forgets the embedding or rerank choice, so the feature says "not chosen" rather than guessing. */
-    fun clearPicked(kind: PickedKind) {
-        val next = when (kind) {
-            PickedKind.EMBEDDING -> modelConfig.copy(embedding = null)
-            PickedKind.RERANK -> modelConfig.copy(rerank = null)
-        }
-        writeModelConfig(next, "Cleared the ${kind.label}")
-    }
 
     /**
      * Puts back the config the app shipped.
@@ -3617,7 +3425,6 @@ class AppViewModel @JvmOverloads constructor(
                 ws,
                 { null },
                 { accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR },
-                index = indexer(ws),
             )
             val made = git.init(clean)
             // **The folder tree, and nothing in it.** The operator: *"just create empty system_data
@@ -4372,8 +4179,8 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         // **A turn that cannot start must say so.** This was `git ?: return`, and it returned into
         // nothing: no row, no message, `chatWorking` left true — a screen that waits for ever and a
-        // record that does not mention the question. `git` is a property that now wires the index
-        // queue on every read, so it can fail for reasons that have nothing to do with the turn.
+        // record that does not mention the question. `git` opens a repository on every read, so it
+        // can fail for reasons that have nothing to do with the turn.
         val g = try {
             git
         } catch (e: Throwable) {

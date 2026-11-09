@@ -90,13 +90,6 @@ class AgentRunner(
      */
     private val credentials: Credentials? = null,
     /**
-     * The injection scanner, for `browse` and `mcp`.
-     *
-     * **A default that passes text through**, like every other capability here: a runner built without a
-     * decision does not cut sections out of a page it was told to read.
-     */
-    private val scanner: Scanner = Scanner.NONE,
-    /**
      * Whether downloading is allowed, for `fetch`.
      *
      * **A function, and it drops the tool rather than refusing it** — see [AgentTools.specs]. Read per call, so
@@ -122,18 +115,6 @@ class AgentRunner(
      */
     /** The phone's Downloads folder. See `AgentTools.phone`. */
     private val phone: PhoneDownloads = PhoneDownloads.NONE,
-    /**
-     * Where a vector comes from. See `Agent.embedder` — injected for the same reason, and refused by
-     * default so a runner built without a decision cannot spend a key on an embedding.
-     */
-    private val embedder: Embedder = Embedder.NONE,
-    /**
-     * The account's three model choices, read per call. See `Agent.models`.
-     *
-     * The chat model is already read that way ([model]); these are the other two rows of the same
-     * file, and reading them from a second place would be the moment they could disagree.
-     */
-    private val models: () -> ModelConfig? = { null },
 ) {
 
     private val sessions = AgentSessions(ws.accountDir)
@@ -417,7 +398,6 @@ class AgentRunner(
                     fetcher = fetcher,
                     mcp = mcp,
                     credentials = credentials,
-                    scanner = scanner,
                     httpAllowed = httpAllowed,
                     fetchLimit = fetchLimit,
                     // **Read from the settings at the moment of the call**, like the other limits:
@@ -425,8 +405,6 @@ class AgentRunner(
                     privateAllowed = { settings.browsePrivate },
                     browseMs = { settings.browseMs },
                     phone = phone,
-                    embedder = embedder,
-                    models = models,
                     onDiskChanged = onDiskChanged,
                     branch = branch,
                 )

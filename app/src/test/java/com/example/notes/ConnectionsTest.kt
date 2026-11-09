@@ -466,17 +466,16 @@ class ConnectionsTest {
 
         assertEquals("/api/chat", connection.shapeFor(ShapeKind.CHAT).url)
         assertEquals(
-            "an embedding is not the chat's shape, and falls back to the app's own",
-            Shape.EMBEDDING.url,
-            connection.shapeFor(ShapeKind.EMBEDDING).url,
+            "and the kind it carries answers with the shape the connection stored",
+            "api/chat",
+            connection.shapeFor(ShapeKind.CHAT).url,
         )
     }
 
     @Test
     fun `the general scope never answers a chat turn`() {
-        // **A general entry is the app-wide embedding key.** Chat is made *as* somebody, so even
-        // with a general pair and a general model — a combination the windows cannot make — the
-        // answer is the account's rather than the phone's.
+        // **A chat request is made *as* somebody.** Even with a general pair and a general model — a
+        // combination the windows cannot make — the answer is the account's rather than the phone's.
         val wired = asked(
             connections = mapOf(
                 SecretScope.General to Connection("https://models.example.org/v1", "sk-general"),

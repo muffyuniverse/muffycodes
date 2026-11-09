@@ -14,7 +14,7 @@ import java.io.File
  * **The `mcp` tool, through a fake server.**
  *
  * No socket: `Mcp` is an interface, so every test here answers JSON it already knows. That is the same
- * split `Browser`, `Fetcher` and `Embedder` have, and the same reason — a feature that could only be
+ * split `Browser` and `Fetcher` have, and the same reason — a feature that could only be
  * checked by reaching a real server is a feature checked by hand or not at all.
  *
  * What is worth testing is what breaks quietly:

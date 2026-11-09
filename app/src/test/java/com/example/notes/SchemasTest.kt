@@ -62,10 +62,12 @@ class SchemasTest {
     }
 
     @Test
-    fun `a new account is given three requests, one for each kind of call`() {
+    fun `a new account is given the one request the app makes`() {
         val names = Schemas.ensure(app)
 
-        assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), names)
+        // **One, not three.** The embedding and rerank templates went with the index (2026-11-09), so
+        // a fresh folder holds the chat request and nothing pretending to be a call nobody makes.
+        assertEquals(listOf("chat.json"), names)
         for (name in names) {
             val schema = Schemas.read(app, name).getOrThrow()
             assertNull("$name is usable as written", schema.problem())
@@ -78,7 +80,7 @@ class SchemasTest {
         Schemas.ensure(app)
         val chat = Schemas.read(app, "chat.json").getOrThrow()
 
-        // **A literal, not `{{model}}`.** The model is what this file *is*: three templates are three
+        // **A literal, not `{{model}}`.** The model is what this file *is*: two templates are two
         // models, and the app has no other place to keep one.
         assertEquals(ModelConfigFile.DEFAULT_MODEL, chat.body.getString("model"))
         // And the placeholders that remain are the ones only the app can fill.
@@ -114,16 +116,15 @@ class SchemasTest {
     @Test
     fun `a folder that still holds one schema is not refilled`() {
         Schemas.ensure(app)
-        Schemas.remove(app, "embedding.json")
-        Schemas.remove(app, "rerank.json")
+        Schemas.remove(app, "chat.json")
 
         // Same rule from the other side: a folder that exists is a folder somebody has seen, so nothing
-        // is written into it — not even the two that are missing.
-        assertEquals(listOf("chat.json"), Schemas.ensure(app))
+        // is written into it — not even the one that is missing.
+        assertEquals(emptyList<String>(), Schemas.ensure(app))
     }
 
     @Test
-    fun `deleting the folder is how a person asks for the shipped three back`() {
+    fun `deleting the folder is how a person asks for the shipped one back`() {
         Schemas.ensure(app)
         Schemas.remove(app, "chat.json")
         Schemas.dir(app).deleteRecursively()
@@ -131,7 +132,7 @@ class SchemasTest {
         // **The one way back to the defaults, said in the code**: a folder that is not there is made and
         // filled, and a folder that is there is never added to. Nothing else in this class writes the
         // shipped files, so there is no second path that could disagree.
-        assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), Schemas.ensure(app))
+        assertEquals(listOf("chat.json"), Schemas.ensure(app))
     }
 
     @Test
@@ -144,7 +145,7 @@ class SchemasTest {
         // And a dot-file is not one either, for the same reason the list sorts only what it can send.
         write(".hidden.json", "{}")
 
-        assertEquals(listOf("a-first.json", "chat.json", "embedding.json", "rerank.json"), Schemas.names(app))
+        assertEquals(listOf("a-first.json", "chat.json"), Schemas.names(app))
     }
 
     // ---- writing and reading ---------------------------------------------------
@@ -269,20 +270,24 @@ class SchemasTest {
     }
 
     @Test
-    fun `an embedding template is checked against the embedding vocabulary, not the chat one`() {
-        // The same file is a chat request and an embedding request only if the placeholders match, so
-        // the kind travels with the question rather than being stored in the file: **which pointer
-        // named a schema is what it is for**, and a file cannot disagree with that.
-        val embedding = Schema(
+    fun `a template is checked against the vocabulary of the kind it is asked as`() {
+        // **The kind travels with the question rather than being stored in the file**, and chat is the
+        // only vocabulary left now that the embedding and rerank calls are gone. A body naming a
+        // placeholder the chat turn cannot fill is refused with the name, which is the assertion that
+        // keeps the check from being a formality.
+        val foreign = Schema(
             address = "https://x.test/v1",
             url = "embeddings",
-            body = JSONObject("""{"model":"e","input":"{{input}}","dimensions":"{{dimensions}}"}"""),
+            body = JSONObject("""{"model":"e","input":"{{input}}"}"""),
         )
 
-        assertNull(embedding.problem(ShapeKind.EMBEDDING))
         assertNotNull(
             "asked as a chat request, {{input}} is not a name it can fill",
-            embedding.problem(ShapeKind.CHAT),
+            foreign.problem(ShapeKind.CHAT),
+        )
+        assertNull(
+            "and with no kind asked for, a half-written file is not called wrong",
+            foreign.problem(null),
         )
     }
 

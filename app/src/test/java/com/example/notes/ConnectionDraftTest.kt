@@ -225,9 +225,9 @@ class ConnectionDraftTest {
         assertEquals("api/chat", shape?.url)
         assertNull("and it is a shape the app can fill", shape?.problem())
         assertEquals(
-            "an embedding at the same server keeps the app's own shape",
-            Shape.EMBEDDING.url,
-            draft.connection()?.shapeFor(ShapeKind.EMBEDDING)?.url,
+            "and the shape is stored under the kind it was written for",
+            "api/chat",
+            draft.connection()?.shapeFor(ShapeKind.CHAT)?.url,
         )
     }
 

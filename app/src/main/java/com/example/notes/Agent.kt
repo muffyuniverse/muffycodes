@@ -178,7 +178,6 @@ class Agent(
      * **Passed in rather than made here**, like the browser and the fetcher, and the default passes everything
      * through — so an agent built without a decision does not silently cut sections of a page.
      */
-    private val scanner: Scanner = Scanner.NONE,
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /**
@@ -217,21 +216,6 @@ class Agent(
      */
     private val onDiskChanged: () -> Unit = {},
     /**
-     * Where a vector comes from, and whether a hit can be reordered.
-     *
-     * **Injected like the browser and the fetcher**, and the default refuses — so an agent built
-     * without a decision cannot spend a person's key on an embedding it never asked for.
-     */
-    private val embedder: Embedder = Embedder.NONE,
-    /**
-     * The account's three model choices, **read per call**.
-     *
-     * Per call for the same reason the chat model is: a person who chooses an embedding model while
-     * the agent is idle means the next turn, not the next launch. Null is "this app has read no
-     * config", which [SemanticSearch] turns into the refusal that names the setting.
-     */
-    private val models: () -> ModelConfig? = { null },
-    /**
      * **The branch this conversation is on** — and therefore the working tree it can reach (§13d).
      *
      * Passed straight to [AgentTools], where the reasoning lives. It is on `Agent` as well because a
@@ -246,22 +230,12 @@ class Agent(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
         fetcher = fetcher,
-        mcp = mcp, credentials = credentials, scanner = scanner,
+        mcp = mcp, credentials = credentials,
         httpAllowed = httpAllowed,
         fetchLimit = fetchLimit,
         phone = phone,
         onDiskChanged = onDiskChanged,
         branch = branch,
-        // **One engine per agent, because one agent is one worktree.** That is also the extent of a
-        // semantic search — see [SemanticSearch] — so the two facts are the same fact here.
-        semantic = SemanticSearch(
-            ws = ws,
-            project = project,
-            branch = branch,
-            embedder = embedder,
-            embedding = { models()?.embedding },
-            rerank = { models()?.rerank },
-        ),
     )
 
     /**

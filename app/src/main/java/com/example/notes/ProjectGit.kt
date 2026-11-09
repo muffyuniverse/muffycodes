@@ -31,23 +31,6 @@ class ProjectGit(
     private val authorProvider: () -> GitAuthor,
 
     /**
-     * How to ask for a background index pass, or a no-op.
-     *
-     * **A provider like the three above it**, and a parameter rather than a call into [IndexQueue]
-     * for the reason they are: a `ProjectGit` built in a test must not spend a key or start a
-     * thread, and a test that wants to see *that a commit asks for an index* passes a recorder. The
-     * app passes `IndexQueue::want` at the places that also configure the queue.
-     */
-    /**
-     * How to ask for a background index pass: **(project, branch, why)**, or a no-op.
-     *
-     * The branch is in the call because the index is per worktree (§13d): a commit in `feature`'s tree
-     * asks for `feature`'s index, and asking for the project alone would have the pass walk main's
-     * files and leave the branch's index describing the wrong tree.
-     */
-    private val index: (String, String, String) -> Unit = { _, _, _ -> },
-
-    /**
      * **The branch this view of the repository is on** (§13d), and therefore which working tree it
      * opens, locks and commits in.
      *
@@ -112,7 +95,7 @@ class ProjectGit(
     fun onBranch(branch: String): ProjectGit =
         if (branch == this.branch) this
         else ProjectGit(
-            workspace, tokenProvider, authorProvider, index, branch, vaultToken, accountHost, gitUser,
+            workspace, tokenProvider, authorProvider, branch, vaultToken, accountHost, gitUser,
             gitConnection,
         )
 
@@ -325,14 +308,6 @@ class ProjectGit(
                     if (touched.any { Workspace.kindOfPath(it) != EntryKind.TEXT }) {
                         Maintenance.mark(repoDir(project), "a picture was saved")
                     }
-                    // **Every change the app makes is one commit, so this is the single signal that
-                    // the project's text changed** — the editor, the agent's `write`, a delete, a
-                    // move, a restore: they all arrive here. The queue is asked rather than told, so
-                    // the work happens off this thread and a save does not wait for an embedding.
-                    //
-                    // A commit that wrote nothing asks for nothing: `written` is false, and a pass
-                    // would answer "nothing had changed" at the cost of a walk.
-                    index(project, branch, "a change was saved")
                 }
                 outcome
             }
@@ -757,12 +732,6 @@ class ProjectGit(
             // made. Only a clone of a project that has no attribute gets one, and then it is
             // genuinely new content that has to be committed like anything else.
             GitService.ensureLfsAttributesIfMissing(dir)
-            // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
-            // hundreds of files at once and commits none of them, so the commit hook above never
-            // fires for it — and a project that arrived from GitHub is exactly the case where the
-            // whole index is stale at once. The queue makes it background work with a result, rather
-            // than the first search paying for it while somebody waits.
-            index(project, branch, "the project was added")
         }
         return result
     }

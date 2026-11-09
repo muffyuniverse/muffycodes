@@ -325,14 +325,14 @@ object GitService {
      * Opens the repository in [dir] **without creating anything**, or null.
      *
      * The read-only half of [initOrOpen], for a caller that must not change the project it is looking
-     * at — the index walk above all: an index pass that initialised a repository would give a project
-     * with no history a history, and commit whatever it found while looking.
+     * at — a walk of the tree above all: opening a repository must not initialise one, because that
+     * would give a project with no history a history, and commit whatever it found while looking.
      *
      * **`findGitDir`, for the same reason [initOrOpen] uses it.** A linked worktree's `.git` is a file
      * holding `gitdir: …`, and `setGitDir` pointed at that file builds a repository that is silently
      * empty — measured on 7.8.1: `getBranch()` null, `resolve("HEAD")` null, zero branches, and **no
-     * exception thrown**. It answered a repository, so callers believed it. [SemanticSearch] is where
-     * that would have hurt: every branch would have indexed nothing and said nothing.
+     * exception thrown**. It answered a repository, so callers believed it. Every reader of a working
+     * tree in a branch is where that would have hurt: each would have found nothing and said nothing.
      */
     fun openExisting(dir: File): Repository? {
         if (!isRepository(dir)) return null
@@ -1558,16 +1558,17 @@ object GitService {
      * ## Why this exists rather than [versionsOf] per file
      *
      * [versionsOf] runs `git log -- <path>`, so asking about thirty paths is thirty walks of the
-     * history. The index needs every path's versions at once, and this answers that in one pass: each
-     * commit is diffed against its parent, and the diff *is* the set of `(path, blob)` pairs that
-     * commit introduced. It is the same work git does to show a commit, done once for all of them.
+     * history. A search with `history: true` needs every path's versions at once, and this answers
+     * that in one pass: each commit is diffed against its parent, and the diff *is* the set of
+     * `(path, blob)` pairs that commit introduced. It is the same work git does to show a commit,
+     * done once for all of them.
      *
      * ## The pairs, not the commits
      *
-     * The caller is the vector index, and the index is keyed by **content**: the same text saved twice
-     * is one blob and one set of vectors. So what this yields is the blob id — which survives a
-     * force-push that rewrites local commits, because a blob is content and content does not move —
-     * and that is also what makes two identical saves cost one embedding rather than two.
+     * The caller is [versionsOf], and it is keyed by **content**: the same text saved twice is one
+     * blob. So what this yields is the blob id — which survives a force-push that rewrites local
+     * commits, because a blob is content and content does not move — and that is also what keeps one
+     * text saved six times from being six reads of it.
      *
      * A blob id names content, not a place: the same text can appear at two paths, and this reports
      * both, because the *path* is what a search answer has to say.
