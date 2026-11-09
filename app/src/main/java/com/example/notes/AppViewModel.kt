@@ -1668,32 +1668,124 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * **What a link in [file] does when it is pressed.**
+     * **Nothing on this phone opens web pages**, said in words, naming the address.
+     *
+     * The activity is where the attempt happens — it is the only place with a `Context` — and the
+     * sentence is the app's, so it comes back here rather than being written by a screen. The address
+     * is in the words because a person whose phone cannot open a page still needs somewhere to type
+     * it.
+     */
+    fun noBrowser(address: String) {
+        Trace.note("no-browser", address.take(60))
+        message = "Nothing on this phone opens web pages, so $address stays a link in the text."
+    }
+
+    /**
+     * **What a link in a document does when it is pressed.** [base] is the folder the document lives
+     * in, which is what a relative address means.
      *
      * Pulled out of the editor's composable so the rule is testable without a screen — and because
      * the rule is the app's, not the screen's. The editor calls this and nothing else.
+     *
+     * **Three kinds of address and no more**: `app:` (the app acting on its own page), an `http(s)`
+     * address (the browser, outside), and **a path** (a file of this account, opened in the editor).
+     * A path is the one the agent writes most: `[the notes](notes.md)` in a message, and the person
+     * presses it and lands in the file.
      *
      * **`app:` is refused outside the system project.** A locked page is written by the app and
      * cannot be edited, so its links are the app's own. A *cloned* page is ordinary user text, and a
      * cloned page carrying `app:delete-account` would be a document that can act — the door this
      * feature must not open.
      */
-    fun followLink(address: String, file: File) {
+    fun followLink(address: String, base: File?) {
         when {
             address.startsWith("app:") -> {
-                // **The file's own project**, which is the folder two levels up: accounts/<login>/
-                // <project>/<file>. A page at the account root has no project and is therefore not
-                // the system one.
-                val project = file.parentFile?.parentFile?.name.orEmpty()
-                if (Workspace.isSystem(project)) {
+                // **The document's own project**, asked of the workspace rather than guessed from
+                // two `parentFile` steps: a page may be at the project root or four folders down,
+                // and `projectOf` is the app's one answer to "which project is this inside".
+                val project = base?.let { workspace?.projectOf(it) }
+                if (project != null && Workspace.isSystem(project)) {
                     runLinkAction(address.removePrefix("app:"))
                 } else {
                     Trace.note("link-refused", "app: outside the system project")
                 }
             }
             address.startsWith("http") -> openLink(address)
-            else -> Trace.note("link-ignored", "not a link the editor opens")
+            else -> openPath(address, base)
         }
+    }
+
+    /**
+     * **A link in a chat message.** Same three kinds, one difference that matters: **`app:` never
+     * acts here.**
+     *
+     * A message is not a document the app wrote. The agent can type `app:connect-github` into a
+     * reply, and it must not press anything — the same rule that refuses `app:` in a cloned page,
+     * applied to the place where the text is written by a model rather than a person.
+     *
+     * **Paths resolve against the branch's working tree**, which is the folder every tool composes
+     * its paths from (`AgentTools.projectDir`). So the address the agent was given — `shot` answers
+     * with `agent/browser/shot-1.png`, relative to exactly that folder — is the address the person
+     * can press, with no translation between the two.
+     */
+    fun followChatLink(address: String) {
+        val project = chatProject ?: return
+        when {
+            address.startsWith("app:") ->
+                Trace.note("link-refused", "app: in a message")
+            address.startsWith("http") -> openLink(address)
+            else -> openPath(address, workspace?.treeOf(project, chatBranch))
+        }
+    }
+
+    /**
+     * **A path someone pressed, opened in the editor.**
+     *
+     * [base] is what a relative path is relative to: the document's folder, or a branch's tree. The
+     * file must be one this account can name — `Workspace.relative` is the whole of that question,
+     * and it answers null for anything outside. **A path it cannot name is refused in words**, not
+     * dropped: the alternative is the editor closing, which looks exactly like a link that did
+     * nothing.
+     *
+     * **Nothing is created.** A link to a file that is not there is a link to a file that is not
+     * there; opening an empty editor on that path would make the next Save write it, and a
+     * mistyped address would quietly become a new file.
+     */
+    fun openPath(address: String, base: File?) {
+        val ws = workspace
+        if (ws == null) {
+            message = "No account is open, so $address cannot be looked for."
+            return
+        }
+        val plain = address.substringBefore('#').substringBefore('?')
+        if (plain.isBlank()) {
+            message = "That link names no file."
+            return
+        }
+        val file = File(plain).let { named ->
+            // **An absolute path is taken as given**, which is how a link out of Downloads reads;
+            // everything else is beside the document.
+            if (named.isAbsolute) named else base?.let { File(it, plain) }
+        }
+        if (file == null || !file.isFile) {
+            message = "\"$address\" is not a file, so there is nothing to open."
+            return
+        }
+        if (ws.relative(file) == null) {
+            message = "\"$address\" is outside this account, and the editor reads this account's files."
+            return
+        }
+        // **A file inside a branch's worktree opens that branch.** `relative` reports a worktree path
+        // as the project path it stands for — the branch is the difference — and `fileAt` reads that
+        // path back through `activeBranch`, so a file pressed in `feature`'s chat would otherwise open
+        // main's copy of the same name. Setting the branch is what makes the two agree, and it is the
+        // same first act `enterBranch` performs.
+        val branch = ws.branchOf(file)
+        if (branch != ws.activeBranch) {
+            ws.activeBranch = branch
+            forgetBranches()
+        }
+        openEditor(file)
     }
 
     /**
@@ -4071,6 +4163,11 @@ class AppViewModel @JvmOverloads constructor(
         Trace.tap("chat", project)
         chatProject = project
         chatBranch = branch
+        // **A sentence about something else is not about this conversation.** The chat draws
+        // `message` above its field — which is where a refused path link lands — so what it shows has
+        // to be about the conversation that was just opened rather than about the last thing the
+        // browser did.
+        message = null
         chatBox = null
         measureChatContext()
         readChat(follow = true)

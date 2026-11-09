@@ -691,7 +691,11 @@ private fun AppRoot(viewModel: AppViewModel) {
     val linkContext = LocalContext.current
     LaunchedEffect(viewModel.linkToOpen) {
         val address = viewModel.linkToOpen ?: return@LaunchedEffect
-        openInBrowser(linkContext, address)
+        // **A press that opened nothing says so.** The old version swallowed the failure: nothing on
+        // the phone could show a page, and the person was left pressing a link that did not work and
+        // reading nothing about why. The chat draws `message` above its field, so this is where the
+        // sentence lands.
+        if (!openInBrowser(linkContext, address)) viewModel.noBrowser(address)
         viewModel.linkOpened()
     }
     LaunchedEffect(viewModel.pendingConnection) {
@@ -756,7 +760,10 @@ private fun Dialogs(
                 onSignIn = {
                     tap("openrouter sign in")
                     val url = viewModel.beginOpenRouterSignIn()
-                    openInBrowser(here, url)
+                    // **The address is shown either way** — the dialog prints it, which is the way
+                    // out when this phone has nothing to open pages with. Saying so is still worth
+                    // the sentence: a press that did nothing looks like a broken button.
+                    if (!openInBrowser(here, url)) viewModel.noBrowser(url)
                     url
                 },
                 onCode = { code, answered ->
@@ -843,10 +850,8 @@ private fun Dialogs(
                     // records it, rather than the dialog reaching into a private function in
                     // another file — which is what the compiler refused, correctly.
                     tap("open github device")
-                    openInBrowser(
-                        here,
-                        if (where.startsWith("http")) where else "https://$where",
-                    )
+                    val address = if (where.startsWith("http")) where else "https://$where"
+                    if (!openInBrowser(here, address)) viewModel.noBrowser(address)
                 },
                 // The login is whatever GitHub says it is, not what was typed, and
                 // the question goes to GitHub off the main thread.
@@ -1331,16 +1336,20 @@ private fun shareTrace(context: android.content.Context) {
  * A phone with no browser is a sentence rather than a crash: the paste box in the same dialog still
  * works, and a key made by hand is the same key.
  */
-private fun openInBrowser(context: android.content.Context, url: String) {
-    try {
-        context.startActivity(
-            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    } catch (t: Throwable) {
-        // Nothing on this phone can open a web page. The dialog says nothing, because the paste box
-        // is right there and a person who cannot open a browser already knows it.
-    }
+/**
+ * Hands [url] to whatever this phone opens web pages with, and **says whether it worked**.
+ *
+ * The answer matters now that a link is something a person presses in a conversation: a silent
+ * failure is the app doing nothing at all, which is the one thing it is not allowed to do.
+ */
+private fun openInBrowser(context: android.content.Context, url: String): Boolean = try {
+    context.startActivity(
+        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    )
+    true
+} catch (t: Throwable) {
+    false
 }
 
 /** The activity behind a compose context, however it is wrapped. */

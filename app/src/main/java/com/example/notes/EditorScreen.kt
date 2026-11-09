@@ -240,7 +240,8 @@ fun EditorScreen(
         if (at >= 0) viewModel.onboardingReached(at)
     }
 
-    val onLink: (String) -> Unit = { address -> viewModel.followLink(address, file) }
+    // **The document's folder**, which is what a relative address in it means.
+    val onLink: (String) -> Unit = { address -> viewModel.followLink(address, file.parentFile) }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 

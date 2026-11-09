@@ -1072,6 +1072,148 @@ The operator, 2026-11-09:
 | **C4** | The prompt's `WHAT THE PERSON SEES`; `shot`'s answer names the markdown to write |
 | **C5** | Tests: a `shot` path in an agent message draws; a picture that is missing says so; a path link opens the editor on the branch's file; `../..` and an outside absolute path are refused by name; `app:` in a message is refused; `http(s)` is not fetched |
 
+## 3.11 No local account: `shared` is the app's, and the agent's template is a chat control
+
+The operator, 2026-11-09:
+
+> *"what do you think about scrapping local account so that there are no prebuilt accounts and
+> projects?"* … *"why onboarding has nowhere to live if it is inside shared folder that doesnt belong to
+> any project and belongs to the app itself?"* … *"after onboarding user just enters the accounts screen
+> where he can add accounts (there is always github sign in + option and manual sign in option), and
+> branches should not require to select a llm template for agent to use - it should be a separate button
+> inside the agent chat screen itself that allows you to select/change the template that this chat is
+> using and that automatically pops up when a particular chat doesnt have a template selected. And
+> openrouter oauth key minting should be an option in general settings in the same block with vault
+> secrets management button - because it should be used to basically mint an openrouter key as a secret
+> that then could be given an access scope (a particular branch, project, account, general or undefined
+> which means that the secret is not availiable to agents at the time) and used in templates and http
+> requests."*
+
+### Why `~local` goes (§3.11.1)
+
+**It is a workspace wearing an account's clothes.** `AccountStore` says an account is a name, a host and a
+key (`AccountStore.kt:20`); `~local` has no key and no host, so §3.9 had to special-case it six ways:
+undeletable, no origin, a refusal at two doors, a transfer rule, `whoFor` null, a fake `PROVISIONAL_AUTHOR`
+for its commits. **An account cannot be shipped by an app** — an identity is something a person has, and one
+that cannot be deleted is a credential that cannot be revoked.
+
+**The measurement that settles it: the honest screens already exist and are unreachable today.**
+`AccountsScreen`'s empty state ("No accounts yet — an account is a name, a host and a key…") and
+`BrowserScreen`'s "Sign in to begin" were both written, then a workaround made them dead. Dead-but-correct
+code is the author already knowing the shape.
+
+**Projects keep what accounts cannot: the phone.** `ProjectGit.isLocal` is a per-project fact
+(`remoteUrl(project).isNullOrBlank()`) and stays one. A project with no address, inside an account, is
+exactly "kept on this phone" — so the honest thing §3.9 wanted to protect survives as a property of a
+project rather than as a fake identity. `Transfer` becomes what the operator asked for in the first place:
+between two identities.
+
+### `shared` moves to the app (§3.11.2)
+
+**Measured: `shared` is `<filesDir>/accounts/<login>/shared`** (`Workspace.kt:216`, `projectDir` → the same
+folder). The account is the only thing that makes it exist, and nothing about it needs the account: no
+`.git`, not a project, not per-identity. It is where it is because it used to be `system/`, a row beside the
+projects.
+
+**So it becomes the app's own folder, one per phone: `<filesDir>/shared`.** That is what makes onboarding
+possible with zero accounts, and it is **more** consistent with the decision that made the library work at
+all: a template names `@openrouter` and resolves against the vault of the account it is used in — that
+indirection exists so one library serves every account. Two libraries would be two places to keep in step.
+
+**The one real cost: containment is a single `startsWith(accountDir)`** (`partsOf`, `Workspace.kt:993`), and
+`relative` answers null outside it — so the browser would refuse to show the app's folder and the editor
+would refuse to open its files. `Workspace` gains a **second root** and serializes it as `shared/…`, which is
+the name a person already sees. `partsOf` canonicalizes, so a file reached through a project's `shared` link
+still counts; and `linkSystem`'s target base moves with the folder, leaving the relativization (and
+therefore every depth) correct.
+
+| what | where it goes |
+|---|---|
+| `AgentPrompt.systemFile` | `<filesDir>/shared/muffycodes_data/prompts/…` |
+| `shared/onboarding/` | the same folder — **readable with no account** |
+| `shared/schemas/`, `shared/requests/` | unchanged names, app-wide |
+| `shared/prompt.txt` | unchanged |
+| every project's `shared` link | points into the app's folder; still relative, still canonicalized |
+
+**A template unit written for one account is visible from every account**, and that is correct: the vault row
+it names is resolved where it is used, so `@openrouter` means *this account's* OpenRouter key. That is the
+whole reason a template holds a name.
+
+### Branches stop asking for a template (§3.11.3)
+
+**A template is not a property of a branch, it is a property of a chat.** A branch is a tree; the model is
+something you choose when you talk. Making it a branch attribute meant:
+
+- the branch screen asked for something before the branch did anything (§3.6's scoped llm menu, of which
+  only the pointer survives — and the pointer itself is what moves);
+- a person arriving at a chat with no choice made had to *back out* to a different screen to fix it;
+- and "which template is this chat using" was answerable only by reading a file.
+
+**So: a button in the chat, and it opens by itself when there is nothing chosen.**
+
+- **Where**: the chat's own top bar, beside the branch name — the chat is the thing that spends the token,
+  so the chat is where the token's shape is chosen.
+- **What it says**: the template's name when one is chosen (`deepseek-1017`), "Choose a template" when none
+  is. A refusal is not a message: with nothing chosen the button is the only enabled control, so a person
+  cannot type into a chat that has nowhere to send.
+- **Auto-open**: on entering a chat whose branch has no pointer, the picker opens once. **Once**, not every
+  frame — it is a window the person can dismiss, and dismissing it leaves the chat read-only rather than
+  opening it again on the next redraw. `AgentChatScreen` uses the same `remember(session)` idiom it already
+  uses for `opened`/`page`.
+- **What it lists**: `shared/requests/chat/` — the units (§3.8), by name, with the model id beneath. Choosing
+  one writes the pointer (`.muffy/schemas.json`, keyed `project/branch`), so the choice is per chat and is
+  the same fact the runner reads.
+- **The branch screen loses the picker entirely.** Its row menu keeps `Git connection…`; the model half
+  goes back to being the account's, which is what §3.6 already decided (general settings → the account's
+  request default) — the chat overrides it per conversation.
+
+**What this changes in §3.8's storage**: the pointer stays exactly as it is (a path, per `project/branch`).
+Only the *door* moves, from a branch row to the chat.
+
+### Minting a key becomes a vault verb (§3.11.4)
+
+**Today the OpenRouter key is minted by a sign-in flow that ends in a *connection*, not in a secret.** So the
+key exists in two shapes at once — a row under `conn_<login>_…` and, for the token to be usable elsewhere
+(an `http` call, a template), it has to be a vault row. That duplication is why `ConnKind.LLM` exists at all.
+
+**The operator's shape: minting produces a secret, and a secret has a scope.**
+
+- **Where**: general settings, in the block that holds the vault button — the same block, because it is the
+  same act (put a credential on this phone) with one step of automation in front of it.
+- **What it does**: the OAuth flow (existing `beginOpenRouterSignIn`/`DeviceFlow` machinery) ends by writing
+  **a vault row** — no connection row, no `ConnKind.LLM`.
+- **What it asks for after minting**: the **scope** of the secret, which is the vault's own vocabulary:
+
+| scope | who may spend it |
+|---|---|
+| **undefined** | nobody yet — stored, not available to agents, which is the honest default for a key that was just minted |
+| **general** | any account's agents, any project, any branch |
+| **account** | the agents of one account |
+| **project** | the agents of one project |
+| **branch** | one branch's agents |
+
+- **Why the scope is asked at mint time and not at mint**: because the key arrives without one, and a key
+  that defaults to usable-by-everything is a capability nobody granted. The default is `undefined`, and
+  choosing a scope is the grant.
+- **Where it is used**: a template (`"key": "@openrouter"`) or an `http` call (`"auth": "@openrouter"`) — the
+  same `secret(name, host)` resolution both already perform, which is what makes one minted key serve the
+  chat, an embedding request, a rerank, and a hand-written `http` call without being copied four times.
+
+### Steps (§3.11.5)
+
+| step | what | why here |
+|---|---|---|
+| **N0** | `shared` → the app's folder: a second root in `partsOf`/`relative`/`projectOf`, `linkSystem`'s base, the ~8 `File(accountDir, SYSTEM_PROJECT)` sites, `ensure()` made independent of an account | first, because everything else needs a place to live that is not an account |
+| **N1** | Delete `~local`: `PROVISIONAL`, `ensureProvisional`, `isProvisional`, `localOriginSaid`, `removeAccount`'s refusal, `Transfer`'s `toIsLocal`, `AddProjectDialog(fromAddress=…)`, the hidden `Set the address…`, `PROVISIONAL_AUTHOR`, `createLocalProject`; **and F2's starter project with it**, since it only existed to make `~local` non-empty | second: every one of these is a branch of code whose condition can no longer be true |
+| **N2** | The act doors speak: the 58 `workspace ?: return` sites are now reachable, so every *act* sets `message`; read doors keep answering empty | third, and it must be its own step: it is the one that can rot silently |
+| **N3** | Onboarding, now that it has a home: one boolean, the folder read from the app's `shared/`, page 06 and the `app:` machinery deleted (F3's decision, unchanged) | after N1, because the pages were the `~local` account's property |
+| **N4** | The accounts screen is the landing screen: no workspace means the empty state with **two doors — GitHub (device flow) and a manual host** | after N1, so "no workspace" is a state the screen can actually be in |
+| **N5** | The chat's template button + auto-open picker; the branch screen loses the picker | after §3.8's library exists (F6) — before it, there is nothing to list |
+| **N6** | Minting writes a vault row and asks for its scope; `ConnKind.LLM` and the connection shape for llm go | last, because it removes the machinery N5's pointer was reading through |
+
+**N0 and N1 before N2**, because N2's audit is about doors that only become reachable when the workspace can
+be absent. **N5 after F6**, because it lists what F6 stores.
+
 ## 4. Cost is removed
 
 `usage.cost` and the per-endpoint prices are OpenRouter's extension; the OpenAI protocol has no money in it.

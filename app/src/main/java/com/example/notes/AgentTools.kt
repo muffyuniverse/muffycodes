@@ -4218,9 +4218,14 @@ class AgentTools(
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
             val rel = file.relativeTo(projectDir).path
+            // **The path is given in the form that shows it.** A result that said only "written to
+            // agent/browser/shot-1.png" left the model to work out that a picture is drawn by a path
+            // in a markdown message — one inference between it and the picture the person asked for.
+            // The line below is the inference, written out.
             success(
                 "written to $rel (" + (bytes.size / 1024) + " KB)" +
-                    (if (full) ", the whole page" else ", the visible part"),
+                    (if (full) ", the whole page" else ", the visible part") +
+                    "\nWrite it into your reply as ![what it shows]($rel)",
             )
         } catch (e: Throwable) {
             refusal("The picture was taken but could not be saved: ${e.message ?: "unknown reason"}")

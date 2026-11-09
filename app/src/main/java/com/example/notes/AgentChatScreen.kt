@@ -125,6 +125,20 @@ fun AgentChatScreen(
     // `feature`'s chat must not appear in main's when the person switches branch.
     var draft by remember(project, viewModel.chatBranch) { mutableStateOf("") }
     /**
+     * **Where a path in a message points: the branch's working tree.**
+     *
+     * The same folder every tool composes its paths from — `AgentTools.projectDir` is
+     * `ws.treeOf(project, branch)` — so the address the agent was *given* is the address the person
+     * can *press*, with no translation and therefore no way for the two to disagree. `shot` answers
+     * with `agent/browser/shot-1.png`, and that is exactly what `![]()` beside it means.
+     *
+     * Null when there is no workspace, which the renderer answers honestly: a picture says it could
+     * not be read here rather than drawing an empty frame.
+     */
+    val base = viewModel.workspace?.treeOf(project, viewModel.chatBranch)
+    /** What a link in a message does — see [AppViewModel.followChatLink]. */
+    val onLink: (String) -> Unit = { address -> viewModel.followChatLink(address) }
+    /**
      * **Which bubble is open, by the row's id** — 0 for none.
      *
      * Not a position in the list: a position moves when anything before it is forgotten, and the
@@ -483,6 +497,8 @@ fun AgentChatScreen(
                                     page = Fullscreen(message, index)
                                     Trace.tap("message fullscreen", "#${message.id}")
                                 },
+                                base = base,
+                                onLink = onLink,
                             )
                         }
                         // **The reply being written, as a bubble where it will end up.**
@@ -547,6 +563,24 @@ fun AgentChatScreen(
                         )
                     }
                 }
+            }
+
+            // **The app's own sentence, where the person is looking.**
+            //
+            // Only the browser drew `viewModel.message`, so a refusal raised while the chat was on
+            // screen had nowhere to land — a path that names no file, a link that leaves the account,
+            // a send that could not start. The chat is a screen; the app says what it did there too.
+            //
+            // `openChat` clears the line, so what appears here was said during this conversation.
+            viewModel.message?.let { said ->
+                Text(
+                    said,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
             }
 
             // **No divider, and no box around the field.** The operator's report: "I want write to
@@ -733,7 +767,16 @@ fun AgentChatScreen(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     if (shown != null) {
-                        PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
+                        // **The same base and the same rule as the bubble.** A picture drawn in the
+                        // list and gone in fullscreen would be the same message read two ways.
+                        PageBody(
+                            page = shown,
+                            cap = 0,
+                            ink = MaterialTheme.colorScheme.onSurface,
+                            expanded = true,
+                            base = base,
+                            onLink = onLink,
+                        )
                     }
                 }
             }
@@ -938,6 +981,9 @@ private fun MessageRow(
     cap: Int,
     onTurn: (Int) -> Unit,
     onFullscreen: (Int) -> Unit,
+    /** Where a relative path in this message points, and what pressing one does. */
+    base: File?,
+    onLink: (String) -> Unit,
 ) {
     val mine = message.side == AgentChat.Side.OPERATOR
     // **Two colours, and they are surfaces rather than text colours.** The sides have to be told
@@ -1096,6 +1142,8 @@ private fun MessageRow(
                 ink = ink,
                 expanded = false,
                 onExpand = { onFullscreen(at) },
+                base = base,
+                onLink = onLink,
             )
         }
         Text(
@@ -1168,6 +1216,15 @@ private fun PageBody(
      * offering to open what is already open.
      */
     onExpand: (() -> Unit)? = null,
+    /**
+     * Where a relative path in this page points, and what pressing one does.
+     *
+     * **The two travel together**, because they are the same question asked twice: what does
+     * `![](agent/browser/shot-1.png)` mean here, and where does `[notes](notes.md)` go. The chat
+     * answers both with the branch's tree.
+     */
+    base: File? = null,
+    onLink: ((String) -> Unit)? = null,
 ) {
     val lines = page.detail.ifBlank { page.body }.lines()
     // **Rows, not lines.** The operator's question: "limit on displayed lines doesnt account for
@@ -1204,7 +1261,12 @@ private fun PageBody(
     // is one target rather than a run of characters a long press can select.
     val body = if (cut && onExpand == null) shown + "\n… $hidden more rows — expand to read" else shown
     if (page.prose) {
-        MarkdownBody(text = body, modifier = Modifier.fillMaxWidth())
+        MarkdownBody(
+            text = body,
+            modifier = Modifier.fillMaxWidth(),
+            baseDir = base,
+            onLink = onLink,
+        )
     } else {
         // **The plain branch carries its own container.** A tool result is not markdown, so it does
         // not go through `MarkdownBody` and gets none of its per-block containers — and the caller

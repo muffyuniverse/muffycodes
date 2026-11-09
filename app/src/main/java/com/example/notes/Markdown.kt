@@ -300,6 +300,69 @@ object Markdown {
      * opening delimiter is not whitespace, and the one before the closing delimiter
      * is not either.
      */
+    /**
+     * **One annotation, so the two ways of writing a link cannot behave differently.**
+     *
+     * The listener lives on the annotation rather than on a clickable box around the paragraph:
+     * Compose resolves the tap from the character under the finger, so a paragraph holding several
+     * links can tell which one was pressed. `styles` is left null — the underline and the colour come
+     * from the `SpanStyle` the caller pushes, and a link style here would be a second opinion about
+     * how a link looks.
+     */
+    private fun clickable(
+        address: String,
+        onLink: (String) -> Unit,
+    ): LinkAnnotation.Clickable = LinkAnnotation.Clickable(
+        tag = address,
+        linkInteractionListener = object : androidx.compose.ui.text.LinkInteractionListener {
+            override fun onClick(link: LinkAnnotation) {
+                onLink(address)
+            }
+        },
+    )
+
+    /**
+     * Where a bare `http(s)://…` that starts at [at] ends, or [at] when there is none.
+     *
+     * **Three rules, and each one is a mistake a naive scan makes:**
+     *
+     * - **It must start at a boundary.** `xhttps://…` is a word with a scheme inside it, not a link.
+     * - **A closing bracket ends it, unless it opens one.** `(see https://a.example)` must not swallow
+     *   the parenthesis, and `https://en.wikipedia.org/wiki/Foo_(bar)` must not lose its tail — so
+     *   parentheses are counted rather than cut at.
+     * - **Trailing punctuation belongs to the sentence.** `Visit https://a.example.` links the address
+     *   and leaves the full stop outside it, which is the difference between a link that works and a
+     *   link that 404s on a full stop.
+     *
+     * A URL inside a `[words](address)` never reaches this: the `[` branch takes the whole of it
+     * first. Inside a backtick span or a code block it is not reached either, and that is the point —
+     * code is quoted, not navigated.
+     */
+    private fun urlEnd(text: String, at: Int): Int {
+        val scheme = when {
+            text.regionMatches(at, "https://", 0, 8) -> 8
+            text.regionMatches(at, "http://", 0, 7) -> 7
+            else -> return at
+        }
+        if (at > 0 && text[at - 1].isLetterOrDigit()) return at
+        var i = at + scheme
+        if (i >= text.length || text[i].isWhitespace()) return at
+        var parens = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c.isWhitespace() || c == '<' || c == '>' || c == '"' || c == '`') break
+            if (c == '(') parens++
+            if (c == ')') {
+                if (parens == 0) break
+                parens--
+            }
+            if (c == ']' && parens == 0) break
+            i++
+        }
+        while (i > at + scheme && text[i - 1] in ".,;:!?\'\"*_~") i--
+        return i
+    }
+
     private fun opens(text: String, at: Int, width: Int): Boolean =
         at + width < text.length && !text[at + width].isWhitespace()
 
@@ -377,6 +440,32 @@ object Markdown {
                     }
                 }
 
+                // **A bare address is a link too.**
+                //
+                // The operator, 2026-11-09: the agent should be able to give links to browse. An
+                // agent writes `https://example.com/x` far more often than `[x](https://…)`, and a
+                // renderer that only honours the second form makes the common answer dead text —
+                // the one thing a chat full of addresses must not do.
+                //
+                // **A code span and a code block are still not linked**, and they cannot be: a
+                // backtick span takes its text before this branch is reached, and `Block.Code` is
+                // drawn without going through the inline parser at all.
+                (ch == 'h' || ch == 'H') && onLink != null && urlEnd(text, i) > i -> {
+                    val end = urlEnd(text, i)
+                    flushPlain()
+                    val address = text.substring(i, end)
+                    val start = out.length
+                    out.withStyle(
+                        SpanStyle(
+                            textDecoration = TextDecoration.Underline,
+                            color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
+                            else linkColour,
+                        ),
+                    ) { append(address) }
+                    out.addLink(clickable(address, onLink), start = start, end = out.length)
+                    i = end
+                }
+
                 ch == '[' -> {
                     // `[words](address)` — the words are shown, the address is
                     // shown too. There is no browser here, and a link that looks
@@ -416,27 +505,7 @@ object Markdown {
                                     else linkColour,
                                 ),
                             ) { appendInline(this, words, linkColour, onLink) }
-                            out.addLink(
-                                LinkAnnotation.Clickable(
-                                    tag = address,
-                                    // **The listener lives on the annotation**, so Compose resolves
-                                    // the tap from the character under the finger. A clickable box
-                                    // around the paragraph could not tell which of several links was
-                                    // pressed.
-                                    //
-                                    // `styles` is left null: the underline and the colour come from
-                                    // the `SpanStyle` above, and a link style here would be a second
-                                    // opinion about how a link looks.
-                                    linkInteractionListener = object :
-                                        androidx.compose.ui.text.LinkInteractionListener {
-                                        override fun onClick(link: LinkAnnotation) {
-                                            onLink(address)
-                                        }
-                                    },
-                                ),
-                                start = start,
-                                end = out.length,
-                            )
+                            out.addLink(clickable(address, onLink), start = start, end = out.length)
                         } else {
                             out.withStyle(
                                 SpanStyle(
