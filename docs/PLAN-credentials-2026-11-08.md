@@ -1003,6 +1003,13 @@ Which is why the menu item only appears when there are two.
 | **L3** | `Transfer.kt` + `Worktrees.repoint`/`rename` split; move and copy with the refusals above; tests for a project with branches (history, branches, repointed pointers, `shared` link still working) |
 | **L4** | The row's ⋮ gains `Move to account…` and `Copy to account…`, offered when there are two accounts, with a destination list |
 
+**All four landed** (`80a23d8d`, `42513743`, `5fba7232`, `7c7e12e6`, `35d6c687`):
+`adoptProvisional` and its call are deleted, `ensureProvisional()` runs on every start as creation rather than
+recreation, `Transfer.kt` moves or copies a project with its worktrees repointed, the two origin doors refuse
+in `~local`, and the row's menu offers both modes. Two measured lessons, both in the code as comments:
+`Result.Success`/`Failure` are **internal**, so an outcome is asked through `exceptionOrNull()`; and a phone
+that has signed in now lists **`~local` as a row too**, which is the rule working — three rows, three menus.
+
 **L1 and L2 before L3**, because the transfer has to refuse a connected project entering `~local`, and that
 rule is L2's. **L3 before L4**, so the menu has something to call.
 
