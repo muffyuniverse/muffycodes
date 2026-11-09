@@ -89,12 +89,14 @@ class ModelConfigTest {
      */
     @Test
     fun `the connection's address is stored when it is not the shipped one`() {
-        val own = ModelConfigFile.default().copy(baseUrl = "http://192.168.1.9:8000/v1")
+        val own = ModelConfigFile.default().copy(
+            active = ModelConfigFile.default().active.copy(baseUrl = "http://192.168.1.9:8000/v1"),
+        )
         ModelConfigFile.write(account, own)
         assertEquals(
             "round trip",
             "http://192.168.1.9:8000/v1",
-            ModelConfigFile.load(account).getOrThrow().baseUrl,
+            ModelConfigFile.load(account).getOrThrow().active.baseUrl,
         )
 
         // **The shipped one is not written**, so an OpenRouter account's file does not sprout an
@@ -107,7 +109,7 @@ class ModelConfigTest {
         assertEquals(
             "and reading it answers the default",
             OPENROUTER_BASE,
-            ModelConfigFile.load(account).getOrThrow().baseUrl,
+            ModelConfigFile.load(account).getOrThrow().active.baseUrl,
         )
     }
 
@@ -182,9 +184,10 @@ class ModelConfigTest {
 
     @Test
     fun `an old file with embedding, rerank and baseUrl still loads`() {
-        // **Ignored, not refused.** The build before this one wrote those blocks, and refusing a
-        // person's own config over a field that no longer means anything would be a file the app that
-        // wrote it can no longer open. The chat model's address is `active.baseUrl`, which is read.
+        // **The two model blocks are ignored, not refused.** The build before this one wrote them, and
+        // refusing a person's own config over a field that no longer means anything would be a file the
+        // app that wrote it can no longer open. `baseUrl` is different: it is still the chat model's
+        // address when no connection names one, so it is read rather than dropped.
         val old = """
             {
               "version": 1,

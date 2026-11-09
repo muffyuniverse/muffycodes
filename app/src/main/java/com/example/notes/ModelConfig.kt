@@ -149,6 +149,10 @@ object ModelConfigFile {
             put("model", config.active.model)
             put("effort", config.active.effort)
         })
+        // **Written only when it is not the shipped one.** A file the app writes stays the file it
+        // wrote before, so an OpenRouter account's config does not sprout an address it never chose —
+        // and the absence of the field keeps meaning "the default", not "empty".
+        if (config.active.baseUrl != OPENROUTER_BASE) put("baseUrl", config.active.baseUrl)
     }
 
     /**
@@ -187,10 +191,28 @@ object ModelConfigFile {
         // says nothing about the rest, so a file edited by hand (a comment, a leftover name) loads
         // instead of refusing — refusing would make the file unopenable by the app that wrote it.
 
-        // **A `baseUrl`, `embedding` or `rerank` block is ignored rather than refused**, and that is
-        // the one place this parser is forgiving: a file written by the build before this one holds
-        // them, and refusing to load it would be refusing a person's own config over a field that no
-        // longer means anything. The chat model's address is `active.baseUrl`, which is read above.
+        // **A `embedding` or `rerank` block is ignored rather than refused**, and that is the one
+        // place this parser is forgiving: a file written by the build before this one holds them, and
+        // refusing to load it would be refusing a person's own config over a field that no longer
+        // means anything.
+
+        // **The address, if the file carries one.** Absent means the shipped default, which is what
+        // every config written before this field existed means — and what a person who typed nothing
+        // would expect. A value that is present must look like an address, because "openai" in this
+        // field would produce a relative URL and an error nobody could act on.
+        //
+        // **It is the chat model's address** (`active.baseUrl`), and since §2.2 of the credentials
+        // plan it is only the *fallback*: the connection in the vault names the host when it names one.
+        // Reading it here keeps a hand-written file working, which is the whole reason it exists.
+        val base = root.optString("baseUrl").trim()
+        if (base.isNotEmpty() && !base.startsWith("http://") && !base.startsWith("https://")) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "baseUrl must start with http:// or https:// — it is an address, " +
+                        "like https://openrouter.ai/api/v1",
+                ),
+            )
+        }
 
         // **The model is read before the address**, because the address is what the model is asked
         // at and a config with no model cannot be asked anything at all.
