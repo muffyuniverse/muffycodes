@@ -1256,8 +1256,8 @@ template selected" means.
 |---|---|---|
 | **N0** | `shared` → the app's folder: a second root in `partsOf`/`relative`/`projectOf`, `linkSystem`'s base, the ~8 `File(accountDir, SYSTEM_PROJECT)` sites, `ensure()` made independent of an account | first, because everything else needs a place to live that is not an account |
 | **N1** | Delete `~local`: `PROVISIONAL`, `ensureProvisional`, `isProvisional`, `localOriginSaid`, `removeAccount`'s refusal, `Transfer`'s `toIsLocal`, `AddProjectDialog(fromAddress=…)`, the hidden `Set the address…`, `PROVISIONAL_AUTHOR`, `createLocalProject`; **and F2's starter project with it**, since it only existed to make `~local` non-empty | second: every one of these is a branch of code whose condition can no longer be true |
-| **N2** | The act doors speak: the 58 `workspace ?: return` sites are now reachable, so every *act* sets `message`; read doors keep answering empty | third, and it must be its own step: it is the one that can rot silently |
-| **N3** | Onboarding, now that it has a home: one boolean, the folder read from the app's `shared/`, page 06 and the `app:` machinery deleted (F3's decision, unchanged) | after N1, because the pages were the `~local` account's property |
+| **N2** | The act doors speak: the 58 `workspace ?: return` sites are now reachable, so every *act* sets `message`; read doors keep answering empty | **landed** (`5d86cdbd`, `0bafbc70`, `9cdde465`): `workspaceFor(done)` — one helper taking the act's past tense — replaced **26** act sites, two acts kept their own words, and `NoAccountFeatureTest` holds both halves (a read must leave an existing message alone, not merely be silent). 21 sites remain: the reads, the background passes and the internal helpers |
+| **N3** | Onboarding, now that it has a home: one boolean, the folder read from the app's `shared/`, page 06 and the `app:` machinery deleted (F3's decision, unchanged) | **code side landed** (`bc002504`, `5bf52f00`, `4def3506`): the app's folder is seeded at start-up with no account, `openOnboarding` reads it with no workspace, `app:` links resolve through `inAppFolder()` instead of `workspace.relative`. **Still open:** the seven-page journey and the deletion of page 06 with the `app:` machinery (N5b), and the `app:connect-*` links on page 06 still exist |
 | **N4** | The accounts screen is the landing screen: no workspace means the empty state with **two doors — GitHub (device flow) and a manual host** | after N1, so "no workspace" is a state the screen can actually be in |
 | **N5** | The chat's template button + auto-open picker; the branch screen loses the picker | after §3.8's library exists (F6) — before it, there is nothing to list |
 | **N5b** | The popup's three sentences (§3.11.6) and the seven pages, written as one sequence | with N5: the popup and the pages say the same thing about the same folders, and writing them apart is how they drift |
@@ -1277,6 +1277,22 @@ the request library's `requests/`.
 Three fixtures had to be told the truth twice: a folder that is no longer an entry (`VisibilityFeatureTest`'s
 three lists), a test that asserts the old path is *gone* — which a careless rewrite turned into a tautology —
 and six more sites that built `<account>/shared` by hand where `systemDir` is the call the app makes.
+
+**N1 landed** (`270a8066`, `bc002504`): `~local` is deleted outright — `provisional`, `isProvisional`,
+`ensureProvisional`, `PROVISIONAL`, `localOriginSaid`, `AccountStore.remove`'s guard, `Transfer.toIsLocal`,
+`AddProjectDialog(fromAddress = …)`, `createLocalProject`, and F2's starter project with it. The only
+`accounts.save` callers left are inside `addAccount`, which is what makes "no account can be made without a
+key" a fact about the code rather than a convention.
+
+**What §3.11 could not have predicted, and did not:** removing the provisional account turned
+`workspace ?: return` from a dead branch into the state a phone *starts* in. That is N2's whole subject, and
+it is why the step could not be folded into N1 — the audit only becomes meaningful once the state is real,
+and it is the kind of audit that rots silently if it is done before the change it is about.
+
+**N2 and N3 are done as far as the code goes** (see the table above). What remains of §3.11 is the writing:
+N4 (the accounts screen as the landing screen, two doors), N5/N5b (the chat's template button, the popup's
+three sentences, the seven pages), and N6 (minting writes a vault row and asks its scope). N5 waits on **F6**
+(the JSONC library) because a picker with nothing to list is a picker that shows an empty window.
 
 ## 4. Cost is removed
 

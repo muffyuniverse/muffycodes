@@ -588,7 +588,11 @@ class AgentRunnerTest {
             door = { _, _ -> door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        val release = runner.hold("shopping")
+        // **The hold is the guard, so the test must hold what the guard compares.** It spelled the
+        // project name once, where a turn holds `project/branch`; `polling()` therefore never matched
+        // and the tick could wake the session under the screen — which is the defect the test exists to
+        // prevent, passing or failing on whether a result happened to be ready at that instant.
+        val release = runner.hold("shopping", AgentSession.MAIN)
         bg.startHere(Call("c1", "search", "{}")) { "0 one" }
         runner.tick(5_001)
         assertEquals("nothing went out while the screen had it", 0, door.asked.size)

@@ -170,12 +170,19 @@ class AgentRunner(
         agentId(project, branch) in polling()
 
     /**
-     * Says "a turn is being taken for [agent]" until the returned function is called.
+     * Says "a turn is being taken for this worktree" until the returned function is called.
      *
      * Separate from [inFlight] rather than the same set: a turn and a ping may overlap for a moment
      * (a ping in flight while the person types), and one finishing must not release the other's claim.
+     *
+     * **A project and a branch, not an id.** It took an id once, and a caller that spelled
+     * `hold("shopping")` where the guard compares `hold("shopping/main")` was holding nothing at all —
+     * the same silence [isBusy]'s comment warns about, in the one place it was not prevented. A turn
+     * whose hold does not match its own id is a turn the tick can wake underneath, which is exactly
+     * what this function exists to stop.
      */
-    fun hold(agent: String): () -> Unit {
+    fun hold(project: String, branch: String = AgentSession.MAIN): () -> Unit {
+        val agent = agentId(project, branch)
         synchronized(inFlight) { held += agent }
         return { synchronized(inFlight) { held -= agent } }
     }

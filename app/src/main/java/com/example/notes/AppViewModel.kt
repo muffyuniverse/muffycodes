@@ -4234,7 +4234,7 @@ class AppViewModel @JvmOverloads constructor(
         // **Held by the worktree's key**, because the same conversation is what the tick must not
         // wake: `feature`'s agent and `main`'s are two turns, and one holding the other's claim would
         // be a turn nobody can start.
-        val release = runner?.hold(AgentSession.keyOf(project, branch))
+        val release = runner?.hold(project, branch)
         onWorker {
             try {
                 val log = AgentLog.open(ws.treeOf(project, branch))
