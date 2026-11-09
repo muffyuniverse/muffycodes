@@ -447,10 +447,10 @@ class AccountsFeatureTest : FeatureTest() {
 
     @Test
     fun `an app link in a locked onboarding page is followed`() {
-        val dir = File(
-            scene.viewModel.workspace!!.systemDir,
-            Onboarding.DIR,
-        )
+        // **The app's folder, asked of the store rather than of a workspace.** This class runs with
+        // nobody signed in, and with no account shipped (§3.11) that means no workspace — while the
+        // introduction is still there, because it is the app's.
+        val dir = File(scene.viewModel.accounts.sharedDir, Onboarding.DIR)
         val page = File(dir, Onboarding.pages().last().name)
         scene.viewModel.followLink("app:use-token", page.parentFile)
 
@@ -487,10 +487,7 @@ class AccountsFeatureTest : FeatureTest() {
 
         val beforeAction = Trace.report().taps
         val page = File(
-            File(
-                scene.viewModel.workspace!!.systemDir,
-                Onboarding.DIR,
-            ),
+            File(scene.viewModel.accounts.sharedDir, Onboarding.DIR),
             Onboarding.pages().last().name,
         )
         scene.viewModel.followLink("app:connect-github", page.parentFile)
@@ -580,9 +577,10 @@ class AccountsFeatureTest : FeatureTest() {
         try {
             scene.await("onboarding to open") { scene.viewModel.onboarding }
             // **The page as a File**, because that is what the editor opens: `pages()` returns
-            // name-and-text pairs, and the file lives in the system project's onboarding folder.
+            // name-and-text pairs, and the file lives in the app's onboarding folder (§3.11) — which
+            // exists with no account, which is why this class can reach it.
             val connect = File(
-                File(scene.viewModel.workspace!!.systemDir, Onboarding.DIR),
+                File(scene.viewModel.accounts.sharedDir, Onboarding.DIR),
                 Onboarding.pages().last().name,
             )
             assertTrue("the page is on disk: $connect", connect.isFile)

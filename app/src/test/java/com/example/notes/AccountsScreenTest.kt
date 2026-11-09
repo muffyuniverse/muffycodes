@@ -197,15 +197,15 @@ class AccountsScreenTest {
     }
 
     @Test
-    fun `removing the last real account leaves the local workspace, not a blank screen`() {
-        // **The empty state is unreachable, and that is the design.** The local account cannot be
-        // removed (§3.9: *"make ~local undeletable … so that local always exist"*), so the menu always
-        // has at least one row. An empty list would mean a screen that could not act, and this is the
-        // assertion that the floor is really there.
+    fun `removing the last account leaves the empty state, which says how to begin`() {
+        // **The empty state is reachable now, and it is where a new phone starts.** There is no
+        // account an app can ship (§3.11), so a phone whose last account was removed has none — and
+        // the screen that answers that is this one, with its explanation and its `+ Add`, rather
+        // than a workspace belonging to nobody.
         scene.viewModel.removeAccount(scene.login, deleteCopies = true)
         accounts()
 
-        compose.onNodeWithText("~local").assertIsDisplayed()
-        compose.onNodeWithText("No accounts yet").assertDoesNotExist()
+        compose.onNodeWithText("No accounts yet").assertIsDisplayed()
+        compose.onNodeWithText("+ Add").assertIsDisplayed()
     }
 }

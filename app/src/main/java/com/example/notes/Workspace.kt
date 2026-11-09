@@ -118,6 +118,11 @@ class Workspace(
      */
     fun ensure() {
         accountDir.mkdirs()
+        // **The app's folder too, because it is what every account reads.** One call site for "this
+        // workspace is ready" is worth more than the purity of keeping the two apart: a caller that
+        // ensured an account and then found the system prompt missing would be a caller that has to
+        // know about two folders.
+        ensureAppFolder()
         ensureSystemLinks()
     }
 

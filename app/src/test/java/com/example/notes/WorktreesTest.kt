@@ -333,7 +333,9 @@ class WorktreesTest {
         projectWithBranch()
         workspace.ensure()
         val tree = trees.make("Shopping", "feature").getOrThrow()
-        val readme = File(workspace.systemDir, Workspace.README)
+        // **The app's own folder, which `ensure()` seeds** (§3.11) — the README is written there by
+        // the app rather than by an account, so the probe exists on the first call.
+        val readme = File(workspace.appDir, Workspace.README)
         assertTrue("the folder the link points at has a file in it", readme.isFile)
 
         trees.remove("Shopping", "feature")

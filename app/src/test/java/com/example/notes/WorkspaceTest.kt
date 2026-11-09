@@ -212,9 +212,12 @@ class WorkspaceTest {
     @Test
     fun `deleting a project does not empty the shared folder it links to`() {
         // **The defect the link would have introduced.** `File.deleteRecursively()` follows a symlink, so
-        // deleting a project would walk into the account's shared folder and delete its contents first.
+        // deleting a project would walk into the app's shared folder and delete its contents first.
+        //
+        // **The folder is outside the account now** (§3.11), which makes the walk worse rather than
+        // better: it would leave the account entirely. The probe is the README, written by the app.
         workspace.ensure()
-        val shared = workspace.systemDir
+        val shared = workspace.appDir
         val readme = File(shared, Workspace.README)
         assertTrue("the folder has something in it", readme.isFile)
         val proj = workspace.projectDir("Shopping")
@@ -276,7 +279,13 @@ class WorkspaceTest {
     // ---- onboarding: written, versioned, and locked ---------------------------
 
     /** The folder the pages go in. */
-    private fun onboardingDir() = File(workspace.systemDir, Onboarding.DIR)
+    /**
+     * Where the pages are: **the app's own folder, one per phone** (§3.11) — not the account's.
+     *
+     * The stamp lives beside them, so a revision replaces them once for the whole phone rather than
+     * once per identity.
+     */
+    private fun onboardingDir() = File(workspace.appDir, Onboarding.DIR)
 
     @Test
     fun `the onboarding pages are written into the shared folder`() {
