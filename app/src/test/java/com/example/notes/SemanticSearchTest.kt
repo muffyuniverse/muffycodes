@@ -437,8 +437,8 @@ class SemanticSearchTest {
         // **The index remembers the model id** — read from the template when it was built, because a
         // template can be edited to ask for another model while its name stays the same. The sentence
         // names both ids and the file that asks for the second, which is what a person can act on.
-        assertTrue("naming the model that built it: $said", said.contains("embedding"))
-        assertTrue("and the model asked for now: $said", said.contains("other"))
+        assertTrue("naming the model that built it: $said", said.contains("test/embed"))
+        assertTrue("and the model asked for now: $said", said.contains("other/embed"))
         assertTrue("and the template that asks: $said", said.contains("other.json"))
         assertTrue("and that they cannot be compared: $said", said.contains("cannot be compared"))
         assertTrue("and what empties it: $said", said.contains("emptied"))
