@@ -3695,26 +3695,25 @@ class AppViewModel @JvmOverloads constructor(
         val toIsLocal = accounts.isProvisional(toLogin)
         Transfer.problem(ws, to, project, toIsLocal)?.let { message = it; return false }
         val verb = if (copy) "Copied" else "Moved"
-        return when (val done = Transfer.go(ws, to, project, copy)) {
-            is Result.Success -> {
-                // **The screen cannot be showing what left.** A moved project's path names a folder that
-                // is no longer in this account, so the browser goes back to the account root rather than
-                // drawing a row for a folder that has gone; a copy leaves the screen alone.
-                if (!copy && currentProject == project) {
-                    path = emptyList()
-                    editingPath = null
-                    historyPath = null
-                }
-                refresh()
-                message = "$verb \"$project\" to $toLogin."
-                Trace.tap(if (copy) "copy project" else "move project", "$project -> $toLogin")
-                true
-            }
-            is Result.Failure -> {
-                message = done.exceptionOrNull()?.message ?: "\"$project\" could not be transferred."
-                false
-            }
+        val done = Transfer.go(ws, to, project, copy)
+        // **One refusal, one sentence**, and it is the transfer's own: it names the folder it could not
+        // write and whether anything was left behind, which is what the person needs to know.
+        done.exceptionOrNull()?.message?.let {
+            message = it
+            return false
         }
+        // **The screen cannot be showing what left.** A moved project's path names a folder that is no
+        // longer in this account, so the browser goes back to the account root rather than drawing a
+        // row for a folder that has gone; a copy leaves the screen alone.
+        if (!copy && currentProject == project) {
+            path = emptyList()
+            editingPath = null
+            historyPath = null
+        }
+        refresh()
+        message = "$verb \"$project\" to $toLogin."
+        Trace.tap(if (copy) "copy project" else "move project", "$project -> $toLogin")
+        return true
     }
 
     fun deleteProject(project: String) {

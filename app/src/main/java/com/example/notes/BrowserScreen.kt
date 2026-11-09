@@ -1117,14 +1117,14 @@ private fun ProjectList(
                                     text = { Text("Move to account…") },
                                     onClick = {
                                         menu = false
-                                        onRowTransfer(name, false)
+                                        onTransfer(name, false)
                                     },
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Copy to account…") },
                                     onClick = {
                                         menu = false
-                                        onRowTransfer(name, true)
+                                        onTransfer(name, true)
                                     },
                                 )
                             }
