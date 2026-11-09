@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -63,6 +64,9 @@ object Schemas {
 
     /** The suffix every schema has. A file without it is not offered, so a note can live here too. */
     const val SUFFIX = ".json"
+
+    /** Where the worktree pointers live, under `.muffy/` — the app's own state, beside `agents.json`. */
+    const val POINTERS = "schemas.json"
 
     fun dir(accountDir: File): File = File(accountDir, DIR)
 
@@ -128,6 +132,55 @@ object Schemas {
         if (!clean.endsWith(SUFFIX)) return "A schema's name must end in $SUFFIX."
         if (clean.length > 64) return "That name is too long; keep it under 64 characters."
         return null
+    }
+
+    /**
+     * **Which template a worktree runs** — `chat.json`, say, keyed `project/branch`.
+     *
+     * Stored beside `agents.json` in `.muffy/`, and **not inside the session**: a template is chosen when
+     * the branch is made, which is before any agent has ever run, so a session record would be the wrong
+     * home for it — and forgetting a session would silently forget its request.
+     *
+     * One file, read and written whole, keyed exactly as [AgentSession.keyOf] keys a session: `main`
+     * keeps the bare project name, a branch is `project/branch`.
+     */
+    fun pointerFile(accountDir: File): File =
+        File(File(accountDir, Workspace.STATE_DIR), POINTERS)
+
+    /** The template [project] on [branch] runs, or null when it has not chosen one. */
+    fun pointer(accountDir: File, project: String, branch: String): String? {
+        val file = pointerFile(accountDir)
+        if (!file.isFile) return null
+        val root = try {
+            JSONObject(file.readText())
+        } catch (e: Exception) {
+            // **A broken file is "nobody has chosen"**, not a crash on every tick: the sessions beside it
+            // are the app's record of what is running, and losing a template pointer must not take that
+            // with it. The refusal the agent gets names the picker, so the person can set it again.
+            return null
+        }
+        return root.optString(AgentSession.keyOf(project, branch)).trim().takeIf { it.isNotEmpty() }
+    }
+
+    /** Points [project] on [branch] at [name], or forgets the pointer when [name] is blank. */
+    fun setPointer(accountDir: File, project: String, branch: String, name: String) {
+        val file = pointerFile(accountDir)
+        val root = if (file.isFile) {
+            try {
+                JSONObject(file.readText())
+            } catch (e: Exception) {
+                JSONObject()
+            }
+        } else {
+            JSONObject()
+        }
+        val key = AgentSession.keyOf(project, branch)
+        val clean = name.trim()
+        if (clean.isEmpty()) root.remove(key) else root.put(key, clean)
+        file.parentFile?.mkdirs()
+        // **Written whole and atomically**, because the runner reads it on every tick from another
+        // worker: a half-written file is every branch's pointer gone at once.
+        Beside.write(file, root.toString(2))
     }
 
     /**

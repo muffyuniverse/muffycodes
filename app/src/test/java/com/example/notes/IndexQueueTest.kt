@@ -277,11 +277,10 @@ class IndexQueueTest {
      */
     private fun Config(embedding: PickedModel?) = ModelConfig(
         active = ActiveModel("chat/model", "high"),
-        models = emptyList(),
         embedding = embedding,
     )
 
     private companion object {
-        val PICK = PickedModel("test/embed", "test", dimensions = 4)
+        val PICK = PickedModel("embedding.json", dimensions = 4)
     }
 }

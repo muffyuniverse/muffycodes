@@ -335,7 +335,6 @@ class ConnectionsTest {
 
     private val account = ActiveModel(
         model = "deepseek/deepseek-v4.1-flash",
-        provider = "deepseek",
         effort = "high",
         baseUrl = "https://openrouter.ai/api/v1",
     )
@@ -394,10 +393,12 @@ class ConnectionsTest {
         assertEquals("https://models.example.org/v1", wired.active.baseUrl)
         assertEquals("low", wired.active.effort)
         assertEquals("sk-the-project-key", wired.key())
+        // **The address is the upstream**, and `providerOf` is the one place a sentence gets a word for
+        // it — so the assertion that used to read `active.provider` reads the host the address names.
         assertEquals(
-            "and the word for the address is the host, because nobody named one",
+            "and the word for the address is the host",
             "models.example.org",
-            wired.active.provider,
+            providerOf(wired.active.baseUrl),
         )
     }
 

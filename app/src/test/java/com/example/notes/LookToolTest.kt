@@ -123,37 +123,14 @@ class LookToolTest {
         assertEquals("the role is the operator's, the only one allowed mid-array", "user", carrying[0].role)
     }
 
-    @Test
-    fun `a blind model is refused in words rather than sent an image it would ignore`() {
-        picture(64, 64)
-        val body = tools(sees = { false }).run(
-            Call("c1", "look", """{"paths":["shot.png"]}"""),
-        )
-
-        assertTrue("a refusal: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue(
-            "which says why: $body",
-            body.contains("cannot see pictures"),
-        )
-        // **And nothing was written.** A refusal that had already attached the picture would leave a
-        // note behind that the next request would honour.
-        assertEquals("no see note", 0, log.rows().count { it.kind == AgentLog.NOTE && it.name == "see" })
-    }
-
-    @Test
-    fun `a model that can see, and a tool set that was never told, both proceed`() {
-        // **Null is not "no".** Every existing test builds tools without a model, and the app passes
-        // the real answer. If null meant "cannot see", every one of those tests would break and the
-        // default would be a refusal nobody asked for.
-        picture(64, 64)
-        assertTrue("told it can see", tools(sees = { true }).run(
-            Call("c1", "look", """{"paths":["shot.png"]}"""),
-        ).startsWith(AgentLog.SUCCESS))
-        picture(64, 64, "second.png")
-        assertTrue("never told", tools(sees = null).run(
-            Call("c2", "look", """{"paths":["second.png"]}"""),
-        ).startsWith(AgentLog.SUCCESS))
-    }
+    /*
+     * **The "blind model" tests are gone with the answer they relied on.**
+     *
+     * `modelSees` was fed by `architecture.input_modalities`, which is one of OpenRouter's own fields and
+     * part of no chat protocol — so a server that does not publish it left the app guessing, and the
+     * guess was a refusal in the app's words where the server's would have been the truth. A model that
+     * cannot see a picture now says so itself, in the reply to the request that carried it.
+     */
 
     @Test
     fun `nothing usable is a refusal, not a success with a complaint`() {

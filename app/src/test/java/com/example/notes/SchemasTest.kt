@@ -278,6 +278,70 @@ class SchemasTest {
         )
     }
 
+    // ---- which template a worktree runs ---------------------------------------
+
+    @Test
+    fun `a worktree that has chosen nothing says so rather than guessing`() {
+        // **No pointer, no request.** A fresh branch runs nothing until somebody names a template, which
+        // is what makes "the picker is the choice" true — a default here would spend the key on a model
+        // nobody chose for this worktree.
+        assertEquals(null, Schemas.pointer(account, "Shopping", "main"))
+        assertEquals(null, Schemas.pointer(account, "Shopping", "feature/x"))
+    }
+
+    @Test
+    fun `a pointer is per worktree, and main is the bare project name`() {
+        Schemas.setPointer(account, "Shopping", "main", "chat.json")
+        Schemas.setPointer(account, "Shopping", "feature/x", "slow.json")
+
+        assertEquals("chat.json", Schemas.pointer(account, "Shopping", "main"))
+        assertEquals("slow.json", Schemas.pointer(account, "Shopping", "feature/x"))
+        // **Two branches are two requests**, like two agents: a branch is a worktree and the request it
+        // runs is part of what that worktree is.
+        assertEquals("another project has none", null, Schemas.pointer(account, "Notes", "main"))
+    }
+
+    @Test
+    fun `a pointer lives beside the sessions, not inside one`() {
+        // **In `.muffy/`, keyed the way a session is keyed** — and in its own file, because a template is
+        // chosen when the branch is made, before any agent has run, and forgetting a session must not
+        // forget which request the branch runs.
+        Schemas.setPointer(account, "Shopping", "main", "chat.json")
+
+        assertEquals(
+            File(File(account, Workspace.STATE_DIR), "schemas.json"),
+            Schemas.pointerFile(account),
+        )
+        assertTrue("one file, not one per branch", Schemas.pointerFile(account).isFile)
+    }
+
+    @Test
+    fun `a blank name forgets the pointer`() {
+        Schemas.setPointer(account, "Shopping", "main", "chat.json")
+        Schemas.setPointer(account, "Shopping", "main", "  ")
+
+        assertEquals(null, Schemas.pointer(account, "Shopping", "main"))
+    }
+
+    @Test
+    fun `a file that will not parse reads as nobody having chosen`() {
+        // The sessions live in the next file over, and a damaged pointer file must not take the record of
+        // what is running with it — the refusal the agent gets names the picker.
+        Schemas.pointerFile(account).parentFile?.mkdirs()
+        Schemas.pointerFile(account).writeText("{ not json")
+
+        assertEquals(null, Schemas.pointer(account, "Shopping", "main"))
+    }
+
+    @Test
+    fun `writing one pointer keeps the others`() {
+        Schemas.setPointer(account, "Shopping", "main", "chat.json")
+        Schemas.setPointer(account, "Notes", "main", "slow.json")
+
+        assertEquals("chat.json", Schemas.pointer(account, "Shopping", "main"))
+        assertEquals("slow.json", Schemas.pointer(account, "Notes", "main"))
+    }
+
     // ---- names -----------------------------------------------------------------
 
     @Test
