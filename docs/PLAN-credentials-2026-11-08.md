@@ -319,33 +319,50 @@ reason the GitHub device flow was kept: it is a door onto a registration process
 so a branch-level embedding choice would silently invalidate an index built by another branch. The chat
 model may differ per branch; the vectors may not.
 
-### 3.5 The chat model is chosen at the scope that runs it — and Settings holds none
+### 3.5 The chat model is chosen at the scope that runs it — and the general settings are the root
 
-**Settings is the app's own settings, not any account's.** It keeps the embedding and rerank model (with
-their own key and endpoint, exactly as a scoped chat connection has) and nothing about chat.
+**Rewritten 2026-11-09, on the operator's correction.** This section used to say Settings holds no chat
+model at all. It holds the **root of the chain** instead:
 
-The chat model is chosen **per account, per project, per branch** — in the window that adds the thing, and
-in the ⋮ settings window of the row afterwards. Each window opens on the values it inherits and lets the
-person change any of them (§2.2's table says which fields inherit independently).
+> *"keep a rule that empty "" value means that it is inherited from the parent, while if lower settings
+> scope defines it, then overwrites — this way user will be able to change only what he needs and keep the
+> rest of the fields inherited. And we will get just one llm request schema button per settings window."*
 
-**Why the account is not the same as general.** An account is an identity; a project is one repository; a
-branch is one working tree. Chat *is* per identity — the log says who spent the tokens — so the account is
-the widest place a chat choice can live, and a new account asks for one. That is also why the service polls
-correctly with no "default model" anywhere: it polls as an account, so it asks that account.
+So there are **four places a chat setting may be written, and each is the same set of fields**:
 
-**Consequences, stated rather than discovered later:**
+| scope | what it is | where it is stored |
+|---|---|---|
+| general | the app's own settings screen | `model_conf.json`'s `active` + `model_key_` + `SettingsStore`'s numbers |
+| account | one identity | `conn_<login>_account_llm` (+`_choice`) — a row here overrides the general one |
+| project | one repository | `conn_<login>_project_<p>_llm` |
+| branch | one working tree | `conn_<login>_branch_<p>/<b>_llm` |
 
-- `model_conf.json` keeps only `embedding` and `rerank`. Its `active` block, and with it `ModelChoice`, the
-  `models` list, `providers`, `providersOf` and `ModelSection`'s chat rows, **go**: C2 stopped sending
-  provider tags, so the list only ever fed a pin that no longer exists.
-- **`ContextBudget.CEILINGS` loses its key.** It is a table of measured ceilings indexed by *provider tag*,
-  and there are no tags left to index. The numbers move to where they already half lived — stored with the
-  choice (`contextLength`, `maxOutput`) and filled from the endpoint read when a picker is used — and a
-  choice nobody measured falls through the existing ladder to the floor. Deleting the table without saying
-  where its numbers went would be losing a measurement, so the measured values move into the endpoint read's
-  defaults rather than into a table nothing indexes.
-- The runner already reads the model **per request** (`AgentWiring.kt:132`), and a session is already keyed
-  `project/branch`, so this is a seam rather than a redesign.
+**Every field is resolved on its own** (`wiredFor`, `Connections.kt`): branch → project → account →
+general. A branch that writes only a model keeps the project's address, key, shape, effort and three
+numbers. There is no "inherit" switch, because an empty field *is* the inheritance and a switch would be a
+second thing to keep in step with the text.
+
+**The fields, and there is one set of them:**
+
+- the **credential**: address, key, keyless, user (git only), and a shape per request kind
+- the **choice**: model, effort, and the three compaction numbers (target, forget, trim)
+- the **grant**: the checkmark that lets `auth: llm` / `auth: git` name it
+
+**There is no cap and no completeness rule.** A model id is a name the server assigns, so pointing a
+project at another server while inheriting the model is a request that server refuses — in its own words,
+naming the model it does not have. That is a better answer than a window that would not close, and it is
+the same feedback every number in the app now gets. **The one composition that is still refused is a key
+and a host** (`Wired.keyProblem`), because a key sent to the wrong server cannot be un-sent; every other
+mistake produces an error from somebody who knows better.
+
+**The ceiling is gone** (see `ContextBudget`): the operator's numbers are used as written, nothing is
+capped, nothing is derived, and the app no longer needs to know or display a model's window or reply
+reserve. That is why `ActiveModel.contextLength`/`maxOutput`, the pin table, the ladder, the clamp and the
+window-learning path are all deleted rather than re-homed — the *consumer* of those numbers was the clamp.
+
+**A window writes only the difference.** It opens on the values in force, so "left alone" and "typed the
+same" look identical in the text; `ConnectionDraft.changesAgainst` is what stops that from being stored,
+because a copy of the parent's value at a narrower scope stops following the parent.
 
 ---
 
@@ -384,27 +401,24 @@ and a column nobody reads is not a compatibility problem).
 | **C3** | Vault B: `conn_<scope>_<kind>` (kind `git` \| `llm`, scope branch/project/general), **the account answered from today's records** rather than a second copy (`token_` + `Account.host`/`gitUser`; `model_key_` + the address in `model_conf.json`); the ⋮ windows on account/project/branch rows; `ProjectGit` and the runner read it narrowest-first. Per §2.2 the pair is atomic and the choice inherits field by field, capped at the scope that supplied the pair. | **landed** (storage `a709173a`, readers `d526d073`…`63e34748`, windows `ddcdd591`): `Connections.kt` (the chain, the cap, `wiredFor`, `Wired`), `ProjectGit.gitConnection` + `GitCredentials.Answer.Use` carrying the **username**, the runner resolving **per project and per branch**, and both doors obeying one resolution. **The account scope has no row** — a second copy of a secret is what the design avoids — so there is no account column to open: its pair is the sign-in token and the model key, and its model/address is `model_conf.json` |
 | **C4** | The two checkmarks, off by default; `auth:` resolves a Vault B entry only when ticked and only for its host; the agent's tool description lists what it may name. | **landed** (`187a1e7c`): `Connection.nameable`, `namedConnection`/`kindFor`/`Credentials.spendable`, `auth: git`/`auth: llm` in `http`, a Checkbox in each window, and the refusal names both words |
 | **C5** | Cost removal (§4). | **landed** (`57e2d4e3`): `usage.cost` and the `reported` denominator are gone from the request shape, the database (raw + all three rollups), the statistics, the agent's SQL schema and every test; the heartbeat's fourth cell counts **requests** |
-| **C6** | Settings holds **no chat model at all**: it keeps embedding and rerank (key + endpoint + model + dimension). `model_conf.json` drops `active` and the `models` list; `ModelSection`'s chat rows, `ModelChoice`, `providers`/`providersOf` and the tag-keyed `ContextBudget.CEILINGS` go with them (§3.5). | **not started — the next step, and now unblocked.** The account scope became **writable** (`conn_<login>_account_llm`, `wiredFor` treating the account's records as the floor rather than a special case), so the account's model has a row to live in; C6 is what stops `model_conf.json` being a second place to say it. It is still a wide removal — `ModelSection`'s chat rows and their tests, `ModelChoice`, `providers`/`providersOf`, the tag-keyed `ContextBudget.CEILINGS` — and the account-scope floor has to keep answering for an account that has no row |
+| **C6** | **Landed 2026-11-09, in the shape §3.5 now describes** — the general settings are the root of the chain rather than emptied: the ceiling and everything that fed it are deleted (`ContextBudget`), the three compaction numbers live in the choice beside the model with the general settings as their root, the scoped window writes only the difference the person made, and the shape editor gained the Reset the operator asked for. | **landed** (`a5e3a8a4` … `10f9ad1a`): the numbers resolved per field (`wiredFor`), stored per scope (`Choice.target/forget/trim`), written by the window (three fields, `NumberField`), and used as written; `ActiveModel.contextLength/maxOutput`, `model_conf.json`'s two keys, `chooseModel`'s two arguments and `learnWindow` are gone. `ModelSection`'s chat rows and `ModelChoice` stay, because they are the general level's own editor. What did **not** happen: the numbers do not appear twice — Settings keeps the general three, and a scoped window shows the numbers in force and writes only what changed |
 
-### What C6 still needs before it is a removal rather than a regression
+### What C6 turned out to be, and what it is not
 
-`model_conf.json` holding `active` is not only a second place to name a model — it is, today, the only
-place where a chosen model's **window and reply ceiling** are written down. They come from the
-catalogue (`ModelSection`'s picker) and land in `Choice.contextLength`/`maxOutput`, which the context
-budget reads. A connection window that asks for a model id and nothing else therefore cannot take over
-from the picker: an account whose picker was deleted would have a model and no window, and
-`ContextBudget` would fall back to the unknown-model floor for every turn.
+The plan's own warning survives as a lesson: **the picker was the only place a model's size was written
+down.** Deleting it first would have left every account with a model and no window. The operator's
+decision removed the *consumer* instead — nothing clamps — which is why the picker could stay where it is
+and the numbers could go.
 
-So C6 is two steps wearing one name:
+What is still not built, and is deliberately not:
 
-1. **The window becomes the picker** — a list read from the connection's own `/models`, saving the
-   numbers the catalogue reported beside the model id. (The endpoint read already exists; this is where
-   it belongs now that the address is the connection.)
-2. **Then the removal**: `ModelSection`'s chat rows, `ModelChoice`, `providers`/`providersOf`, the
-   tag-keyed `ContextBudget.CEILINGS`, and `active` from the file — with the account's row (or the
-   shipped default when it has none) as the floor.
-
-Doing (2) first would remove the only way to say how big a model is.
+- **A single "request schema" row in place of the general model block.** The general level's editor is
+  still `ModelSection`'s block (model, provider, effort, rates) rather than one tappable row opening a
+  window. The *scoped* windows already have one shape button and the whole field set; making the general
+  one match is UI polish, not a rule.
+- **`ModelChoice`/`providers`/`providersOf`** still exist, because the general level still lists the
+  endpoints a person may pick. They are the general editor's data, not a routing mechanism (C2 stopped
+  sending tags).
 
 **Why C0 first.** It is the only step that fixes sentences the app is currently saying falsely, it is
 small, and every later step addresses a row by scope — so the addressing has to be right before a fourth

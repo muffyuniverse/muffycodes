@@ -383,7 +383,7 @@ object ModelConfigFile {
         }
         return Result.success(
             ModelConfig(
-                ActiveModel(model, provider, effort, window, reply),
+                ActiveModel(model, provider, effort),
                 models,
                 embedding = embedding,
                 rerank = rerank,
