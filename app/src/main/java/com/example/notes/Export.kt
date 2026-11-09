@@ -14,12 +14,16 @@ import java.io.File
  *
  * ## Why this is one function and not two
  *
- * A person reaches this from a project's ⋮ menu; the agent reaches it from a `downloads` call. **They
- * must be the same code**, because two implementations of "copy this to Downloads" drift in exactly the
- * ways that are hard to notice: one cleans the name and the other does not, one refuses a folder and the
- * other copies its contents, one overwrites and the other makes `name (1)`. A person who downloaded a
- * file and an agent that downloaded the same file should be able to compare notes and find them
- * identical.
+ * A person reaches this from a project's ⋮ menu, from a browser row's menu, and from the proof sheet.
+ * **Those are the same code**, because two implementations of "copy this to Downloads" drift in exactly
+ * the ways that are hard to notice: one cleans the name and the other does not, one refuses a folder and
+ * the other copies its contents, one overwrites and the other makes `name (1)`. A person who copied a
+ * file from one place and the same file from another should find the two identical.
+ *
+ * **The agent does not reach it.** It had three verbs — list, copy out, copy in — until 2026-11-09, and
+ * they were removed rather than repaired: the `MediaStore` read behind the listing answers only this
+ * app's own rows, so the agent could not see the file the person meant. A file reaches a project through
+ * `Imports`, and from there every tool works on it.
  *
  * ## Why no permission
  *

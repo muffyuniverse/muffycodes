@@ -952,7 +952,7 @@ private fun ProjectList(
     onGit: (String) -> Unit,
     /** A project going to another account — see [BrowserScreen]'s parameter. */
     onTransfer: (String, Boolean) -> Unit,
-    /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
+    /** Puts a file of the project into Downloads, through the same `Export` call as every other route. */
 ) {
     val names = viewModel.projectNames
     // **The system folder is a row here, and it is not a project** (§13f). It lives at the account root,
@@ -1535,8 +1535,8 @@ private fun EntryRow(
                         actions.onCopy(entry)
                     },
                 )
-                // **The same act the `upload` tool does**, through the same `Export` call, so a
-                // person's copy and an agent's cannot drift apart.
+                // **The same act as the ⋮ item on a project file**, through the same `Export`
+                // call, so a page's picture and a project's file cannot drift apart.
                 DropdownMenuItem(
                     text = { Text("Copy to Downloads") },
                     onClick = {

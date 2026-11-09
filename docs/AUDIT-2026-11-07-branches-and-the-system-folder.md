@@ -119,10 +119,12 @@ Checked and left alone, so a later reader does not re-open them:
 
 ## 5. What is still open, ranked by what it costs if it stays
 
-1. ~~**§13e — Downloads as a folder, via SAF.**~~ **REVERSED 2026-11-09 — the opposite is happening:**
-   the three verbs and `PhoneDownloads` are being **removed** rather than made true, because the
-   `MediaStore` read they depend on only ever answers the app's own rows (see
-   `PLAN-universal-2026-11-06` §13e.3). `DownloadsSink` — the app writing its own `trace.log` — stays.
+1. ~~**§13e — Downloads as a folder, via SAF.**~~ **DONE, THE OTHER WAY (2026-11-09):** the three verbs
+   and `PhoneDownloads` were **removed** rather than made true — 860 lines — because the `MediaStore` read
+   they depend on only ever answers the app's own rows (see `PLAN-universal-2026-11-06` §13e.3).
+   `DownloadsSink` — the app writing its own `trace.log` — stays, and so do `Export`/`Imports`.
+   **What this leaves open instead:** a `search.db` under `agent/` from a build before the removal is
+   orphaned, since the index that owned it is gone (`docs/REMOVED-2026-11-09-semantic-search-and-scanner.md`).
 2. **`MediaStore` has never run on a device.** Still true, and it is now only the trace log. `save-picture`
    and the export/import buttons are the other untested-on-a-device paths.
 3. **`push`/`pull` have never run against a real remote.** Every test uses `DiskGitHub`, which is real

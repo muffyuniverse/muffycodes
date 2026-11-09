@@ -133,14 +133,11 @@ class AgentToolsTest {
                 // `shot` makes a picture and nothing could consume one until `look` existed.
                 "look",
                 "ci", "runs",
-                // **The ones that move a file rather than words.** `artifact` fetches what a run
-                // produced; `downloads` lists the phone's folder, `download` copies out of it and
-                // `upload` is the only way anything leaves the project.
-                "artifact", "downloads", "download", "upload",
-                // **`archive` is what makes the `upload` sentence true.** It packs a folder into
-                // one file for that flat folder, and it unpacks a fetched dependency into the
-                // project — the two directions of one capability, which is why it is one tool.
-                "archive",
+                // **The one that moves a file rather than words.** `artifact` fetches what a run
+                // produced, `fetch` what an address answers, and `archive` is what makes several
+                // files one — packing a folder for somebody to open, and unpacking a fetched
+                // dependency into the project.
+                "artifact", "archive",
                 // **`fetch` is the missing primitive**, and it is the only tool that turns a URL
                 // into a file: `browse` gives a page's text, `shot` a picture, `artifact` one file
                 // from a CI run, and none of them takes an address.

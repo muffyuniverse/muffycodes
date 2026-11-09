@@ -2912,7 +2912,7 @@ class AgentTest {
         // written into the project, which is a change to the folder like any other. What replaced it
         // is `http`, which files its answer too.
         val writes = setOf(
-            "write", "delete", "move", "restore", "download", "archive",
+            "write", "delete", "move", "restore", "archive",
             "pull", "push", "http",
         )
         assertEquals("every writing tool, and only those", writes, AgentTools.CHANGES_DISK)

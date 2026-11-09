@@ -133,7 +133,14 @@ so. The chat model's address is `active.baseUrl`, which was always a different f
 
 ---
 
-## 5. How to attach it back
+## 5. A sentence that changed with a later removal
+
+`Export.kt`'s header used to say "a person reaches this from a project's ⋮ menu; the agent reaches it from a
+`downloads` call". The agent no longer has that call — the three Downloads verbs went on the same day, for a
+reason of their own (`PLAN-universal-2026-11-06` §13e.3) — so the header now says the person reaches it and
+the agent does not, and names `Imports` as how a file crosses in.
+
+## 6. How to attach it back
 
 `git revert <the commit named at the top of this file>` restores every file and every call site in one
 step. That is the reason the removal is one commit rather than two: **a revert target is worth more than a

@@ -2340,12 +2340,12 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Pins or unpins a file or folder (§2: the flags live in `.muffy`). */
     /**
-     * Copies [file] to the phone's Downloads — the ⋮ item, and the same act as the `upload` tool.
+     * Copies [file] to the phone's Downloads — the ⋮ item, and the person's own exit.
      *
      * **Report 23**: *"I should be able to clone/move to the downloads - add this as a choice"*. It
-     * goes through `Export.copyToDownloads`, which is exactly what `MediaStoreDownloads.write` calls,
-     * so a person's copy and an agent's are the same bytes by the same route — two implementations
-     * would drift in the ways nobody notices until a file arrives wrong.
+     * goes through `Export.copyToDownloads`, the same call the browser's row menu makes, so every
+     * route to Downloads is one implementation — two would drift in the ways nobody notices until a
+     * file arrives wrong.
      *
      * **The outcome is a message either way.** A copy that failed silently is a person who believes
      * the file is on their phone and finds it missing at the moment they needed it.

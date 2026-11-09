@@ -95,7 +95,6 @@ AgentToolsTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/ja
 EncryptedLogTest app/src/main/java/com/example/notes/EncryptedLog.kt
 ReleaseTest app/src/main/java/com/example/notes/Release.kt app/src/main/java/com/example/notes/Who.kt
 ExportTest app/src/main/java/com/example/notes/Export.kt
-DownloadsTest app/src/main/java/com/example/notes/Downloads.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Workspace.kt
 BrowseToolsTest app/src/main/java/com/example/notes/AgentTools.kt
 SearchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt

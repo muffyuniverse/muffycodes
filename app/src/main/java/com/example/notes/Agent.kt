@@ -172,12 +172,6 @@ class Agent(
      * secret" are two different refusals and only the second one is actionable.
      */
     private val credentials: Credentials? = null,
-    /**
-     * What cuts suspected instructions out of text brought in from outside the app.
-     *
-     * **Passed in rather than made here**, like the browser and the fetcher, and the default passes everything
-     * through — so an agent built without a decision does not silently cut sections of a page.
-     */
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /**
@@ -191,22 +185,6 @@ class Agent(
     private val fetchLimit: () -> Long = { Fetched.LIMIT_BYTES },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
     private val browseMs: () -> Long = { 0L },
-    /**
-     * GitHub, and the key to reach it with, or nulls when this project is not a GitHub one.
-     *
-     * **A function, not a value**, for the same reason the model is: a person can sign out or change
-     * the key while an agent is idle, and the key that applies is the one in force when the call
-     * arrives. Null means the CI tools refuse — a local project has no runs to read.
-     */
-    /**
-     * The phone's Downloads folder, or `PhoneDownloads.NONE` when the agent may not reach it.
-     *
-     * **Injected for the same reason the browser is**: `MediaStore` needs a `Context`, and an `Agent`
-     * built in a test must not need one. Null makes the tool refuse in words rather than fail at the
-     * last moment, which is the difference between a model that learns the app cannot do this and one
-     * that learns nothing.
-     */
-    private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
      * **What the screens are told when a command has changed the project on disk.**
      *
@@ -233,7 +211,6 @@ class Agent(
         mcp = mcp, credentials = credentials,
         httpAllowed = httpAllowed,
         fetchLimit = fetchLimit,
-        phone = phone,
         onDiskChanged = onDiskChanged,
         branch = branch,
     )

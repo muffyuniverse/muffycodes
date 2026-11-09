@@ -2181,6 +2181,14 @@ channel bought for a convenience nothing measured a need for.
 **Nothing is commented out.** The verbs are deleted; git holds them. `git revert` of the removal commit is
 the honest "attach it back later", and it cannot rot the way a commented-out call site does.
 
+**Landed 2026-11-09, 860 lines gone and 33 added** — `Downloads.kt`, `DownloadsTest`, the three verbs with
+their specs and their arguments, and the `phone:` parameter through `Agent` → `AgentRunner` → `AgentTools`
+→ `AgentWiring`. Two tests changed with it: `CHANGES_DISK` no longer lists `download` (a tool that was in
+`AgentToolsTest`'s expected name list and `AgentTest`'s expected writing set), and `ArchiveTest`'s "the
+`upload` description no longer tells the agent to zip files" went with the description it was checking.
+The prose that survived was rewritten rather than left pointing at a tool that is not there: `Export`'s
+header now says the person reaches it and the agent does not, and names `Imports` as the replacement.
+
 ### 13e.3 (as it was) The decision: one folder, `Download/Muffy/`, granted once, via SAF
 
 **A `DocumentFile` tree, not a `MediaStore` cursor.** The person picks `Download/Muffy/` once (the root
