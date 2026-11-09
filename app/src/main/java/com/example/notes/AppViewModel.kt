@@ -417,6 +417,29 @@ class AppViewModel @JvmOverloads constructor(
     private var cachedWorkspace: Pair<String, Workspace>? = null
 
     /**
+     * The account's tree, or null **after saying why** — for a door a person pressed.
+     *
+     * With no account open there is nothing to act on, and until §3.11 that state could not be reached:
+     * a provisional account always existed, so every one of these branches was dead and a silent
+     * `?: return` cost nothing. Now it is the state a phone starts in, and a silent return is a button
+     * that does nothing — the person presses "New file", the screen does not move, and there is no way
+     * to tell that apart from a broken app.
+     *
+     * **[done] is the act in the past tense**, because that is what a failure has to say: what happened.
+     * "No account is open, so nothing was created" is true of every door and names the outcome; a
+     * sentence built from the act's own words would have to be written twice, once for the door and once
+     * for the sentence, and the second copy is the one that goes stale.
+     *
+     * **Read doors do not ask this.** They answer empty (`?: return emptyList()`), because they run while
+     * a screen is being drawn, and setting a message in composition would redraw for ever.
+     */
+    private fun workspaceFor(done: String): Workspace? {
+        val ws = workspace
+        if (ws == null) message = "No account is open, so nothing was $done."
+        return ws
+    }
+
+    /**
      * Who commits. **An account's own identity, or the app's placeholder when there is none.**
      *
      * The placeholder is reachable only on a phone with no account — where nothing can be committed
@@ -985,7 +1008,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Writes the config and records it as a version, like any other change to the account. */
     private fun writeModelConfig(next: ModelConfig, what: String) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("written") ?: return
         ModelConfigFile.write(ws.accountDir, next)
         modelConfig = next
         modelConfigProblem = null
@@ -1927,7 +1950,7 @@ class AppViewModel @JvmOverloads constructor(
      * looking at it. The difference is only what the file's body is.
      */
     fun createImage(name: String, canvas: Look.Canvas): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("created") ?: return false
         val dir = currentDir ?: return false
         val asked = if (name.trim().contains('.')) name.trim() else "${name.trim()}.png"
         val result = ws.createImage(dir, asked, canvas)
@@ -1940,7 +1963,7 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun createFile(name: String): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("created") ?: return false
         val dir = currentDir ?: return false
         val asked = Workspace.withDefaultExtension(name.trim())
         val result = ws.createFile(dir, asked)
@@ -2020,7 +2043,7 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun createFolder(name: String): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("created") ?: return false
         val dir = currentDir ?: return false
         val result = ws.createFolder(dir, name)
         val made = result.getOrNull()?.name?.plus("/") ?: name.trim()
@@ -2039,7 +2062,7 @@ class AppViewModel @JvmOverloads constructor(
      * behind, and showing a name the file no longer had.
      */
     fun renameTo(file: File, newName: String): File? {
-        val ws = workspace ?: return null
+        val ws = workspaceFor("renamed") ?: return null
         // Silent, like saving: a locked file says so on its row and in the editor.
         if (isLocked(file)) return null
         val wasEditing = editingPath != null && editingPath == ws.relative(file)
@@ -2070,7 +2093,7 @@ class AppViewModel @JvmOverloads constructor(
      * quietly wrong — which is exactly what "keep only on this phone" did.
      */
     fun move(file: File, into: File): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("moved") ?: return false
         val was = ws.projectOf(file)?.takeIf { ws.inWorktree(file) }
         val now = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
         val result = ws.move(file, into)
@@ -2103,7 +2126,7 @@ class AppViewModel @JvmOverloads constructor(
      * sentence here rather than two: the copy is `milk.txt` or nothing happened.
      */
     fun copy(file: File, into: File): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("copied") ?: return false
         val now = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
         val result = ws.copy(file, into)
         if (result.isFailure) {
@@ -2120,7 +2143,7 @@ class AppViewModel @JvmOverloads constructor(
 
 
     fun delete(file: File): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("deleted") ?: return false
         // A lock is read-only in every direction: not written, not renamed, not
         // deleted. Only the screen was refusing, which is the same as not refusing.
         if (isLocked(file)) {
@@ -2152,7 +2175,7 @@ class AppViewModel @JvmOverloads constructor(
      * question is answered here and not by the screen alone.
      */
     fun toggleLocked(file: File) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("locked") ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
         // **Read from the workspace, not from this screen's copy of it.**
@@ -2185,7 +2208,7 @@ class AppViewModel @JvmOverloads constructor(
      * sent looks exactly like one that did not work.
      */
     fun ignoreInGit(file: File) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("ignored") ?: return
         val path = ws.relative(file) ?: return
         val project = ws.projectOf(file) ?: return
         val inside = insideOf(ws, file, path) ?: return
@@ -2226,7 +2249,7 @@ class AppViewModel @JvmOverloads constructor(
      * after the file is gone from a fresh clone. Measured, not assumed.
      */
     private fun setIgnored(file: File, project: String, inside: String, ignore: Boolean) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("ignored") ?: return
         Trace.tap(if (ignore) "ignore" else "track", inside)
         // **The tree the file is in.** A branch's `.gitignore` is that branch's file: writing main's
         // would change a document the person is not looking at, and the branch's own status would not
@@ -2361,7 +2384,7 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun togglePinned(file: File) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("pinned") ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
         // Named before the change, so the trace says which way the switch was pressed
@@ -2383,7 +2406,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Adds [file] to the selection, or takes it out. */
     fun toggleSelected(file: File) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("selected") ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
         Trace.tap(if (key in selected) "unselect" else "select", file.name)
@@ -2425,7 +2448,7 @@ class AppViewModel @JvmOverloads constructor(
      * anyway, so per-move commits would fold into one and cost a repository walk each.
      */
     fun moveSelected(into: File): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("moved") ?: return false
         val files = selectedFiles().filter { it.canonicalFile != into.canonicalFile }
         if (files.isEmpty()) {
             message = "Nothing is selected"
@@ -2485,7 +2508,7 @@ class AppViewModel @JvmOverloads constructor(
      * other side.
      */
     fun copySelected(into: File): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("copied") ?: return false
         val files = selectedFiles().filter { it.canonicalFile != into.canonicalFile }
         if (files.isEmpty()) {
             message = "Nothing is selected"
@@ -2555,7 +2578,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Deletes everything selected, in one recorded change. */
     fun deleteSelected(): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("deleted") ?: return false
         val files = selectedFiles()
         if (files.isEmpty()) {
             message = "Nothing is selected"
@@ -2898,7 +2921,7 @@ class AppViewModel @JvmOverloads constructor(
         // question about the repository: entering Diff and finding nothing to compare look the same
         // on the screen, and only the log can say which happened.
         Trace.tap("diff", path)
-        val ws = workspace ?: return
+        val ws = workspaceFor("compared") ?: return
         val project = currentProject ?: return
         val g = git ?: return
         // **Read before the post, not inside it.** `main.post` runs on the UI thread, and every one
@@ -3038,7 +3061,7 @@ class AppViewModel @JvmOverloads constructor(
     fun openChangedFile(path: String) {
         // The list's own act: which file a person entered from "see n changes".
         Trace.tap("open changed file", path)
-        val ws = workspace ?: return
+        val ws = workspaceFor("opened") ?: return
         val project = currentProject ?: return
         // **Straight into Diff, against the last synced commit.** The operator: "files from this
         // list when clicked should open in diff mode." A person who tapped a file in a list called
@@ -3194,7 +3217,7 @@ class AppViewModel @JvmOverloads constructor(
      * their circle next to a paragraph that is no longer there.
      */
     fun photograph(text: String) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("photographed") ?: return
         val file = editingFile ?: return
         if (ws.kindOf(file) != EntryKind.TEXT) return
         val dir = file.parentFile ?: return
@@ -3265,7 +3288,7 @@ class AppViewModel @JvmOverloads constructor(
      * editing keeps its own version, and the one they made starts with its own.
      */
     fun savePicture(bytes: ByteArray, target: File? = null) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("saved") ?: return
         val file = editingFile ?: return
         // The mirror of `saveEditor`'s refusal, and held here rather than only on the screen for the
         // same reason: a guarantee held only by the caller is a convention.
@@ -3642,7 +3665,7 @@ class AppViewModel @JvmOverloads constructor(
      * is refused before anything is touched.
      */
     private fun transferProject(project: String, toLogin: String, copy: Boolean): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("transferred") ?: return false
         val to = accounts.account(toLogin)?.let { accounts.dirOf(it.login) }
         if (to == null) {
             message = "\"$toLogin\" is not an account on this phone, so \"$project\" did not move."
@@ -3672,7 +3695,7 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun deleteProject(project: String) {
-        val ws = workspace ?: return
+        val ws = workspaceFor("deleted") ?: return
         // **The system project is not deletable.** It holds the settings that belong to the whole
         // account, and a person who deletes it loses the prompt with no way to notice until the
         // agent behaves differently. Refused in the view model rather than greyed out on the row:
@@ -4176,7 +4199,10 @@ class AppViewModel @JvmOverloads constructor(
         said: String,
         then: (List<AgentLog.Row>, Agent.End) -> Unit,
     ) {
-        val ws = workspace ?: return
+        val ws = workspace ?: run {
+            message = "No account is open, so the agent has nowhere to work."
+            return
+        }
         // **A turn that cannot start must say so.** This was `git ?: return`, and it returned into
         // nothing: no row, no message, `chatWorking` left true — a screen that waits for ever and a
         // record that does not mention the question. `git` opens a repository on every read, so it
@@ -4423,7 +4449,10 @@ class AppViewModel @JvmOverloads constructor(
      * leave the record half in each file.
      */
     fun resetAgent(project: String, branch: String = AgentSession.MAIN) {
-        val ws = workspace ?: return
+        val ws = workspace ?: run {
+            message = "No account is open, so there is no conversation to reset."
+            return
+        }
         if (chatWorking || agentBusy(project, branch)) return
         Trace.tap("reset agent", project)
         onWorker {
@@ -5267,7 +5296,7 @@ class AppViewModel @JvmOverloads constructor(
      * the project is, and a tag on a branch nobody has merged is a version of something else.
      */
     fun tagRelease(versionName: String, note: String = "") {
-        val ws = workspace ?: return
+        val ws = workspaceFor("tagged") ?: return
         val project = currentProject
         if (project == null) {
             message = "Open a project first: a version belongs to one"
@@ -5441,7 +5470,7 @@ class AppViewModel @JvmOverloads constructor(
         // branch does not exist, holding the system link and whatever was checked out.
         val removed = outcome.getOrNull()
         if (removed != null) {
-            val ws = workspace ?: return
+            val ws = workspaceFor("removed") ?: return
             Worktrees(ws).remove(project, removed)
             // **The session goes with it.** A session whose tree is gone is one the tick would remove
             // on its next pass anyway — but between now and then the screen still offers a
@@ -5722,7 +5751,7 @@ class AppViewModel @JvmOverloads constructor(
      * happen is indistinguishable from a broken screen.
      */
     fun restoreDeleted(dir: File, gone: Gone): Boolean {
-        val ws = workspace ?: return false
+        val ws = workspaceFor("restored") ?: return false
         val path = ws.relative(dir) ?: run {
             message = "${dir.name} is not part of this account any more"
             return false
@@ -5801,7 +5830,7 @@ class AppViewModel @JvmOverloads constructor(
     /** Puts an old version back into the file. */
     fun restoreVersion(revisionId: String) {
         Trace.tap("restore version", revisionId.take(7))
-        val ws = workspace ?: return
+        val ws = workspaceFor("restored") ?: return
         val target = historyPath ?: return
         // A restore writes, so a lock refuses it. The history stays open and says so:
         // the version list is exactly where a person finds out that they froze this file.

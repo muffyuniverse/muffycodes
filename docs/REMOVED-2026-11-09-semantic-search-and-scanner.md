@@ -116,10 +116,13 @@ so. The chat model's address is `active.baseUrl`, which was always a different f
    `PLAN-credentials-2026-11-08` **landed and deliberately left it there** — the general settings are the root
    of the chain. What would remove it is **T5** (*"the general scope holds no chat model"*, part done), and
    this removal is what makes T5 a deletion of a file rather than a surgery on one.
-2. **The vault's `General` scope has no consumer.** It existed for the app-wide embedding and rerank key —
-   one vector space per app — and chat is never general. §3.11 N6 asks for the scope of a minted key
-   (`undefined`/general/account/project/branch); this removal is the argument for dropping `general` from
-   that list, and it is left to N6 rather than done quietly here.
+2. ~~**The vault's `General` scope has no consumer.**~~ **Settled by the operator, 2026-11-09: it stays,
+   and it is not about models.** The general scope is *the phone's own* secrets — a key an `http` request or
+   an MCP article names, usable from any project under any account. That is why `Credentials.secret(...)`
+   looks there last and why `connectionScopes` ends with it; the model chain skips it because a chat request
+   is made *as* somebody, and that is still right. What lost its consumer was **the app-wide embedding/rerank
+   key**, which is a much narrower thing. N6 still asks for a minted key's scope, and `general` is still one
+   of the answers it can give.
 3. **`.muffy/search.db` files on phones are orphans.** They are inside `.muffy/`, which is git-ignored, so
    they are invisible rather than untracked noise — and `SearchIndex`'s own rule was that an index is
    derived data. Nothing deletes them; nothing needs to. A person who wants the bytes back can delete the
