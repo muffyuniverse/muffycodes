@@ -292,7 +292,7 @@ class WorktreesTest {
         assertTrue(
             "the account's own system folder: ${link.canonicalPath}",
             link.canonicalPath ==
-                File(workspace.accountDir, Workspace.SYSTEM_PROJECT).canonicalPath,
+                workspace.systemDir.canonicalPath,
         )
     }
 
@@ -333,7 +333,7 @@ class WorktreesTest {
         projectWithBranch()
         workspace.ensure()
         val tree = trees.make("Shopping", "feature").getOrThrow()
-        val readme = File(File(workspace.accountDir, Workspace.SYSTEM_PROJECT), Workspace.README)
+        val readme = File(workspace.systemDir, Workspace.README)
         assertTrue("the folder the link points at has a file in it", readme.isFile)
 
         trees.remove("Shopping", "feature")

@@ -559,22 +559,22 @@ class ProjectsFeatureTest : FeatureTest() {
         //
         // **But it is not a project, and that is the operator's correction** (§13f): as a project it had
         // no repository, so the row promised a history, a status and a remote that did not exist - a
-        // dangling row. It is a folder at the account root, it is listed as an entry there, and every
-        // project can reach it through a link.
+        // dangling row. It is **the app's own folder** now (§3.11) — one per phone, outside every
+        // account — drawn as a row of its own at the root and reachable from every project's link.
         assertFalse("no project row", scene.viewModel.projectNames.any { it.equals("shared", ignoreCase = true) })
-        assertTrue("but it is a folder in the root listing", scene.names().contains("shared"))
         assertTrue(
-            "and the folder is really there",
-            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
+            "and the folder is really there, beside the accounts rather than inside one",
+            scene.workspace!!.systemDir.isDirectory,
+        )
+        assertFalse(
+            "not in the account's own folder",
+            scene.workspace!!.systemDir.exists(),
         )
 
         scene.viewModel.message = null
         scene.viewModel.deleteProject("shared")
         assertTrue("and it cannot be deleted", scene.viewModel.message != null)
-        assertTrue(
-            "the folder is still there",
-            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
-        )
+        assertTrue("the folder is still there", scene.workspace!!.systemDir.isDirectory)
     }
 
     @Test
@@ -586,10 +586,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.message = null
         scene.viewModel.setAddress(Workspace.SYSTEM_PROJECT, "https://host/owner/settings.git")
         assertTrue("it cannot be renamed away", scene.viewModel.message != null)
-        assertTrue(
-            "and it still has its own name",
-            File(scene.workspace!!.accountDir, Workspace.SYSTEM_PROJECT).isDirectory,
-        )
+        assertTrue("and it still has its own name", scene.workspace!!.systemDir.isDirectory)
 
         scene.project("groceries")
         scene.viewModel.message = null

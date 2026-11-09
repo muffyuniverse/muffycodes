@@ -2743,7 +2743,7 @@ class AgentTest {
         // and no agent can stand in it. A refusal that offers an impossible next step is one a model
         // spends a turn on.
         assertTrue("the link was made", ws.linkSystem(ws.repoOf("shopping")))
-        val own = File(File(ws.accountDir, Workspace.SYSTEM_PROJECT), "prompt.txt")
+        val own = File(ws.systemDir, "prompt.txt")
         own.parentFile?.mkdirs()
         own.writeText("the brief")
 

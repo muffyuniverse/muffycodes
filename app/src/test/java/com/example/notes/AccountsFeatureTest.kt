@@ -483,7 +483,7 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `an app link in a locked onboarding page is followed`() {
         val dir = File(
-            scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT),
+            scene.viewModel.workspace!!.systemDir,
             Onboarding.DIR,
         )
         val page = File(dir, Onboarding.pages().last().name)
@@ -523,7 +523,7 @@ class AccountsFeatureTest : FeatureTest() {
         val beforeAction = Trace.report().taps
         val page = File(
             File(
-                scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT),
+                scene.viewModel.workspace!!.systemDir,
                 Onboarding.DIR,
             ),
             Onboarding.pages().last().name,
@@ -617,7 +617,7 @@ class AccountsFeatureTest : FeatureTest() {
             // **The page as a File**, because that is what the editor opens: `pages()` returns
             // name-and-text pairs, and the file lives in the system project's onboarding folder.
             val connect = File(
-                File(scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR),
+                File(scene.viewModel.workspace!!.systemDir, Onboarding.DIR),
                 Onboarding.pages().last().name,
             )
             assertTrue("the page is on disk: $connect", connect.isFile)

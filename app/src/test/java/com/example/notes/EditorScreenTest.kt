@@ -416,7 +416,7 @@ class EditorScreenTest {
         val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
         try {
             phone.await("onboarding to open") { phone.viewModel.onboarding }
-            val dir = File(phone.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+            val dir = File(phone.viewModel.workspace!!.systemDir, Onboarding.DIR)
             val page = File(dir, Onboarding.pages().first().name)
             phone.viewModel.openEditor(page)
             compose.setContent {
@@ -483,7 +483,7 @@ class EditorScreenTest {
         val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
         try {
             phone.await("onboarding to open") { phone.viewModel.onboarding }
-            val dir = File(phone.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+            val dir = File(phone.viewModel.workspace!!.systemDir, Onboarding.DIR)
             val page = File(dir, Onboarding.pages().first().name)
             phone.viewModel.openEditor(page)
             compose.setContent {

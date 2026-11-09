@@ -42,7 +42,7 @@ class WorkspaceTest {
         // made a repository. `isProjectFolder` states the rule rather than inferring it from the folder's
         // contents, or the leftover would turn it back into the "dangling" row the operator reported.
         workspace.ensure()
-        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val shared = workspace.systemDir
         assertTrue("the folder is made by ensure()", shared.isDirectory)
         assertFalse("and it is not in the project list", workspace.projectNames().contains("shared"))
         assertFalse("nor a project by the predicate", workspace.isProjectFolder(shared))
@@ -139,7 +139,7 @@ class WorkspaceTest {
     @Test
     fun `every tree gets the link, including a folder a person already made`() {
         workspace.ensure()
-        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val shared = workspace.systemDir
         val proj = workspace.projectDir("Shopping")
         proj.mkdirs()
         File(proj, ".git").mkdirs()
@@ -214,7 +214,7 @@ class WorkspaceTest {
         // **The defect the link would have introduced.** `File.deleteRecursively()` follows a symlink, so
         // deleting a project would walk into the account's shared folder and delete its contents first.
         workspace.ensure()
-        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT)
+        val shared = workspace.systemDir
         val readme = File(shared, Workspace.README)
         assertTrue("the folder has something in it", readme.isFile)
         val proj = workspace.projectDir("Shopping")
@@ -276,7 +276,7 @@ class WorkspaceTest {
     // ---- onboarding: written, versioned, and locked ---------------------------
 
     /** The folder the pages go in. */
-    private fun onboardingDir() = File(File(workspace.accountDir, Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+    private fun onboardingDir() = File(workspace.systemDir, Onboarding.DIR)
 
     @Test
     fun `the onboarding pages are written into the shared folder`() {
@@ -993,7 +993,7 @@ class WorkspaceTest {
         // **What the lock does not do is make the subtree read-only.** A folder lock is an existence
         // lock now (`isAgentLocked`), so a template inside `shared/schemas/` is still editable; what the
         // path rule holds is the folder against being renamed or deleted.
-        val shared = File(workspace.accountDir, Workspace.SYSTEM_PROJECT).apply { mkdirs() }
+        val shared = workspace.systemDir.apply { mkdirs() }
         val deep = File(File(File(shared, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
             parentFile.mkdirs()
             writeText("you are an agent\n")
