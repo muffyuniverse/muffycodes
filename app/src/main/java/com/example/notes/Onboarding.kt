@@ -24,7 +24,7 @@ package com.example.notes
 object Onboarding {
 
     /**
-     * The folder, inside the system project.
+     * The folder, inside the app's own `shared/` — so the pages exist before any account does.
      *
      * **A folder rather than a list in code**, because a folder is what the editor, the browser and
      * the swipe gesture already understand. Nothing new had to be taught to any of them.
@@ -42,7 +42,7 @@ object Onboarding {
      * The number is compared with the one recorded in settings. A person's own notes belong in their
      * own files, not in these.
      */
-    const val REVISION = 1
+    const val REVISION = 2
 
     /** A page: its file name, and its text. The name's leading number is the order. */
     data class Page(val name: String, val text: String)
@@ -110,10 +110,11 @@ what it did is a file you can read.
 # What it can do
 
 - **Write and edit files** across every project, with every change a commit.
-- **Read the web**, and show you the page it read.
-- **Look at pictures** — screenshots, photographs, and drawings you make with a pen.
-- **Search your own writing**, by meaning rather than by exact words.
-- **Run workflows** on GitHub, and read back what they said.
+- **Search your own writing** — every file, by name and by text, and every saved version of it.
+- **Read the web**, and show you the page it read. It can look at pictures too: screenshots,
+  photographs, and drawings you make with a pen.
+- **Move files both ways**: pull a project down, push it up, and bring a file in from the phone.
+- **Call any address** with `http`, including the ones whose secret you have kept for it.
 
 It can also be told what to do once and remember it: a project's prompt is a file, and so is every
 skill you teach it.
@@ -151,7 +152,7 @@ When both are connected this page closes on its own.
 
 ---
 
-**You can read all of this again at any time.** These pages are a folder in your system project, and
-the browser will open them whenever you want.
+**You can read all of this again at any time.** These pages are a folder in the app's own `shared/`,
+and the browser will open them whenever you want — they are there before the first account is.
 """.trimIndent()
 }
