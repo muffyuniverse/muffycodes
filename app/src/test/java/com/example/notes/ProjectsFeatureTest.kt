@@ -593,7 +593,9 @@ class ProjectsFeatureTest : FeatureTest() {
 
         scene.project("groceries")
         scene.viewModel.message = null
-        scene.viewModel.setAddress("groceries", "https://host/owner/System.git")
+        // **The name in another case is still the name.** The guard is case-insensitive because a
+        // filesystem that folds case would otherwise offer a second `Shared` that can be deleted.
+        scene.viewModel.setAddress("groceries", "https://host/owner/SHARED.git")
         assertTrue("nor can another project take it", scene.viewModel.message != null)
         assertTrue(
             "and groceries is still groceries",

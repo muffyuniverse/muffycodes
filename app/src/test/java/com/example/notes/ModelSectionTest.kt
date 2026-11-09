@@ -6,6 +6,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.After
@@ -126,8 +128,9 @@ class ModelSectionTest {
         compose.onNodeWithText("Embedding model").assertIsDisplayed()
         compose.onNodeWithText("Rerank model").assertIsDisplayed()
         // Both unnamed, which is the honest state of a fresh account — and the search feature says so
-        // rather than inventing a template on the person's behalf.
-        compose.onNodeWithText("not chosen").assertIsDisplayed()
+        // rather than inventing a template on the person's behalf. **Counted, not found once**: two rows
+        // say it, and `onNodeWithText` refuses to pick between them.
+        compose.onAllNodesWithText("not chosen").assertCountEquals(2)
     }
 
     @Test

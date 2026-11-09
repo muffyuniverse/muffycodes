@@ -118,7 +118,10 @@ class AgentTest {
             "deepseek/deepseek-v4.1-flash-1017",
             request.model,
         )
-        assertEquals("and its pinned endpoint", "deepseek", request.provider)
+        // **The host, because the address is the upstream.** The tag that used to be asserted here was
+        // OpenRouter's routing data; the app stores none and sends none, so the word a sentence gets for
+        // "where this went" is the host the address names.
+        assertEquals("and its endpoint", "openrouter.ai", request.provider)
     }
 
     @Test
@@ -2742,14 +2745,14 @@ class AgentTest {
         own.writeText("the brief")
 
         val body = AgentTools(ws, "shopping", git, log).run(
-            Call("c1", "write", """{"path":"system/prompt.txt","text":"a different brief"}"""),
+            Call("c1", "write", """{"path":"shared/prompt.txt","text":"a different brief"}"""),
         )
 
         assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("it says whose folder it is: $body", body.contains("the account's own folder"))
         assertFalse(
             "and it does not offer to open a folder that cannot be opened: $body",
-            body.contains("needs `system` open"),
+            body.contains("needs `shared` open"),
         )
         assertEquals("the brief is unchanged", "the brief", own.readText())
     }

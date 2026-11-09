@@ -73,13 +73,15 @@ class SemanticSearchTest {
         // names, so a pointer alone is not enough to embed — the file has to exist and to say which
         // model. A test that named a pointer and stubbed the embedder would be testing its own stub.
         schema = { name ->
+            // **The id is derived from the file name**, so a test that switches templates gets a
+            // different model — which is what the refusal test needs — and `rerank.json` is a rerank
+            // request rather than an embedding one.
+            val id = if (name.startsWith("other")) "other/embed" else "test/embed"
             Result.success(
                 Schema(
                     address = "https://x.test/v1",
-                    url = "embeddings",
-                    body = org.json.JSONObject(
-                        """{"model":"${name.substringBeforeLast('.')}","input":"{{input}}"}""",
-                    ),
+                    url = if (name.startsWith("rerank")) "rerank" else "embeddings",
+                    body = org.json.JSONObject("""{"model":"$id","input":"{{input}}"}"""),
                 ),
             )
         },
