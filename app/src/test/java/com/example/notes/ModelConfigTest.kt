@@ -75,8 +75,10 @@ class ModelConfigTest {
         val read = ModelConfigFile.load(account).getOrThrow()
 
         assertEquals("the same choice", written.active, read.active)
-        assertEquals("and the same pointers", written.embedding, read.embedding)
-        assertEquals("both of them", written.rerank, read.rerank)
+        // **And nothing else**, which is the other half of a round trip: what the writer puts in the
+        // file is what the reader takes out, so a field the build no longer has cannot come back
+        // through the file.
+        assertFalse("the file holds no model blocks", ModelConfigFile.text(read).contains("embedding"))
     }
 
     /**
