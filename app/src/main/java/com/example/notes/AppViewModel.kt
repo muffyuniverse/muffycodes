@@ -4449,10 +4449,7 @@ class AppViewModel @JvmOverloads constructor(
      * leave the record half in each file.
      */
     fun resetAgent(project: String, branch: String = AgentSession.MAIN) {
-        val ws = workspace ?: run {
-            message = "No account is open, so there is no conversation to reset."
-            return
-        }
+        val ws = workspaceFor("reset") ?: return
         if (chatWorking || agentBusy(project, branch)) return
         Trace.tap("reset agent", project)
         onWorker {
@@ -5448,7 +5445,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun dropBranch(name: String) {
         Trace.tap("confirm remove branch", name)
-        val project = choosingBranchFor ?: return
+        // **The widest precondition first, so the sentence names the one that actually stopped it.** With
+        // no account open there is no project either, and "nothing was removed" is the true answer rather
+        // than "no branch was chosen" — which would send a person looking for a branch to choose.
+        workspaceFor("removed") ?: return
+        val project = choosingBranchFor ?: run {
+            message = "No project's branches are open, so nothing was removed."
+            return
+        }
         // **Not while its agent is working.** The tree is deleted with the branch, so an agent part way
         // through a turn would be writing into a folder somebody else just removed — and the rule that
         // a running agent means "not now" is the one housekeeping already follows.
