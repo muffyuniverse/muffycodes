@@ -346,7 +346,9 @@ class WorkspaceTest {
         // **A newer revision replaces it**, because the point of a revision is that the words
         // changed — and a confusing sentence has to reach the people who installed before it was
         // fixed.
-        val stamp = File(workspace.stateDir, Workspace.ONBOARDING_STAMP)
+        // **The stamp is the app's, beside the pages** (§3.11): one folder per phone means the
+        // revision is written once, not once per identity.
+        val stamp = File(File(workspace.appDir, Workspace.STATE_DIR), Workspace.ONBOARDING_STAMP)
         stamp.writeText("0")
         workspace.ensure()
         assertEquals(

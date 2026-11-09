@@ -1699,8 +1699,11 @@ class AppViewModel @JvmOverloads constructor(
                 // which would refuse the app's own pages. The question here is only "is this document
                 // inside `shared/`", and `isSystemPath` is that question: the path from the account
                 // root, whose first component is the name.
-                val path = base?.let { workspace?.relative(it) }?.joinToString("/").orEmpty()
-                if (Workspace.isSystemPath(path)) {
+                //
+                // **Answered without a workspace too**, which is the state a phone is in before anyone
+                // signs in — and the introduction is exactly the document that has to work there. The
+                // folder is compared canonically, the same way `partsOf` does it.
+                if (inAppFolder(base)) {
                     runLinkAction(address.removePrefix("app:"))
                 } else {
                     Trace.note("link-refused", "app: outside the system project")
@@ -1709,6 +1712,28 @@ class AppViewModel @JvmOverloads constructor(
             address.startsWith("http") -> openLink(address)
             else -> openPath(address, base)
         }
+    }
+
+    /**
+     * **Is [file] inside the app's own folder?** — the question `app:` asks, answered without a
+     * workspace.
+     *
+     * Canonical on both sides, like `Workspace.partsOf`: the folder can be reached through a project's
+     * `shared` link, and a link and its target are the same place.
+     */
+    private fun inAppFolder(file: File?): Boolean {
+        if (file == null) return false
+        val app = try {
+            accounts.sharedDir.canonicalFile
+        } catch (e: Exception) {
+            accounts.sharedDir.absoluteFile
+        }
+        val target = try {
+            file.canonicalFile
+        } catch (e: Exception) {
+            file.absoluteFile
+        }
+        return target.path == app.path || target.path.startsWith(app.path + File.separator)
     }
 
     /**
@@ -1767,7 +1792,10 @@ class AppViewModel @JvmOverloads constructor(
             message = "\"$address\" is not a file, so there is nothing to open."
             return
         }
-        if (ws.relative(file) == null) {
+        // **The app's folder is readable with no account** (§3.11) — it is the one place a phone that
+        // has not signed in can open a file, and it is where the introduction lives. Everything else
+        // must be one the workspace can name.
+        if (ws.relative(file) == null && !inAppFolder(file)) {
             message = "\"$address\" is outside this account, and the editor reads this account's files."
             return
         }
