@@ -57,6 +57,8 @@ class SettingsScreenTest {
         /** Whether a reminder would be seen: the phone's fact, stated by the test. */
         notified: (android.content.Context) -> Boolean = { true },
         onAskNotices: () -> Unit = {},
+        /** The connection window's door — one per settings window, and this is the general one. */
+        onModelConnection: () -> Unit = {},
         /** The count and the ceiling, set before the screen is drawn. */
     ) {
         compose.setContent {
@@ -69,9 +71,36 @@ class SettingsScreenTest {
                     onAskBattery = onAskBattery,
                     notified = notified,
                     onAskNotices = onAskNotices,
+                    onModelConnection = onModelConnection,
                 )
             }
         }
+    }
+
+    @Test
+    fun `the model connection is one row that opens the same window a project has`() {
+        // **One entry per settings window** (operator, 2026-11-09): the address, the key, the request
+        // shape and the three numbers are the same fields at every scope, so the screen offers one
+        // door and the scope is which row was pressed. Without this, the general level could set a
+        // model and never its address.
+        var opened = 0
+        settings(onModelConnection = { opened++ })
+
+        compose.onNodeWithText("Model connection").performScrollTo().performClick()
+
+        assertEquals("the row asked for its window", 1, opened)
+    }
+
+    @Test
+    fun `the model connection row names the host the requests go to`() {
+        // The value is the host, not the full base URL: a row that showed
+        // `https://openrouter.ai/api/v1` would say more than a person needs to tell two servers apart,
+        // and the full address is one tap away in the window it opens.
+        settings()
+
+        // The whole value, so the assertion cannot be satisfied by a second row that happens to name
+        // the same host — and "tap to change" is the half that says what pressing it does.
+        compose.onNodeWithText("openrouter.ai · tap to change").assertExists()
     }
 
     /**
