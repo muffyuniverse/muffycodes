@@ -3211,7 +3211,7 @@ class AgentTools(
      * ways to say the same path.
      */
     private fun articleDirs(): List<File> {
-        val shared = ws.projectDir(Workspace.SYSTEM_PROJECT)
+        val shared = ws.systemDir
         return if (project.equals(Workspace.SYSTEM_PROJECT, ignoreCase = true)) {
             listOf(projectDir)
         } else {

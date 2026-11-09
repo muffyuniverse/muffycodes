@@ -820,20 +820,20 @@ class RequestDbTest {
     // ---- the file itself ---------------------------------------------------------------------
 
     @Test
-    fun `the database lives beside the system project's requests folder`() {
+    fun `the database is the account's own, under its state folder`() {
+        // **The identity's record, not the app's.** What a request spent belongs to the account that
+        // spent it — the same rule that stops a transferred project carrying its history (§3.9) — so
+        // it lives under that account's `.muffy/`, where nothing can commit it: `.muffy/` is in the
+        // app's own ignore list, which is what keeps this from showing up as "1 changed".
         val file = RequestDb.fileFor(account)
         assertTrue("it exists: $file", file.isFile)
         assertTrue(
-            "and inside the system project, where the log has always lived: $file",
-            file.path.contains("${Workspace.SYSTEM_PROJECT}/requests/"),
+            "under the account's state folder: $file",
+            file.path.contains("${Workspace.STATE_DIR}/${RequestLog.DIR}/"),
         )
-        // **The reason this is asserted and not commented.** The system project is a real project
-        // with a real repository, so a history written into it is a change waiting to be committed.
-        // If this line of APP_IGNORES were ever dropped, every response would show up as
-        // "1 changed" and the history would be the first thing anyone deletes.
         assertTrue(
-            "and the app's own ignore list covers the folder",
-            Workspace.APP_IGNORES.any { "${RequestLog.DIR}/" == it },
+            "and the app's own ignore list covers the state folder",
+            Workspace.APP_IGNORES.any { "${Workspace.STATE_DIR}/" == it },
         )
     }
 

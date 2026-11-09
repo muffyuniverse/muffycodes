@@ -37,7 +37,7 @@ class ArchiveTest {
 
     @Before
     fun setUp() {
-        ws = Workspace(temp.root)
+        ws = Workspace.single(temp.root)
         ws.projectDir("shopping").mkdirs()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         log = AgentLog.open(ws.projectDir("shopping"))

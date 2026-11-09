@@ -23,7 +23,7 @@ class AgentSessionsTest {
     @Before
     fun fresh() {
         account = File(System.getProperty("java.io.tmpdir"), "sessions-${System.nanoTime()}")
-        Workspace(account).ensure()
+        Workspace.single(account).ensure()
         store = AgentSessions(account)
     }
 

@@ -84,9 +84,28 @@ data class Gone(
  *   project's `.git/info/exclude` by the app itself — so it cannot be renamed, moved or deleted,
  *   and its `session.log` cannot be written by anyone but [AgentLog].
  */
-class Workspace(val accountDir: File) {
+class Workspace(
+    val accountDir: File,
+    /**
+     * **The app's own folder: one per phone, outside every account** (§3.11).
+     *
+     * It holds the text every account inherits — the agent's system prompt, the onboarding pages, the
+     * request library, the app's README — and it is here rather than inside an account because
+     * **none of that is anybody's**. It used to be `<account>/shared`, a folder at the account root
+     * beside the projects, which meant the app's own instructions existed once per identity and a
+     * phone with no account had none at all.
+     *
+     * A template names a vault row (`@openrouter`) and the row is resolved in the account it is used
+     * in — so one library can serve every account without ever holding a key. That indirection is
+     * what makes a single folder the honest shape.
+     */
+    val appDir: File,
+) {
 
     val stateDir: File get() = File(accountDir, STATE_DIR)
+
+    /** The app's folder, as the workspace sees it — [`shared/`] from the account root. */
+    val systemDir: File get() = appDir
 
     /** The folder of one project. **This is the repository** — `.git` is in here. */
     fun projectDir(project: String): File = File(accountDir, project)
@@ -182,7 +201,7 @@ class Workspace(val accountDir: File) {
             ensureExcluded(worktree)
             return false
         }
-        val target = File(accountDir, SYSTEM_PROJECT)
+        val target = appDir
         return try {
             worktree.mkdirs()
             target.mkdirs()
@@ -213,7 +232,7 @@ class Workspace(val accountDir: File) {
      */
     private fun ensureSystemFolder() {
         try {
-            val dir = File(accountDir, SYSTEM_PROJECT)
+            val dir = appDir
             dir.mkdirs()
             ensureReadme(dir)
         } catch (t: Throwable) {
@@ -991,15 +1010,26 @@ class Workspace(val accountDir: File) {
 
     /** The account-relative segments of [file], or null when it is outside the account. */
     private fun partsOf(file: File): List<String>? {
-        val root = accountDir.canonicalFile.toPath()
         val target = try {
             file.canonicalFile.toPath()
         } catch (e: Exception) {
             file.absoluteFile.toPath()
         }
-        if (!target.startsWith(root)) return null
-        val names = root.relativize(target).toString()
-        return if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
+        // **Two roots, one name.** The account's files are `Shopping/notes.txt`; the app's are
+        // `shared/onboarding/01-….md`, which is the name a person already sees in the browser. The
+        // app's folder is asked second, so a file inside an account is never reported as the app's.
+        val root = accountDir.canonicalFile.toPath()
+        if (target.startsWith(root)) {
+            val names = root.relativize(target).toString()
+            return if (names.isEmpty()) emptyList() else names.split(File.separatorChar)
+        }
+        val app = appDir.canonicalFile.toPath()
+        if (target.startsWith(app)) {
+            val names = app.relativize(target).toString()
+            return if (names.isEmpty()) listOf(SYSTEM_PROJECT) else
+                listOf(SYSTEM_PROJECT) + names.split(File.separatorChar)
+        }
+        return null
     }
 
     /** The file at a path from the account root. */
@@ -1018,6 +1048,12 @@ class Workspace(val accountDir: File) {
      */
     fun fileAt(path: List<String>): File {
         val project = path.firstOrNull()
+        // **The app's folder is not a project and has no branch.** `shared/onboarding/x.md` is one
+        // path for every account, so it is answered directly rather than through a worktree — the
+        // branch redirect below would look for `.muffy/worktrees/<project>/…` and find nothing.
+        if (project != null && isSystem(project)) {
+            return path.drop(1).fold(appDir) { dir, name -> File(dir, name) }
+        }
         if (project != null && activeBranch != AgentSession.MAIN) {
             val root = File(accountDir, project)
             // **The branch has to exist for *this* project.** `activeBranch` is ambient, and a person
@@ -1874,6 +1910,16 @@ class Workspace(val accountDir: File) {
          * that folds case would otherwise offer a second `Shared` that can be deleted.
          */
         const val SYSTEM_PROJECT = "shared"
+
+        /**
+         * **One folder standing in for both roots** — the account and the app's own folder.
+         *
+         * That is the layout of a phone that has not been migrated past this build, and it is what a
+         * test means when it says `Workspace(folder)`: one tree, with `shared/` inside it. Named
+         * rather than defaulted, so a production caller cannot get the per-account shape by leaving an
+         * argument out — the app's folder is a fact that has to be passed.
+         */
+        fun single(dir: File): Workspace = Workspace(dir, File(dir, SYSTEM_PROJECT))
 
         /**
          * How deep a branch's folder can be below `.muffy/worktrees/`.

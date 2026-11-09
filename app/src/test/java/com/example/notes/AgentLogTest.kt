@@ -53,7 +53,7 @@ class AgentLogTest {
     /** A bare agent, for the one test that asks how rows become a conversation. */
     private fun agentFor(record: AgentLog): Agent {
         val dir = record.session.parentFile.parentFile
-        val workspace = Workspace(dir.parentFile.parentFile)
+        val workspace = Workspace.single(dir.parentFile.parentFile)
         return Agent(
             accountDir = workspace.accountDir,
             project = dir.name,

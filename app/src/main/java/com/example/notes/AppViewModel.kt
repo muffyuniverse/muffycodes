@@ -429,7 +429,7 @@ class AppViewModel @JvmOverloads constructor(
         get() {
             val login = activeLogin ?: return null
             cachedWorkspace?.takeIf { it.first == login }?.let { return it.second }
-            val fresh = Workspace(accounts.dirOf(login))
+            val fresh = Workspace(accounts.dirOf(login), accounts.sharedDir)
             cachedWorkspace = login to fresh
             return fresh
         }
@@ -638,7 +638,7 @@ class AppViewModel @JvmOverloads constructor(
         val pages = Onboarding.pages()
         if (pages.isEmpty()) return
         if (settings.onboardingDone(pages.size)) return
-        val dir = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+        val dir = File(ws.systemDir, Onboarding.DIR)
         val at = settings.onboardingAt.coerceIn(0, pages.lastIndex)
         val page = File(dir, pages[at].name)
         if (!page.isFile) return
@@ -1217,7 +1217,7 @@ class AppViewModel @JvmOverloads constructor(
      * the list must hold it. The count on the settings row is keyed on a revision so Compose re-runs it
      * after this screen writes a file.
      */
-    fun templateNames(): List<String> = workspace?.let { Schemas.ensure(it.accountDir) }.orEmpty()
+    fun templateNames(): List<String> = workspace?.let { Schemas.ensure(it.systemDir) }.orEmpty()
 
     /** Forgets the embedding or rerank choice, so the feature says "not chosen" rather than guessing. */
     fun clearPicked(kind: PickedKind) {
@@ -5257,7 +5257,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     val accountsWithProjects: List<Pair<Account, Int>>
         get() = accounts.accounts().map { account ->
-            account to Workspace(accounts.dirOf(account.login)).projectNames().size
+            account to Workspace(accounts.dirOf(account.login), accounts.sharedDir).projectNames().size
         }
 
     /**

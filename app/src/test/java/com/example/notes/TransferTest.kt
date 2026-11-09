@@ -35,11 +35,11 @@ class TransferTest {
     @Before
     fun makeTwoAccounts() {
         root = File(System.getProperty("java.io.tmpdir"), "transfer-${System.nanoTime()}")
-        from = Workspace(File(root, "~local"))
+        from = Workspace.single(File(root, "~local"))
         from.accountDir.mkdirs()
         from.ensure()
         toDir = File(root, "muffyuniverse")
-        to = Workspace(toDir)
+        to = Workspace.single(toDir)
         to.accountDir.mkdirs()
         to.ensure()
     }

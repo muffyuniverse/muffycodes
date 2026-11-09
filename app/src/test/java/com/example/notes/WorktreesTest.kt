@@ -41,7 +41,7 @@ class WorktreesTest {
     @Before
     fun makeSpace() {
         root = File(System.getProperty("java.io.tmpdir"), "worktrees-${System.nanoTime()}")
-        workspace = Workspace(File(root, "muffyuniverse"))
+        workspace = Workspace.single(File(root, "muffyuniverse"))
         workspace.accountDir.mkdirs()
         workspace.ensure()
         trees = Worktrees(workspace)

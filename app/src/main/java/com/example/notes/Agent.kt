@@ -921,7 +921,7 @@ class Agent(
      * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
      */
     /** **The prompt for this agent**, built fresh each turn so an edit is seen next turn. */
-    private fun layers(): AgentPrompt.Layers = AgentPrompt.read(accountDir, tools.projectDir)
+    private fun layers(): AgentPrompt.Layers = AgentPrompt.read(ws.appDir, tools.projectDir)
 
     private fun readOpening(layers: AgentPrompt.Layers, log: AgentLog, tools: List<ToolSpec>): Opening {
         // **The line numbers are the context file's, and they cost nothing to know.**

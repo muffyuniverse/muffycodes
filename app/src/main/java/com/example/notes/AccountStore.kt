@@ -141,6 +141,15 @@ class AccountStore(private val filesDir: File) {
     fun dirOf(login: String): File = File(accountsDir, login)
 
     /**
+     * **The app's own folder: one per phone, beside the accounts rather than inside one** (§3.11).
+     *
+     * It holds what is nobody's — the agent's system prompt, the onboarding pages, the request library,
+     * the app's README — so it has to exist on a phone that has never signed in, and it must not be
+     * listed as an account. Two siblings under the app's files directory is the whole of that.
+     */
+    val sharedDir: File get() = File(filesDir, Workspace.SYSTEM_PROJECT)
+
+    /**
      * Makes sure the provisional account exists on disk — **on a phone that has no account at all.**
      *
      * Called when the app starts. It is *creation*, not recreation: the account cannot be removed, so

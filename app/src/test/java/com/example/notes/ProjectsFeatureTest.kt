@@ -609,17 +609,17 @@ class ProjectsFeatureTest : FeatureTest() {
         // It used to live at the account's root — a place the app draws as the project list, with
         // nothing in the interface leading to it. A file nothing leads to is a file nobody edits.
         val ws = scene.workspace!!
-        val prompt = AgentPrompt.systemFile(ws.accountDir)
+        val prompt = AgentPrompt.systemFile(ws.systemDir)
 
         // **Asked first, because asking is what writes it.** The shipped text becomes a file the
         // first time the agent needs it — the same rule the project layer already follows, and the
         // reason a missing file is not an agent with no instructions.
-        assertEquals("the shipped text to begin with", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(ws.accountDir))
+        assertEquals("the shipped text to begin with", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(ws.systemDir))
         assertTrue("the system prompt is written where the project is", prompt.isFile)
 
         // The file is the person's: editing it changes the prompt, with no second copy winning.
         prompt.writeText("Say only the word: milk.")
-        assertEquals("the file is the prompt", "Say only the word: milk.", AgentPrompt.system(ws.accountDir))
+        assertEquals("the file is the prompt", "Say only the word: milk.", AgentPrompt.system(ws.systemDir))
     }
 
     @Test

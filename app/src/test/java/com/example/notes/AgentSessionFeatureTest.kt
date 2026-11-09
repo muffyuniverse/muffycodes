@@ -958,10 +958,10 @@ class AgentSessionFeatureTest : FeatureTest() {
         // `Workspace.ensure()` on every refresh, so writing into it is right; the project's folder is
         // the person's, so writing into it is how a deleted project comes back. A single shared rule
         // for both would have to pick one of those, and either choice is wrong for the other.
-        val file = AgentPrompt.systemFile(scene.viewModel.workspace!!.accountDir)
+        val file = AgentPrompt.systemFile(scene.viewModel.workspace!!.systemDir)
         file.delete()
 
-        val said = AgentPrompt.system(scene.viewModel.workspace!!.accountDir)
+        val said = AgentPrompt.system(scene.viewModel.workspace!!.systemDir)
 
         assertTrue("the fallback is returned", said.isNotBlank())
         assertTrue("and it was written down, so the person can edit it", file.isFile)

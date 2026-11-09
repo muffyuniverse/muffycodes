@@ -53,7 +53,7 @@ class IndexQueueTest {
     @Before
     fun setUp() {
         account = File(temp.root, "account")
-        ws = Workspace(account)
+        ws = Workspace.single(account)
         ws.ensure()
         ws.repoOf("shopping").mkdirs()
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "the milk went sour\n")
@@ -104,12 +104,12 @@ class IndexQueueTest {
         // none of it file by file, so nothing below ever fires for it.
         val origin = File(temp.root, "origin").apply { mkdirs() }
         val source = ProjectGit(
-            Workspace(origin),
+            Workspace.single(origin),
             { null },
             { GitAuthor("Muffy", "muffy@example.com") },
         ).also {
-            Workspace(origin).repoOf("far").mkdirs()
-            Workspace(origin).write(File(File(origin, "far"), "notes.txt"), "a fact\n")
+            Workspace.single(origin).repoOf("far").mkdirs()
+            Workspace.single(origin).write(File(File(origin, "far"), "notes.txt"), "a fact\n")
             it.init("far")
         }
         source.commit("far", "first")
@@ -288,7 +288,7 @@ class IndexQueueTest {
      */
     private fun template(name: String) {
         Schemas.write(
-            ws.accountDir,
+            ws.systemDir,
             name,
             Schema(
                 address = "https://x.test/v1",

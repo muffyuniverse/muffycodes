@@ -117,7 +117,7 @@ object AgentWiring {
     ): AgentRunner? {
         val login = credentials.activeLogin ?: return null
         val accounts = AccountStore(rootDir)
-        val ws = Workspace(accounts.dirOf(login))
+        val ws = Workspace(accounts.dirOf(login), accounts.sharedDir)
         val author = accounts.account(login)?.author() ?: AppViewModel.DEFAULT_AUTHOR
         val git = ProjectGit(
             workspace = ws,

@@ -963,7 +963,7 @@ private fun ProjectList(
     // so a person must be able to reach it from the root; but it has no repository, no remote and no
     // menu, and calling it a project is exactly the "dangling row" the operator reported. So it is drawn
     // last, as a folder, and tapping it opens the folder.
-    val system = viewModel.workspace?.let { File(it.accountDir, Workspace.SYSTEM_PROJECT) }
+    val system = viewModel.workspace?.systemDir
         ?.takeIf { it.isDirectory }
     if (names.isEmpty() && system == null) {
         EmptyState(

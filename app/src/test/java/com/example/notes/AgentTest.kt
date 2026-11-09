@@ -25,6 +25,9 @@ class AgentTest {
 
     private lateinit var account: File
     private lateinit var ws: Workspace
+
+    /** The app's folder, where the system prompt lives — one per phone (§3.11). */
+    private val app: File get() = ws.systemDir
     private lateinit var git: ProjectGit
     private lateinit var log: AgentLog
 
@@ -41,7 +44,7 @@ class AgentTest {
     @Before
     fun fresh() {
         account = File(System.getProperty("java.io.tmpdir"), "agent-${System.nanoTime()}")
-        ws = Workspace(account)
+        ws = Workspace.single(account)
         ws.ensure()
         val projectDir = File(ws.accountDir, "shopping")
         ws.repoOf("shopping").mkdirs()
@@ -568,11 +571,11 @@ class AgentTest {
         // so a file on the phone was written by this build or by a person — and comparing it
         // against half-remembered defaults would rewrite somebody's instructions to fix a phon
         // that does not exist.
-        val file = AgentPrompt.systemFile(account)
+        val file = AgentPrompt.systemFile(app)
         val theirs = "Work only in src/. Never touch the README.\n"
         file.writeText(theirs)
 
-        val read = AgentPrompt.system(account)
+        val read = AgentPrompt.system(app)
 
         assertEquals("handed over as it is", theirs, read)
         assertEquals("and left alone on disk", theirs, file.readText())
@@ -583,16 +586,16 @@ class AgentTest {
         // The one thing the file system has to do here: a fresh account has no instructions, and an
         // agent with none is an agent inventing its own rules. **The file is in the system project**
         // — the one place the prompt lives, with no second path to fall back to.
-        val file = AgentPrompt.systemFile(account)
+        val file = AgentPrompt.systemFile(app)
         file.delete()
 
-        assertEquals("the shipped text", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
+        assertEquals("the shipped text", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(app))
         assertEquals("and it is on disk now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
 
         // **And an emptied file is a missing one.** A save that wrote nothing is not a person saying
         // the agent has no rules.
         file.writeText("   \n")
-        assertEquals("still instructioned", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
+        assertEquals("still instructioned", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(app))
     }
 
     @Test
@@ -3510,7 +3513,7 @@ class AgentTest {
         // ① is shipped as a default but it is the account's file from the first turn on, so a
         // person can correct the app's own instructions — and the next turn is answered under
         // the correction. Anything else would make the file a decoration.
-        val file = AgentPrompt.systemFile(account)
+        val file = AgentPrompt.systemFile(app)
         file.writeText("You are working inside a phone app. Answer in Latin.")
         val first = ScriptedDoor(Reply("ok"))
         agent(first).burst("go")

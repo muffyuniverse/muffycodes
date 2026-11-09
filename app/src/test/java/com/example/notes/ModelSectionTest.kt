@@ -46,6 +46,9 @@ class ModelSectionTest {
 
     private val account: java.io.File get() = scene.workspace!!.accountDir
 
+    /** The app's folder, which is where the library lives (§3.11). */
+    private val app: java.io.File get() = scene.workspace!!.systemDir
+
     @Composable
     private fun Section(onOpenTemplates: () -> Unit = {}) {
         MaterialTheme {
@@ -64,7 +67,7 @@ class ModelSectionTest {
         url = "embeddings",
         body = org.json.JSONObject("""{"model":"e","input":"{{input}}"}"""),
     )) {
-        Schemas.write(account, name, schema).getOrThrow()
+        Schemas.write(app, name, schema).getOrThrow()
     }
 
     // ---- the folder is the manager ---------------------------------------------
@@ -88,9 +91,9 @@ class ModelSectionTest {
     fun `a folder with one template says one, not three`() {
         // The count is read, not remembered: a person who deletes two in the browser comes back to a row
         // that says so. This is the assertion that would fail if the list were cached at construction.
-        Schemas.ensure(account)
-        Schemas.remove(account, "embedding.json")
-        Schemas.remove(account, "rerank.json")
+        Schemas.ensure(app)
+        Schemas.remove(app, "embedding.json")
+        Schemas.remove(app, "rerank.json")
         compose.setContent { Section() }
 
         compose.onNodeWithText("1 template — tap to edit").assertIsDisplayed()
@@ -98,8 +101,8 @@ class ModelSectionTest {
 
     @Test
     fun `an empty folder says so in words a person can act on`() {
-        Schemas.ensure(account)
-        for (name in Schemas.names(account)) Schemas.remove(account, name)
+        Schemas.ensure(app)
+        for (name in Schemas.names(app)) Schemas.remove(app, name)
         compose.setContent { Section() }
 
         // Not "0 templates": the row is the only place a person is told the feature has nothing to work

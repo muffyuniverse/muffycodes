@@ -81,7 +81,7 @@ class AgentRunnerTest {
     @Before
     fun fresh() {
         root = File(System.getProperty("java.io.tmpdir"), "runner-${System.nanoTime()}")
-        ws = Workspace(root)
+        ws = Workspace.single(root)
         ws.ensure()
         ws.repoOf("shopping").mkdirs()
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")

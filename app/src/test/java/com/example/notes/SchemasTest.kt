@@ -22,6 +22,14 @@ class SchemasTest {
 
     private lateinit var account: File
 
+    /**
+     * **The app's folder** — one per phone (§3.11), which is where the library lives.
+     *
+     * A test builds one tree, so the app's folder is `shared/` inside it: the same path a person sees,
+     * with the account beside it rather than containing it.
+     */
+    private val app: java.io.File get() = java.io.File(account, Workspace.SYSTEM_PROJECT)
+
     @Before
     fun makeSpace() {
         account = File(System.getProperty("java.io.tmpdir"), "schemas-${System.nanoTime()}")
@@ -29,7 +37,7 @@ class SchemasTest {
     }
 
     private fun write(name: String, text: String) {
-        val folder = Schemas.dir(account)
+        val folder = Schemas.dir(app)
         folder.mkdirs()
         File(folder, name).writeText(text)
     }
@@ -43,7 +51,7 @@ class SchemasTest {
         // the whole reason the templates are here and not in a project. The operator: *"we can just keep
         // llm request templates in shared as a system locked subfolder."*
         assertEquals("shared/schemas", Schemas.DIR)
-        assertEquals(File(account, "shared/schemas"), Schemas.dir(account))
+        assertEquals(File(account, "shared/schemas"), Schemas.dir(app))
         // **Derived, not typed twice.** A rename of the account folder must carry the templates with it,
         // or every pointer would name a folder nothing creates.
         assertEquals(
@@ -55,11 +63,11 @@ class SchemasTest {
 
     @Test
     fun `a new account is given three requests, one for each kind of call`() {
-        val names = Schemas.ensure(account)
+        val names = Schemas.ensure(app)
 
         assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), names)
         for (name in names) {
-            val schema = Schemas.read(account, name).getOrThrow()
+            val schema = Schemas.read(app, name).getOrThrow()
             assertNull("$name is usable as written", schema.problem())
             assertTrue("$name names a server", schema.address.startsWith("https://"))
         }
@@ -67,8 +75,8 @@ class SchemasTest {
 
     @Test
     fun `the shipped chat carries its model, because a template that named none could not be sent`() {
-        Schemas.ensure(account)
-        val chat = Schemas.read(account, "chat.json").getOrThrow()
+        Schemas.ensure(app)
+        val chat = Schemas.read(app, "chat.json").getOrThrow()
 
         // **A literal, not `{{model}}`.** The model is what this file *is*: three templates are three
         // models, and the app has no other place to keep one.
@@ -81,8 +89,8 @@ class SchemasTest {
 
     @Test
     fun `the shipped chat ships with the numbers the settings shipped with`() {
-        Schemas.ensure(account)
-        val chat = Schemas.read(account, "chat.json").getOrThrow()
+        Schemas.ensure(app)
+        val chat = Schemas.read(app, "chat.json").getOrThrow()
 
         assertEquals("the destination", 60_000L, chat.target)
         assertEquals("the trigger", 100_000L, chat.forget)
@@ -93,50 +101,50 @@ class SchemasTest {
 
     @Test
     fun `a folder a person emptied stays empty`() {
-        Schemas.ensure(account)
-        for (name in Schemas.names(account)) Schemas.remove(account, name)
+        Schemas.ensure(app)
+        for (name in Schemas.names(app)) Schemas.remove(app, name)
 
         // **The folder's existence is the flag, not whether it holds a schema.** "Fill it when it holds
         // none" reads the same and is wrong: a folder somebody emptied by hand holds none either, and
         // refilling it would be the app putting back the files they just deleted.
-        assertEquals(emptyList<String>(), Schemas.ensure(account))
-        assertTrue("the folder is still there, which is what says it was emptied", Schemas.dir(account).isDirectory)
+        assertEquals(emptyList<String>(), Schemas.ensure(app))
+        assertTrue("the folder is still there, which is what says it was emptied", Schemas.dir(app).isDirectory)
     }
 
     @Test
     fun `a folder that still holds one schema is not refilled`() {
-        Schemas.ensure(account)
-        Schemas.remove(account, "embedding.json")
-        Schemas.remove(account, "rerank.json")
+        Schemas.ensure(app)
+        Schemas.remove(app, "embedding.json")
+        Schemas.remove(app, "rerank.json")
 
         // Same rule from the other side: a folder that exists is a folder somebody has seen, so nothing
         // is written into it — not even the two that are missing.
-        assertEquals(listOf("chat.json"), Schemas.ensure(account))
+        assertEquals(listOf("chat.json"), Schemas.ensure(app))
     }
 
     @Test
     fun `deleting the folder is how a person asks for the shipped three back`() {
-        Schemas.ensure(account)
-        Schemas.remove(account, "chat.json")
-        Schemas.dir(account).deleteRecursively()
+        Schemas.ensure(app)
+        Schemas.remove(app, "chat.json")
+        Schemas.dir(app).deleteRecursively()
 
         // **The one way back to the defaults, said in the code**: a folder that is not there is made and
         // filled, and a folder that is there is never added to. Nothing else in this class writes the
         // shipped files, so there is no second path that could disagree.
-        assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), Schemas.ensure(account))
+        assertEquals(listOf("chat.json", "embedding.json", "rerank.json"), Schemas.ensure(app))
     }
 
     @Test
     fun `the list is sorted and holds only schema files`() {
-        Schemas.ensure(account)
-        write("a-first.json", Schemas.read(account, "chat.json").getOrThrow().text())
+        Schemas.ensure(app)
+        write("a-first.json", Schemas.read(app, "chat.json").getOrThrow().text())
         // **A note is allowed beside them.** This folder is a person's; refusing to let them keep a
         // README in it would be tidiness at their expense, so a non-`.json` file is simply not a schema.
         write("notes.txt", "which model I use for what")
         // And a dot-file is not one either, for the same reason the list sorts only what it can send.
         write(".hidden.json", "{}")
 
-        assertEquals(listOf("a-first.json", "chat.json", "embedding.json", "rerank.json"), Schemas.names(account))
+        assertEquals(listOf("a-first.json", "chat.json", "embedding.json", "rerank.json"), Schemas.names(app))
     }
 
     // ---- writing and reading ---------------------------------------------------
@@ -151,8 +159,8 @@ class SchemasTest {
             forget = 2_000,
             trim = 3_000,
         )
-        Schemas.write(account, "mine.json", schema).getOrThrow()
-        val back = Schemas.read(account, "mine.json").getOrThrow()
+        Schemas.write(app, "mine.json", schema).getOrThrow()
+        val back = Schemas.read(app, "mine.json").getOrThrow()
 
         assertEquals(schema.address, back.address)
         assertEquals(schema.url, back.url)
@@ -164,8 +172,8 @@ class SchemasTest {
 
     @Test
     fun `a number of zero is not written, because off is said by saying nothing`() {
-        Schemas.write(account, "quiet.json", Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}")))
-        val text = File(Schemas.dir(account), "quiet.json").readText()
+        Schemas.write(app, "quiet.json", Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}")))
+        val text = File(Schemas.dir(app), "quiet.json").readText()
 
         // **The file a person opens is the shortest true statement of the request.** A `"trim": 0` in
         // every template would be three keys that mean "nothing" in a document whose point is that
@@ -179,7 +187,7 @@ class SchemasTest {
     fun `a file that is not JSON is refused with its line`() {
         write("broken.json", "{\n  \"address\": \"https://x.test/v1\",\n  \"body\": {\n")
 
-        val failure = Schemas.read(account, "broken.json").exceptionOrNull()
+        val failure = Schemas.read(app, "broken.json").exceptionOrNull()
 
         assertNotNull(failure)
         assertTrue(
@@ -363,13 +371,13 @@ class SchemasTest {
     fun `writing under a bad name writes nothing`() {
         val schema = Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}"))
 
-        assertTrue(Schemas.write(account, "sub/chat.json", schema).isFailure)
-        assertFalse(File(Schemas.dir(account), "sub/chat.json").exists())
+        assertTrue(Schemas.write(app, "sub/chat.json", schema).isFailure)
+        assertFalse(File(Schemas.dir(app), "sub/chat.json").exists())
     }
 
     @Test
     fun `reading a name that is not there says so rather than failing silently`() {
-        val failure = Schemas.read(account, "gone.json").exceptionOrNull()
+        val failure = Schemas.read(app, "gone.json").exceptionOrNull()
         assertTrue(failure!!.message!!.contains("gone.json"))
     }
 }

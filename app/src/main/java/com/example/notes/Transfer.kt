@@ -81,7 +81,7 @@ object Transfer {
     fun go(from: Workspace, toAccountDir: File, project: String, copy: Boolean): Result<Unit> {
         val source = from.projectDir(project)
         val target = File(toAccountDir, project)
-        val to = Workspace(toAccountDir)
+        val to = Workspace(toAccountDir, from.appDir)
         val sourceTrees = File(from.stateDir, "${Worktrees.WORKTREES}/$project")
         val targetTrees = File(to.stateDir, "${Worktrees.WORKTREES}/$project")
         return try {

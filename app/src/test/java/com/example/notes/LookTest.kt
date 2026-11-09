@@ -218,7 +218,7 @@ class LookTest {
 
     private fun space(): Workspace {
         val account = File(folder.root, "account-${System.nanoTime()}")
-        val ws = Workspace(account)
+        val ws = Workspace.single(account)
         ws.ensure()
         return ws
     }

@@ -32,7 +32,7 @@ class GitToolTest {
 
     @Before
     fun setUp() {
-        ws = Workspace(temp.root)
+        ws = Workspace.single(temp.root)
         ws.createProjectFolders("shopping").getOrThrow()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         git.init("shopping").getOrThrow()

@@ -102,7 +102,7 @@ class TimeoutsTest {
         // that is already past the deadline says the same thing every time.
         val account = File(System.getProperty("java.io.tmpdir"), "timeouts-" + System.nanoTime())
         account.mkdirs()
-        val ws = Workspace(account)
+        val ws = Workspace.single(account)
         val project = File(account, "shopping")
         project.mkdirs()
         File(project, "huge.log").writeText((1..20_000).joinToString("\n") { "line $it" })

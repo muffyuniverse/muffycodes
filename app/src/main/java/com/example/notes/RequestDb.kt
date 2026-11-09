@@ -137,7 +137,12 @@ object RequestDb {
      * journal would have the screen's query stop an insert.
      */
     fun open(accountDir: File): SQLiteDatabase {
-        val dir = File(File(accountDir, Workspace.SYSTEM_PROJECT), RequestLog.DIR)
+        // **The account's own record, not the app's folder.** What a request spent belongs to the
+        // identity that spent it — it is the same rule that keeps a project's request history from
+        // being carried when it is transferred (§3.9). And the app's folder holds the *request
+        // library*, whose folder is also called `requests`: two different things, one name, which is
+        // this line's other reason for moving the history under the account's state.
+        val dir = File(File(accountDir, Workspace.STATE_DIR), RequestLog.DIR)
         dir.mkdirs()
         val db = SQLiteDatabase.openOrCreateDatabase(File(dir, FILE), null)
         db.enableWriteAheadLogging()
@@ -147,7 +152,7 @@ object RequestDb {
 
     /** The database file, for a test that wants to delete or measure it. */
     fun fileFor(accountDir: File): File =
-        File(File(File(accountDir, Workspace.SYSTEM_PROJECT), RequestLog.DIR), FILE)
+        File(File(File(accountDir, Workspace.STATE_DIR), RequestLog.DIR), FILE)
 
     /**
      * Deletes the history entirely - **including the write-ahead log and its index.**

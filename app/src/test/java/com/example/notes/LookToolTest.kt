@@ -41,7 +41,7 @@ class LookToolTest {
     @Before
     fun fresh() {
         account = File(System.getProperty("java.io.tmpdir"), "look-${System.nanoTime()}")
-        ws = Workspace(account)
+        ws = Workspace.single(account)
         ws.ensure()
         ws.repoOf("shopping").mkdirs()
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")

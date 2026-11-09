@@ -46,9 +46,9 @@ object Schemas {
     /**
      * The folder, as a path from the account root — the same path the browser shows.
      *
-     * **Derived from the folder's own name rather than typed twice.** It was a literal, and a literal is
-     * how a rename leaves one caller pointing at a folder nothing creates: `shared` is
-     * [Workspace.SYSTEM_PROJECT], and the subfolder is this arc's new name.
+     * **`shared/schemas` is the app's folder, one per phone** (§3.11): a template names a vault row and
+     * the row is resolved in the account that uses it, so one library serves every account without
+     * ever holding a key. The path a person reads is unchanged; what changed is where it ends.
      */
     val DIR = Workspace.SYSTEM_PROJECT + "/schemas"
 
@@ -68,7 +68,13 @@ object Schemas {
     /** Where the worktree pointers live, under `.muffy/` — the app's own state, beside `agents.json`. */
     const val POINTERS = "schemas.json"
 
-    fun dir(accountDir: File): File = File(accountDir, DIR)
+    /**
+     * The library's folder, given **the app's folder** — not an account's.
+     *
+     * The parameter is named after what it is: a caller holding a `Workspace` passes `ws.appDir`, and
+     * one asking about the pointer passes the account. Two folders, and the names keep them apart.
+     */
+    fun dir(appDir: File): File = File(appDir, "schemas")
 
     /**
      * The schemas in the folder, by name, **sorted**, so the pickers read in one order.
@@ -76,8 +82,8 @@ object Schemas {
      * Read on every call rather than cached: a person renames or deletes one in the editor, and a list
      * built once would keep offering a file that is no longer there.
      */
-    fun names(accountDir: File): List<String> {
-        val folder = dir(accountDir)
+    fun names(appDir: File): List<String> {
+        val folder = dir(appDir)
         return folder.listFiles()
             .orEmpty()
             .filter { it.isFile && it.name.endsWith(SUFFIX) && !it.name.startsWith(".") }
@@ -86,8 +92,8 @@ object Schemas {
     }
 
     /** One schema by file name, or the sentence saying why it cannot be read. */
-    fun read(accountDir: File, name: String): Result<Schema> {
-        val file = File(dir(accountDir), name)
+    fun read(appDir: File, name: String): Result<Schema> {
+        val file = File(dir(appDir), name)
         if (!file.isFile) {
             return Result.failure(IllegalArgumentException("There is no schema called \"$name\"."))
         }
@@ -99,10 +105,10 @@ object Schemas {
     }
 
     /** Writes [schema] as [name]. The name is checked first, because it becomes a file. */
-    fun write(accountDir: File, name: String, schema: Schema): Result<Unit> {
+    fun write(appDir: File, name: String, schema: Schema): Result<Unit> {
         nameProblem(name)?.let { return Result.failure(IllegalArgumentException(it)) }
         return try {
-            val folder = dir(accountDir)
+            val folder = dir(appDir)
             folder.mkdirs()
             File(folder, name).writeText(schema.text())
             Result.success(Unit)
@@ -112,7 +118,7 @@ object Schemas {
     }
 
     /** Removes one. A missing file is not an error: the state asked for is the state reached. */
-    fun remove(accountDir: File, name: String): Boolean = File(dir(accountDir), name).delete()
+    fun remove(appDir: File, name: String): Boolean = File(dir(appDir), name).delete()
 
     /**
      * Why [name] cannot be a schema's file name, or null when it can.
@@ -221,18 +227,18 @@ object Schemas {
      * Called before a list is shown rather than at first launch, so an account that upgrades into this
      * design gets them too.
      */
-    fun ensure(accountDir: File): List<String> {
-        val folder = dir(accountDir)
-        if (folder.isDirectory) return names(accountDir)
+    fun ensure(appDir: File): List<String> {
+        val folder = dir(appDir)
+        if (folder.isDirectory) return names(appDir)
         // **A folder that cannot be made is not an error here.** The list is allowed to be empty and
         // the picker says so; failing this call would make a read-only account unable to open Settings
         // at all, which is a worse answer than a list with nothing in it.
         folder.mkdirs()
         if (!folder.isDirectory) return emptyList()
         for ((name, schema) in shipped()) {
-            write(accountDir, name, schema)
+            write(appDir, name, schema)
         }
-        return names(accountDir)
+        return names(appDir)
     }
 
     /**

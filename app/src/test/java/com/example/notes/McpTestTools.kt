@@ -38,7 +38,7 @@ class McpTestTools {
 
     @Before
     fun setUp() {
-        ws = Workspace(temp.root)
+        ws = Workspace.single(temp.root)
         ws.projectDir("shopping").mkdirs()
         ws.projectDir("notes").mkdirs()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })

@@ -23,7 +23,7 @@ class WorkspaceTest {
     @Before
     fun makeSpace() {
         root = File(System.getProperty("java.io.tmpdir"), "workspace-${System.nanoTime()}")
-        workspace = Workspace(File(root, "muffyuniverse"))
+        workspace = Workspace.single(File(root, "muffyuniverse"))
         workspace.accountDir.mkdirs()
         workspace.accountDir.mkdirs()
     }
@@ -574,7 +574,7 @@ class WorkspaceTest {
         val path = workspace.pathString(workspace.relative(file)!!)
         workspace.setPins(setOf(path))
 
-        val readBack = Workspace(workspace.accountDir)
+        val readBack = Workspace.single(workspace.accountDir)
         assertTrue(readBack.isPinned(file))
         assertFalse(readBack.isPinned(File(workspace.accountDir, "other.txt")))
     }
@@ -892,7 +892,7 @@ class WorkspaceTest {
         workspace.write(file, "two litres")
         lock("milk.txt")
 
-        val other = Workspace(workspace.accountDir)
+        val other = Workspace.single(workspace.accountDir)
 
         assertTrue("the lock is read from disk", other.isAgentLocked(file))
         // The agent's refusal, which is the one a person's lock produces. `write` is the shared

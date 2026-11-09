@@ -298,7 +298,7 @@ class SelectionFeatureTest : FeatureTest() {
         // while the screen's copy said `[]`. Asking a *second, independent* object is the assertion
         // that would have failed then, and it is the one that matters — a row draws from a
         // `Workspace` it did not necessarily make.
-        val after = Workspace(ws.accountDir)
+        val after = Workspace.single(ws.accountDir)
         assertTrue(
             "unlocked, and a fresh reader agrees",
             after.hold(file, after.locked()) == Workspace.Hold.NONE,

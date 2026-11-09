@@ -69,7 +69,7 @@ class HttpToolTest {
 
     @Before
     fun setUp() {
-        ws = Workspace(temp.root)
+        ws = Workspace.single(temp.root)
         project = ws.projectDir("shopping")
         project.mkdirs()
         git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })

@@ -76,7 +76,7 @@ class RepoLocksTest {
         // build their own `ProjectGit` — `AppViewModel` makes one, `AgentWiring.runnerFor` makes
         // another. A lock that lived on the instance would exclude nothing between them, which is
         // exactly the shape of the two-writer bug this class exists for.
-        val ws = Workspace(File(root, "muffyuniverse")).apply { accountDir.mkdirs() }
+        val ws = Workspace.single(File(root, "muffyuniverse")).apply { accountDir.mkdirs() }
         val author = GitAuthor("Test", "test@example.com")
         val one = ProjectGit(ws, { null }, { author })
         val two = ProjectGit(ws, { null }, { author })
@@ -134,7 +134,7 @@ class RepoLocksTest {
      */
     @Test
     fun `a real commit through ProjectGit holds the lock and reports in-flight`() {
-        val ws = Workspace(File(root, "muffyuniverse")).apply { accountDir.mkdirs() }
+        val ws = Workspace.single(File(root, "muffyuniverse")).apply { accountDir.mkdirs() }
         val author = GitAuthor("Test", "test@example.com")
         val git = ProjectGit(ws, { null }, { author })
         ws.projectDir("groceries").mkdirs()

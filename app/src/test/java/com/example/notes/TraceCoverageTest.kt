@@ -38,7 +38,7 @@ class TraceCoverageTest {
     fun `the query tool records that it ran, and how many rows it wrote`() {
         val root = File(app.cacheDir, "trace-${System.nanoTime()}").apply { mkdirs() }
         try {
-            val ws = Workspace(root)
+            val ws = Workspace.single(root)
             ws.projectDir("shopping").mkdirs()
             val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
             val log = AgentLog.open(ws.projectDir("shopping"))

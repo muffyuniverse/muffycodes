@@ -52,9 +52,9 @@ object AgentPrompt {
     /** The prompt of [projectDir]'s own — ② — inside [DATA]. */
     fun projectFile(projectDir: File): File = File(File(projectDir, DATA), "$PROMPTS/$PROJECT_FILE")
 
-    /** The prompt of the system project — ① — inside [DATA]. */
-    fun systemFile(accountDir: File): File =
-        File(File(File(accountDir, Workspace.SYSTEM_PROJECT), DATA), "$PROMPTS/$SYSTEM_FILE")
+    /** The prompt of the app's folder — ① — inside [DATA]. **One per phone** (§3.11). */
+    fun systemFile(appDir: File): File =
+        File(File(appDir, DATA), "$PROMPTS/$SYSTEM_FILE")
 
     /**
      * ① — **the tools and the shape of the environment. Nothing else.**
@@ -263,8 +263,8 @@ object AgentPrompt {
      * layout. Two places to look would also be two places to disagree, and the question "which
      * prompt is the agent given" would need a rule instead of a path.
      */
-    fun system(accountDir: File): String =
-        layer(systemFile(accountDir), SYSTEM_DEFAULT)
+    fun system(appDir: File): String =
+        layer(systemFile(appDir), SYSTEM_DEFAULT)
 
     /**
      * ② for the project in [projectDir].
@@ -338,6 +338,6 @@ object AgentPrompt {
     const val SEPARATOR = "\n\n---\n\n"
 
     /** Reads both layers from their files, now. */
-    fun read(accountDir: File, projectDir: File): Layers =
-        Layers(system(accountDir), project(projectDir))
+    fun read(appDir: File, projectDir: File): Layers =
+        Layers(system(appDir), project(projectDir))
 }

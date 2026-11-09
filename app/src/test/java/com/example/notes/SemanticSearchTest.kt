@@ -47,7 +47,7 @@ class SemanticSearchTest {
     @Before
     fun setUp() {
         account = File(temp.root, "account")
-        ws = Workspace(account)
+        ws = Workspace.single(account)
         ws.ensure()
         ws.projectDir("shopping").mkdirs()
     }
