@@ -281,15 +281,11 @@ class ModelConfigTest {
         // one anyway would put a number in the file that nothing reads and a later reader would try
         // to honour.
         val config = ModelConfigFile.default().copy(
-            rerank = PickedModel(
-                model = "voyageai/rerank-2.5-lite",
-                provider = "voyageai",
-                providers = listOf("voyageai"),
-            ),
+            rerank = PickedModel(schema = "rerank.json"),
         )
         val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
 
-        assertEquals("the model", "voyageai/rerank-2.5-lite", read.rerank?.model)
+        assertEquals("the template", "rerank.json", read.rerank?.schema)
         assertNull("and no dimension", read.rerank?.dimensions)
     }
 }

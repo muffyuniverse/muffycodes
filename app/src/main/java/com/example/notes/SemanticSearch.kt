@@ -183,34 +183,43 @@ class SemanticSearch(
             index.close()
             return Result.failure(IllegalStateException(NO_MODEL))
         }
+        // **The model id is what the index remembers**, read from the template when it was built — not
+        // the template's name. A template can be edited to ask for a different model while the pointer
+        // beside it stays `embedding.json`, and comparing names would call those two vector spaces the
+        // same one.
+        val asked = pick?.schema
+        val wanted = asked?.let(::modelOf)
+        if (asked != null && wanted == null) {
+            // **Named as the thing to fix**, because a template that will not read is the person's edit
+            // and not a mystery: the row says which file has to be repaired or replaced.
+            index.close()
+            return Result.failure(
+                IllegalStateException(
+                    "The index for \"$project\" points at the template \"$asked\", and it could not " +
+                        "be read or names no model. Fix it in Settings → Request templates, or choose " +
+                        "another with the row called \"Embedding model\".",
+                ),
+            )
+        }
         // **A model chosen after the index was built is refused, not ignored.** The index's own record
-        // used to win silently, so a person who picked a different embedding model in Settings got no
-        // effect and no word about it — the silent no-op this app treats as a defect. Dimensions do
-        // not rescue this: two models at 1024 are still two coordinate systems, and a cosine between
-        // them is a number that looks like a score. So the refusal names both and says what empties
-        // it, because a rebuild is a real cost and not a thing to do behind somebody's cursor.
-        if (built != null && pick != null && built.model != pick.schema) {
+        // used to win silently, so a person who picked a different embedding model got no effect and no
+        // word about it — the silent no-op this app treats as a defect. Dimensions do not rescue this:
+        // two models at 1024 are still two coordinate systems, and a cosine between them is a number
+        // that looks like a score. So the refusal names both and says what empties it, because a rebuild
+        // is a real cost and not a thing to do behind somebody's cursor.
+        if (built != null && wanted != null && built.model != wanted) {
             index.close()
             return Result.failure(
                 IllegalStateException(
                     "The index for \"$project\" was built with \"${built.model}\", and " +
-                        "\"${pick.schema}\" is chosen now. Vectors from two templates cannot be " +
+                        "\"$asked\" asks for \"$wanted\" now. Vectors from two models cannot be " +
                         "compared, so the index has to be emptied and rebuilt before this model " +
-                        "can answer — choose \"${built.model}\" again to keep the index, or empty " +
+                        "can answer — point the template back at \"${built.model}\", or empty " +
                         "it to switch.",
                 ),
             )
         }
-        val model = built?.model ?: modelOf(pick!!.schema) ?: run {
-            index.close()
-            return Result.failure(
-                IllegalStateException(
-                    "The index for \"$project\" points at the template \"${pick!!.schema}\", and it " +
-                        "could not be read or names no model. Fix it in Settings → Request templates, " +
-                        "or choose another with the row called \"Embedding model\".",
-                ),
-            )
-        }
+        val model = built?.model ?: wanted!!
         val dims = built?.dims ?: pick!!.dimensions ?: run {
             index.close()
             return Result.failure(

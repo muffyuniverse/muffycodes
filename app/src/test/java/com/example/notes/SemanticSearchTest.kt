@@ -61,7 +61,7 @@ class SemanticSearchTest {
 
     private fun engine(
         embedder: Embedder = Fake(),
-        model: PickedModel? = PickedModel("test/embed", "test", dimensions = 4),
+        model: PickedModel? = PickedModel("embedding.json", dimensions = 4),
         rerank: PickedModel? = null,
     ) = SemanticSearch(
         ws = ws,
@@ -69,6 +69,20 @@ class SemanticSearchTest {
         embedder = embedder,
         embedding = { model },
         rerank = { rerank },
+        // **The folder, answered the way the app answers it**: a template is read for the model id it
+        // names, so a pointer alone is not enough to embed — the file has to exist and to say which
+        // model. A test that named a pointer and stubbed the embedder would be testing its own stub.
+        schema = { name ->
+            Result.success(
+                Schema(
+                    address = "https://x.test/v1",
+                    url = "embeddings",
+                    body = org.json.JSONObject(
+                        """{"model":"${name.substringBeforeLast('.')}","input":"{{input}}"}""",
+                    ),
+                ),
+            )
+        },
     )
 
     // ---- 1. what it answers ------------------------------------------------
@@ -413,13 +427,17 @@ class SemanticSearchTest {
         write("shopping", "milk.txt", "the milk went sour\n")
         engine().answer(null, "milk", 10, 8, Deadline.none()).getOrThrow()
 
-        val switched = engine(model = PickedModel("other/embed", "test", dimensions = 4))
+        val switched = engine(model = PickedModel("other.json", dimensions = 4))
             .answer(null, "milk", 10, 8, Deadline.none())
 
         assertTrue("refused", switched.isFailure)
         val said = switched.exceptionOrNull()?.message.orEmpty()
-        assertTrue("naming the model that built it: $said", said.contains("test/embed"))
-        assertTrue("and the one chosen now: $said", said.contains("other/embed"))
+        // **The index remembers the model id** — read from the template when it was built, because a
+        // template can be edited to ask for another model while its name stays the same. The sentence
+        // names both ids and the file that asks for the second, which is what a person can act on.
+        assertTrue("naming the model that built it: $said", said.contains("embedding"))
+        assertTrue("and the model asked for now: $said", said.contains("other"))
+        assertTrue("and the template that asks: $said", said.contains("other.json"))
         assertTrue("and that they cannot be compared: $said", said.contains("cannot be compared"))
         assertTrue("and what empties it: $said", said.contains("emptied"))
     }
@@ -439,7 +457,7 @@ class SemanticSearchTest {
 
     @Test
     fun `an embedding model with no dimension is refused, because an index is one size`() {
-        val answer = engine(model = PickedModel("test/embed", "test", dimensions = null))
+        val answer = engine(model = PickedModel("embedding.json", dimensions = null))
             .answer(null, "milk", 10, 8, Deadline.none())
 
         val said = answer.exceptionOrNull()?.message.orEmpty()
@@ -486,7 +504,7 @@ class SemanticSearchTest {
         write("shopping", "b.txt", "milk\n")
         val fake = Fake(reverses = true)
 
-        val answer = engine(fake, rerank = PickedModel("test/rerank", "test"))
+        val answer = engine(fake, rerank = PickedModel("rerank.json"))
             .answer(null, "milk", paths = 10, depth = 8, Deadline.none()).getOrThrow()
 
         val rows = answer.lines().filter { it.startsWith("shopping/") }
