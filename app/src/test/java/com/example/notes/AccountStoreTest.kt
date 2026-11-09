@@ -64,57 +64,44 @@ class AccountStoreTest {
     }
 
     @Test
-    fun `signing in adopts the provisional account by renaming its folder`() {
-        // **A rename, not a copy**, and the difference is the point: after it there is exactly one
-        // workspace holding the projects. A copy that failed halfway would leave two, with nothing
-        // on screen to say which one was real.
+    fun `signing in leaves the local account and its projects exactly where they are`() {
+        // **The operator's 2026-11-09 ruling, and it reverses what this test used to assert.**
+        // `~local` cannot be removed, so a sign-in cannot rename it away either: a person who made
+        // projects before signing in still finds them in Local, and moves the ones they want with
+        // the transfer verb. The account that arrives is empty, which is what it is - a new identity
+        // with a new key, and none of Local's history.
         val provisional = store.ensureProvisional()
         val project = File(store.dirOf(provisional.login), "first-project")
         project.mkdirs()
         File(project, "milk.txt").writeText("2 litres")
 
-        val adopted = store.adoptProvisional("muffyuniverse")
+        store.save(Account(login = "muffyuniverse", commitName = "Muffy", commitEmail = "m@example.com"))
 
-        assertTrue("it was adopted", adopted)
         assertTrue(
-            "the project is now the account's",
-            File(store.dirOf("muffyuniverse"), "first-project/milk.txt").isFile,
+            "the project is still Local's",
+            File(store.dirOf(provisional.login), "first-project/milk.txt").isFile,
         )
-        assertFalse("and the provisional folder is gone", store.dirOf(provisional.login).exists())
+        assertFalse(
+            "and nothing was copied into the account",
+            File(store.dirOf("muffyuniverse"), "first-project").exists(),
+        )
     }
 
     @Test
-    fun `an account that already has a folder is not merged into`() {
-        // **Refused, and the provisional content is left where it is.** Merging two workspaces is
-        // not a rename: it needs a rule for two projects of the same name and two git repositories
-        // that disagree about their history. Leaving it untouched is the only answer that cannot
-        // lose work, and the caller is told so it can say something.
+    fun `the local account cannot be removed, however it is asked`() {
+        // **Two verbs, one answer**, because "delete the copies" and "keep them on the phone" are the
+        // same act for an account that is not an identity: neither can leave the phone without a
+        // workspace. The files stay because nothing ran.
         val provisional = store.ensureProvisional()
-        val theirs = File(store.dirOf(provisional.login), "theirs")
-        theirs.mkdirs()
-        File(theirs, "keep.txt").writeText("still mine")
+        val project = File(store.dirOf(provisional.login), "first-project")
+        project.mkdirs()
+        File(project, "milk.txt").writeText("2 litres")
 
-        // The account already exists, with content of its own.
-        val existing = File(store.dirOf("muffyuniverse"), "existing")
-        existing.mkdirs()
-
-        val adopted = store.adoptProvisional("muffyuniverse")
-
-        assertFalse("nothing was adopted", adopted)
-        assertTrue("the provisional project is untouched", File(theirs, "keep.txt").isFile)
-        assertTrue("and the account's own project is too", existing.isDirectory)
-    }
-
-    @Test
-    fun `an empty provisional account is removed rather than adopted`() {
-        // **An empty `~local` should not become an empty project folder on the account.** Signing in
-        // first thing is the common case, and a workspace with nothing in it has nothing to hand
-        // over - but the folder still has to go, or the next start remakes it beside a real account.
-        val provisional = store.ensureProvisional()
-        // Only the app's own state folder, which every account has and which is not content.
-        assertFalse("it starts with nothing to adopt", store.adoptProvisional("muffyuniverse"))
-        assertFalse("and the empty folder is gone", store.dirOf(provisional.login).exists())
-        assertFalse("with no account folder made", store.dirOf("muffyuniverse").exists())
+        assertFalse("removing it is refused", store.remove(provisional.login))
+        assertFalse("and forgetting it too", store.forget(provisional.login))
+        assertTrue("so the project is still there", File(project, "milk.txt").isFile)
+        assertTrue("and it is still an account", store.exists(provisional.login))
+        assertTrue("with its own details", store.detailsOf(provisional.login).isFile)
     }
 
     @Test

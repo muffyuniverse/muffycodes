@@ -3525,6 +3525,15 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun setAddress(project: String, url: String, onDone: (Boolean) -> Unit = {}) {
         val ws = workspace ?: return
+        // **Local projects have no remote, and the operator's 2026-11-09 ruling is why.** `~local` is
+        // not an identity: no host, no key, and `whoFor` answers null, so an address here would be a
+        // repository nothing on this phone can push to. The way out is stated, not implied — the
+        // project moves to an account (`Transfer`) and the address is set there.
+        if (isProvisionalAccount) {
+            message = localOriginSaid()
+            onDone(false)
+            return
+        }
         val address = url.trim()
         if (address.isEmpty()) {
             message = "An address is needed"
@@ -3650,6 +3659,64 @@ class AppViewModel @JvmOverloads constructor(
      * leaves a window in which the folder is gone and its secrets are not, and nothing then knows
      * which project they belonged to.
      */
+    // ---- moving a project between accounts (§3.9) ---------------------------
+
+    /**
+     * **The accounts a project may go to** — every account on this phone except the one it is in.
+     *
+     * The menu offers the transfer only when this is not empty, because a transfer with one destination
+     * that is where you already are is a window that cannot do anything.
+     */
+    fun accountsFor(project: String): List<Account> {
+        val here = activeLogin
+        return accounts.accounts().filter { it.login != here }
+    }
+
+    /** Moves [project] out of this account and into [toLogin]'s. */
+    fun moveProject(project: String, toLogin: String): Boolean = transferProject(project, toLogin, copy = false)
+
+    /** Copies [project] into [toLogin]'s, leaving this account's exactly as it is. */
+    fun copyProject(project: String, toLogin: String): Boolean = transferProject(project, toLogin, copy = true)
+
+    /**
+     * The one road for both, because they differ in one argument and agree about every rule.
+     *
+     * **The destination's name is read, not the login** — [`toLogin`] is what the person picked, and
+     * `AccountStore.account` has already answered whether this phone has it. An account that is not here
+     * is refused before anything is touched.
+     */
+    private fun transferProject(project: String, toLogin: String, copy: Boolean): Boolean {
+        val ws = workspace ?: return false
+        val to = accounts.account(toLogin)?.let { accounts.dirOf(it.login) }
+        if (to == null) {
+            message = "\"$toLogin\" is not an account on this phone, so \"$project\" did not move."
+            return false
+        }
+        val toIsLocal = accounts.isProvisional(toLogin)
+        Transfer.problem(ws, to, project, toIsLocal)?.let { message = it; return false }
+        val verb = if (copy) "Copied" else "Moved"
+        return when (val done = Transfer.go(ws, to, project, copy)) {
+            is Result.Success -> {
+                // **The screen cannot be showing what left.** A moved project's path names a folder that
+                // is no longer in this account, so the browser goes back to the account root rather than
+                // drawing a row for a folder that has gone; a copy leaves the screen alone.
+                if (!copy && currentProject == project) {
+                    path = emptyList()
+                    editingPath = null
+                    historyPath = null
+                }
+                refresh()
+                message = "$verb \"$project\" to $toLogin."
+                Trace.tap(if (copy) "copy project" else "move project", "$project -> $toLogin")
+                true
+            }
+            is Result.Failure -> {
+                message = done.exceptionOrNull()?.message ?: "\"$project\" could not be transferred."
+                false
+            }
+        }
+    }
+
     fun deleteProject(project: String) {
         val ws = workspace ?: return
         // **The system project is not deletable.** It holds the settings that belong to the whole
@@ -3753,6 +3820,14 @@ class AppViewModel @JvmOverloads constructor(
         onDone: (Boolean) -> Unit = {},
     ) {
         val ws = workspace ?: return
+        // **A clone arrives with an origin, so it is the same act as `setAddress`** — and refused here
+        // for the same reason: Local has no host to reach the address with. Said at the door rather
+        // than hidden in the menu, because an agent reaches this verb too.
+        if (isProvisionalAccount) {
+            message = localOriginSaid()
+            onDone(false)
+            return
+        }
         val address = url.trim()
         if (address.isEmpty()) {
             message = "An address is needed: this is where the repository lives"
@@ -4961,16 +5036,12 @@ class AppViewModel @JvmOverloads constructor(
         commitName: String,
         commitEmail: String,
     ) {
-        // **Adopt BEFORE saving, and the order is load-bearing.** `accounts.save` creates the
-        // account's folder, and `adoptProvisional` refuses when that folder already exists - so
-        // saving first would leave the provisional content behind for ever, on the one occasion
-        // the person most expects it to come with them.
+        // **Nothing is moved, and this is the operator's 2026-11-09 ruling rather than a tidy-up.**
+        // `~local` cannot be removed, so it cannot be renamed away at sign-in either: the projects a
+        // person made before signing in are still in Local, and they move when the person says so
+        // (`moveSelectedAccount`/`copySelelectedAccount`, §3.9 of the credentials plan). The account
+        // that arrives is empty, which is the truth: it is a new identity with a new key.
         //
-        // **What moves is the whole workspace**, by one rename: the local projects made before
-        // signing in become this account's projects, and their git repositories, the system
-        // project and the request history go with them because they were all inside the same
-        // folder. Nothing is copied, so a failure leaves everything on the provisional side.
-        val adopted = accounts.adoptProvisional(login)
         // **The key is stored at account scope**, not project scope, because a clone happens before a
         // project exists: a project-scoped secret could never be present the moment it is first needed.
         // The store's narrowest-first lookup still lets a project override it later.
@@ -4993,12 +5064,6 @@ class AppViewModel @JvmOverloads constructor(
         forgetBranches()
         backToMain()
         path = emptyList()
-        if (adopted) {
-            // Said once, because a person who had projects before signing in should be told they
-            // came along rather than discovering it - and if they did NOT come along (an account
-            // of that name already had a folder) this is the only signal that something was left.
-            Trace.note("adopted-provisional", login)
-        }
         refresh()
         // **The first half of the way out.** A key may already be on this phone from before the
         // sign-in, or the person may connect the model next; either order finishes onboarding.
@@ -5474,6 +5539,15 @@ class AppViewModel @JvmOverloads constructor(
      * without it the folders stay and signing in again returns to them (§5).
      */
     fun removeAccount(login: String, deleteCopies: Boolean) {
+        // **Refused at the door, in words.** `AccountStore` refuses too — this is the sentence, and the
+        // rule is there. Local is not an identity this phone can act as, it is the workspace every
+        // phone has, so there is nothing to remove and no key to forget; what leaves is a project, by
+        // `Transfer`, and it leaves into an account.
+        if (accounts.isProvisional(login)) {
+            message = "Local is this phone's own workspace and cannot be removed. " +
+                "Move its projects into an account and they are there; the folder stays."
+            return
+        }
         // **The answer decides whether there is a second attempt.** A save already on its way to the
         // worker can write into the tree while this walks it, and then `delete` fails on a folder
         // that has just been re-made — the account stays on the phone and the person is told nothing.
@@ -5485,14 +5559,15 @@ class AppViewModel @JvmOverloads constructor(
         // at an account that is no longer here.
         // The disk is what says which accounts this phone has; the keys only say
         // which of them can still open GitHub.
-        // **The provisional account is the floor.** Removing the last real account leaves `~local`,
-        // which is a workspace rather than an absence - so the browser still lists local projects
-        // and the system project still has its README. It is made here rather than assumed, because
-        // this is the moment it can have been adopted away by a sign-in and not yet remade.
+        // **The provisional account is the floor, and it is now a fact rather than a call.** It cannot
+        // be removed, so it is always in `accounts()` — the chain below is about which of the *real*
+        // accounts takes over, and `~local` is the answer when none does. The old last resort made it
+        // here (`ensureProvisional()`), because a sign-in could have adopted it away; nothing can any
+        // more, and a line that remakes what cannot be missing is a line that hides a bug.
         val next = accounts.accounts().map { it.login }
             .firstOrNull { it != login && !accounts.isProvisional(it) }
             ?: credentials.logins().firstOrNull { accounts.exists(it) && it != login }
-            ?: accounts.ensureProvisional().login
+            ?: AccountStore.PROVISIONAL
         credentials.activeLogin = next
         activeLogin = next
         path = emptyList()

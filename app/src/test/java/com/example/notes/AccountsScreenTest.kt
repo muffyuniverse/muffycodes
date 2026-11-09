@@ -194,10 +194,10 @@ class AccountsScreenTest {
 
     @Test
     fun `removing the last real account leaves the local workspace, not a blank screen`() {
-        // **The empty state is unreachable, and that is the design.** `removeAccount` makes sure the
-        // provisional account exists rather than assuming it does, because a sign-in can adopt it
-        // away — so the menu always has at least one row. An empty list would mean a screen that
-        // could not act, and this is the assertion that the floor is really there.
+        // **The empty state is unreachable, and that is the design.** The local account cannot be
+        // removed (§3.9: *"make ~local undeletable … so that local always exist"*), so the menu always
+        // has at least one row. An empty list would mean a screen that could not act, and this is the
+        // assertion that the floor is really there.
         scene.viewModel.removeAccount(scene.login, deleteCopies = true)
         accounts()
 

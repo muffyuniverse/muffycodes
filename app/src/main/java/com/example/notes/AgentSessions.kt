@@ -133,6 +133,29 @@ class AgentSessions(private val accountDir: File) {
         }
     }
 
+    /**
+     * Forgets **every branch of [project]** — for a project that is leaving this account.
+     *
+     * The branch is not a parameter here on purpose: [remove] takes one because one branch of a
+     * project is one agent, and forgetting the wrong one is silent in both directions. This is the
+     * other question — "this project is not here any more" — where every row for it is a claim about
+     * an agent standing in a worktree that has gone.
+     */
+    fun removeProject(project: String) {
+        synchronized(guard) {
+            val root = objectOf()
+            val keys = root.keys().asSequence().toList()
+            var changed = false
+            for (key in keys) {
+                if (AgentSession.projectOf(key) == project) {
+                    root.remove(key)
+                    changed = true
+                }
+            }
+            if (changed) write(root)
+        }
+    }
+
     private fun objectOf(): JSONObject = try {
         if (file.isFile) JSONObject(file.readText()) else JSONObject()
     } catch (t: Throwable) {

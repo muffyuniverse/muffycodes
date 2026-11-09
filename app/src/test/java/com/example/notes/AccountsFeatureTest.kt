@@ -191,8 +191,8 @@ class AccountsFeatureTest : FeatureTest() {
 
     @Test
     fun `a second account cannot take the first one's name`() {
-        // **A login is a folder name**, so two accounts cannot share one — and adopting an existing
-        // folder would hand this account somebody else's projects. Said before anything is written.
+        // **A login is a folder name**, so two accounts cannot share one — and a second account of the
+        // same name would be a second claim on one folder of projects. Said before anything is written.
         // This class starts with no account, so the first one has to be made before a second can clash.
         scene.signedIn()
         scene.viewModel.addHostAccount("test-account", "gitlab.com", "", "a-key")
@@ -219,6 +219,49 @@ class AccountsFeatureTest : FeatureTest() {
 
         scene.viewModel.switchTo("test-account")
         assertTrue("switching back shows it again", scene.names().contains("only_in_the_first"))
+    }
+
+    @Test
+    fun `the local account is not offered for removal, and is refused if it is asked for`() {
+        // **The operator, 2026-11-09**: *"make ~local undeletable … so that local always exist and we
+        // dont need machinery for its recreation."* Two doors and one rule: the store refuses it, and
+        // the view model says so instead of doing nothing. A silent no-op here would be the one thing
+        // this app does not do — the menu is gone, the sentence stays, because the sentence is the rule.
+        scene.folder("mine")
+        val inside = File(scene.workspace!!.accountDir, "mine")
+
+        scene.viewModel.removeAccount(AccountStore.PROVISIONAL, deleteCopies = true)
+        scene.viewModel.removeAccount(AccountStore.PROVISIONAL, deleteCopies = false)
+
+        assertTrue("still the account we are in", scene.viewModel.isProvisionalAccount)
+        assertTrue("the account is still known", scene.viewModel.known(AccountStore.PROVISIONAL))
+        assertTrue("its folder is still there", inside.isDirectory)
+        assertTrue(
+            "and the refusal says why: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("cannot be removed"),
+        )
+    }
+
+    @Test
+    fun `a local project cannot be given an address, and the sentence says where to go`() {
+        // **§3.9's second ruling, measured at both doors.** Local stores no host and no key, and
+        // `whoFor` answers null for it, so an address here names a repository this phone cannot speak
+        // to. The refusal names the transfer rather than the prohibition — the same shape the write
+        // refusals use, and the reason a person is not left guessing at "no".
+        scene.localProject("notes")
+        var answered: Boolean? = null
+        scene.viewModel.setAddress("notes", "https://host/owner/notes.git") { answered = it }
+
+        assertEquals("refused", false, answered)
+        assertNull("and nothing was written", scene.viewModel.remoteUrlOf("notes"))
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it names the rule: $said", said.contains("Local"))
+        assertTrue("and the way out: $said", said.contains("Move the project into an account"))
+
+        // **The second door is the same act**, because a clone arrives with the address already in it.
+        scene.viewModel.addProjectFromUrl("https://host/owner/arriving.git", "arriving") { answered = it }
+        assertEquals("a clone is refused too", false, answered)
+        assertFalse("and made nothing", scene.viewModel.projectNames.contains("arriving"))
     }
 
     @Test

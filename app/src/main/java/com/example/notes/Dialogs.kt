@@ -398,6 +398,14 @@ fun AddProjectDialog(
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
     onAddUrl: (url: String, name: String) -> Unit,
+    /**
+     * **Whether an address may be typed here at all** — false for the local account, which has no host
+     * to reach one with (§3.9 of the credentials plan).
+     *
+     * The half is *missing* rather than disabled, and a sentence takes its place: a dialog that shows a
+     * field and refuses what is typed into it spends the person's press to teach them the rule.
+     */
+    fromAddress: Boolean = true,
 ) {
     var address by remember { mutableStateOf("") }
     // **Follows the address until the person types a name of their own.** A prefill that overrides
@@ -421,42 +429,98 @@ fun AddProjectDialog(
                 }
                 HorizontalDivider()
                 Text(
-                    "Or from an address",
+                    if (fromAddress) "Or from an address" else "A project here stays on this phone",
                     style = MaterialTheme.typography.titleSmall,
                 )
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = {
-                        address = it
-                        if (!nameEdited) name = Workspace.repoNameOf(it)
-                    },
-                    label = { Text("Repository address") },
-                    singleLine = true,
-                    supportingText = {
-                        Text(
-                            "https://host/owner/repository.git — checked with ls-remote before " +
-                                "anything is cloned.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    },
-                )
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        name = it
-                        nameEdited = it != suggested
-                    },
-                    label = { Text("Name on this phone") },
-                    singleLine = true,
-                )
-                TextButton(
-                    enabled = address.isNotBlank() && name.isNotBlank(),
-                    onClick = { onAddUrl(address, name) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Add it") }
+                if (!fromAddress) {
+                    Text(
+                        "Local has no host to reach an address with. Sign in, and a repository can " +
+                            "arrive from anywhere — or move this project into an account and set its " +
+                            "address there.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (fromAddress) {
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = {
+                            address = it
+                            if (!nameEdited) name = Workspace.repoNameOf(it)
+                        },
+                        label = { Text("Repository address") },
+                        singleLine = true,
+                        supportingText = {
+                            Text(
+                                "https://host/owner/repository.git — checked with ls-remote before " +
+                                    "anything is cloned.",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                    )
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = {
+                            name = it
+                            nameEdited = it != suggested
+                        },
+                        label = { Text("Name on this phone") },
+                        singleLine = true,
+                    )
+                    TextButton(
+                        enabled = address.isNotBlank() && name.isNotBlank(),
+                        onClick = { onAddUrl(address, name) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Add it") }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * **Where a project is going** — the accounts on this phone, minus the one it is in.
+ *
+ * A list rather than a typed name, because an account is a folder and a folder is chosen by looking at
+ * it. The two modes differ only in the promise, so the window says which one it is making: a move ends
+ * the project here, a copy leaves it.
+ */
+@Composable
+fun TransferProjectDialog(
+    project: String,
+    copy: Boolean,
+    accounts: List<String>,
+    onDismiss: () -> Unit,
+    onGo: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (copy) "Copy \"$project\" to…" else "Move \"$project\" to…") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (copy) {
+                        "The project stays here and a copy goes there: its files, its history and " +
+                            "its branches. The copy has its own address, its own agent and its own " +
+                            "templates."
+                    } else {
+                        "The project leaves this account and arrives in the one you pick: its files, " +
+                            "its history and its branches. Its agent and its template choice do not " +
+                            "travel — those belong to the account that spent them."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                for (login in accounts) {
+                    TextButton(
+                        onClick = { onGo(login) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(login) }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

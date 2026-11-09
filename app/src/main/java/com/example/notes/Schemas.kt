@@ -184,6 +184,32 @@ object Schemas {
     }
 
     /**
+     * Forgets **every branch pointer of [project]** — for a project that is moving accounts.
+     *
+     * **A pointer is a path in this account's folder**, so it must not travel: the unit it names lives
+     * in `shared/requests/` here, and the destination has its own. Dropping the rows rather than
+     * carrying them means a moved branch refuses by naming the picker, which is true and fixable —
+     * a row naming a file that is not there would refuse by naming a file.
+     */
+    fun clearPointers(accountDir: File, project: String) {
+        val file = pointerFile(accountDir)
+        if (!file.isFile) return
+        val root = try {
+            JSONObject(file.readText())
+        } catch (e: Exception) {
+            return
+        }
+        var changed = false
+        for (key in root.keys().asSequence().toList()) {
+            if (AgentSession.projectOf(key) == project) {
+                root.remove(key)
+                changed = true
+            }
+        }
+        if (changed) Beside.write(file, root.toString(2))
+    }
+
+    /**
      * **The folder's existence is the flag**: when it is not there it is made and filled with the
      * shipped three, and when it is there it is left exactly as it is.
      *

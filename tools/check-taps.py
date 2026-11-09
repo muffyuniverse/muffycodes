@@ -84,6 +84,11 @@ VOCABULARY = {
     # old names stay because a log written by an older build still holds them.
     "set address", "confirm set address", "publish", "keep local",
     "confirm publish", "confirm keep local",
+    # **A project leaving or being copied into another account** (§3.9). One name each because a move
+    # and a copy are different promises — one ends the source, one does not — and the log has to be
+    # able to answer "did the folder leave this account" without reading the arg.
+    "move project", "copy project",
+    "confirm move project", "confirm copy project",
     # a project's newest artifact out to the phone, through the same function the agent's tool uses
     "export",
     # publishing a release from inside the app (§13b.7): the strip's button, then the window's press

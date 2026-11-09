@@ -232,23 +232,49 @@ class Worktrees(private val workspace: Workspace) {
         val target = File(worktreesRoot(), to)
         target.parentFile?.mkdirs()
         if (!source.renameTo(target)) return false
-        // **The walk, not one level of listing.** A branch called `feature/x` is a folder `feature`
-        // holding `x`, and `feature` itself has no `.git` — so a top-level listing would "repoint" a
-        // folder that is not a worktree and leave the real one pointing at a path that no longer
-        // exists. `branches` is the same walk, and it reads git's own test for a tree.
+        // **The private entry is renamed first, because its name is derived from the project's.** Leaving
+        // the old id in place would be a worktree git lists under a project that is not there.
+        //
+        // The walk, not one level of listing: a branch called `feature/x` is a folder `feature` holding
+        // `x`, and `feature` itself has no `.git` — so a top-level listing would "repoint" a folder that
+        // is not a worktree and leave the real one pointing at a path that no longer exists.
         branches(to).filter { it != mainBranch }.forEach { branch ->
-            val moved = dirOf(to, branch)
             val oldId = idOf(from, branch)
             val newId = idOf(to, branch)
-            val oldPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$oldId")
-            val newPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$newId")
-            if (oldPrivate.isDirectory && oldId != newId) oldPrivate.renameTo(newPrivate)
-            // **Rewritten, not patched.** These are three-line files whose whole content is one path,
-            // so a replacement is the same size of job as an edit and cannot half-succeed.
+            if (oldId != newId) {
+                val oldPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$oldId")
+                val newPrivate = File(File(workspace.projectDir(to), ".git"), "worktrees/$newId")
+                if (oldPrivate.isDirectory) oldPrivate.renameTo(newPrivate)
+            }
+        }
+        return repoint(to)
+    }
+
+    /**
+     * **Rewrites git's two absolute pointers for every branch folder of [project].**
+     *
+     * A worktree is joined to its repository by two three-line files that name each other by *absolute*
+     * path: the tree's `.git` holds `gitdir: <common>/.git/worktrees/<id>`, and that entry's `gitdir`
+     * holds the tree's path back. `commondir` (`../..`) and the `shared` link are relative and survive a
+     * move untouched — these two do not, and a tree whose pointers name paths that no longer exist is
+     * reported by `GitService.openExisting` as a repository with **no branch and no exception**, the same
+     * silent shape as the `setGitDir` bug this file's header describes.
+     *
+     * Split out of [rename] because moving a project to another account needs exactly this half and none
+     * of the folder renames (`Transfer`): the ids are the project's name, which does not change when the
+     * account does.
+     *
+     * **Rewritten, not patched.** These are one-path files, so a replacement is the same size of job as an
+     * edit and cannot half-succeed.
+     */
+    fun repoint(project: String): Boolean {
+        branches(project).filter { it != mainBranch }.forEach { branch ->
+            val tree = dirOf(project, branch)
+            val private = commonEntry(project, branch)
             runCatching {
-                Beside.write(File(moved, ".git"), "gitdir: " + newPrivate.absolutePath + "\n")
-                Beside.write(File(newPrivate, "gitdir"), File(moved, ".git").absolutePath + "\n")
-                Beside.write(File(newPrivate, "commondir"), "../..\n")
+                Beside.write(File(tree, ".git"), "gitdir: " + private.absolutePath + "\n")
+                Beside.write(File(private, "gitdir"), File(tree, ".git").absolutePath + "\n")
+                Beside.write(File(private, "commondir"), "../..\n")
             }
         }
         return true

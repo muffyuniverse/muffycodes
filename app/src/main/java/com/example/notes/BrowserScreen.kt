@@ -361,15 +361,23 @@ fun AccountsScreen(
                                         onConnection()
                                     },
                                 )
-                                DropdownMenuItem(
-                                    text = {
-                                        Text("Remove…", color = MaterialTheme.colorScheme.error)
-                                    },
-                                    onClick = {
-                                        menu = null
-                                        onRemove(account.login)
-                                    },
-                                )
+                                // **No removal for Local, because there is nothing to remove.**
+                                // `removeAccount` refuses it and `AccountStore` refuses it twice
+                                // over; this is the third place, for the ordinary reason — a menu
+                                // item whose only outcome is a sentence about why it cannot work is
+                                // a press wasted. The row says what Local *is* in its subtitle
+                                // instead, which is where a person looks for it.
+                                if (!viewModel.accounts.isProvisional(account.login)) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text("Remove…", color = MaterialTheme.colorScheme.error)
+                                        },
+                                        onClick = {
+                                            menu = null
+                                            onRemove(account.login)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -412,6 +420,13 @@ fun BrowserScreen(
     onRowDelete: (String) -> Unit,
     /** Synced -> local. Asks first, because the repository stays where it is. */
     onRowKeepLocal: (String) -> Unit = {},
+    /**
+     * **A project going to another account** (§3.9) — `(project, copy)`.
+     *
+     * Offered only when this phone has a second account, because the window's list would otherwise be
+     * empty: a move needs somewhere to go.
+     */
+    onRowTransfer: (String, Boolean) -> Unit = { _, _ -> },
     onCreateFile: () -> Unit,
     onCreateFolder: () -> Unit,
     /** A blank picture, which needs a size as well as a name. */
@@ -664,7 +679,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowKeepLocal, onRowModel, onRowGit,
+                        onRowKeepLocal, onRowModel, onRowGit, onRowTransfer,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -939,6 +954,8 @@ private fun ProjectList(
     /** A project's own credentials, from its row's menu — see [BrowserScreen]'s parameters. */
     onModel: (String) -> Unit,
     onGit: (String) -> Unit,
+    /** A project going to another account — see [BrowserScreen]'s parameter. */
+    onTransfer: (String, Boolean) -> Unit,
     /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
 ) {
     val names = viewModel.projectNames
@@ -1040,13 +1057,21 @@ private fun ProjectList(
                             // a project whose address names something else is renamed after it. There
                             // is no separate "put on GitHub" because there is no repository to make
                             // here: that is the host's own page, and this window takes its result.
-                            DropdownMenuItem(
-                                text = { Text("Set the address…") },
-                                onClick = {
-                                    menu = false
-                                    onRename(name)
-                                },
-                            )
+                            //
+                            // **Not offered in the local account**, which has no host and no key to
+                            // reach an address with (§3.9): `setAddress` refuses it, and a menu item
+                            // whose only outcome is a refusal is a press spent learning a rule the
+                            // screen could have said. A project kept local *inside* an account still
+                            // has this item — that is how one is published.
+                            if (!viewModel.isProvisionalAccount) {
+                                DropdownMenuItem(
+                                    text = { Text("Set the address…") },
+                                    onClick = {
+                                        menu = false
+                                        onRename(name)
+                                    },
+                                )
+                            }
                             // **The two credentials this project may hold** (§2.2 of the credentials
                             // plan). Two entries rather than one window with a switch, because the
                             // two kinds are independent: a person may want the agent to ask the model
@@ -1079,6 +1104,27 @@ private fun ProjectList(
                                     onClick = {
                                         menu = false
                                         onKeepLocal(name)
+                                    },
+                                )
+                            }
+
+                            // **A project is a folder, and a folder can go to another account** (§3.9).
+                            // Two items rather than one with a switch, because they make different
+                            // promises — a move ends the project here, a copy does not — and a person
+                            // choosing between them is choosing whether to keep it.
+                            if (viewModel.accountsFor(name).isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Move to account…") },
+                                    onClick = {
+                                        menu = false
+                                        onRowTransfer(name, false)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Copy to account…") },
+                                    onClick = {
+                                        menu = false
+                                        onRowTransfer(name, true)
                                     },
                                 )
                             }

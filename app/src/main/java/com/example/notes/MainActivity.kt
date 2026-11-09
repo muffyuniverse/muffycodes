@@ -145,6 +145,8 @@ private sealed interface Pending {
     data class Release(val project: String) : Pending
     /** Synced -> local: the remote goes, every version stays. */
     data class KeepLocal(val project: String) : Pending
+    /** A project going to another account (§3.9): `copy` says whether it stays here. */
+    data class TransferProject(val project: String, val copy: Boolean) : Pending
     data class RenameEntry(val entry: Entry) : Pending
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
@@ -610,6 +612,12 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
                 onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
+                // **A project's own move, and it is offered only where it can go somewhere** (§3.9):
+                // with one account on the phone the window would list nothing.
+                onRowTransfer = { project, copy ->
+                    tap(if (copy) "copy project" else "move project", project)
+                    pending = Pending.TransferProject(project, copy)
+                },
                 // **A project's row sets the project's credentials**, which is `main`'s scope — the
                 // branch a project is made of, and whose folder is the project's own tree.
                 onRowModel = { project ->
@@ -876,6 +884,10 @@ private fun Dialogs(
 
         Pending.AddProject -> AddProjectDialog(
             onDismiss = dismiss,
+            // **Local has no host, so there is no address to type** (§3.9): the half is missing with a
+            // sentence in its place, and `addProjectFromUrl` refuses the same act if it arrives from
+            // somewhere else.
+            fromAddress = !viewModel.isProvisionalAccount,
             onNewProject = {
                 dismiss()
                 newProject()
@@ -890,6 +902,24 @@ private fun Dialogs(
         )
 
         Pending.NewProject -> NewProjectUI(viewModel, dismiss)
+
+        is Pending.TransferProject -> TransferProjectDialog(
+            project = pending.project,
+            copy = pending.copy,
+            // **Read when the window opens**, so it lists the accounts this phone has now rather than
+            // the ones it had when the row was drawn.
+            accounts = viewModel.accountsFor(pending.project).map { it.login },
+            onDismiss = dismiss,
+            onGo = { login ->
+                tap(if (pending.copy) "confirm copy project" else "confirm move project", login)
+                dismiss()
+                if (pending.copy) {
+                    viewModel.copyProject(pending.project, login)
+                } else {
+                    viewModel.moveProject(pending.project, login)
+                }
+            },
+        )
 
         is Pending.SetAddress -> SetAddressDialog(
             project = pending.project,

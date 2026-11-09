@@ -68,6 +68,22 @@ data class Account(
 fun removalProblemSaid(login: String): String =
     "\"$login\" is still on this phone: something was still writing into it. Remove it again."
 
+/**
+ * What is said when somebody tries to give a project in the local account a remote.
+ *
+ * **The local account is not an identity, so it has no host to push to.** It stores no host and no key,
+ * and `whoFor` answers null for it — so an address here would be a repository this phone cannot speak
+ * to. The sentence names the way out rather than the prohibition: move the project into an account,
+ * where the key it already has can reach the address.
+ *
+ * Three doors ask this — `setAddress`, `addProjectFromUrl` and a transfer arriving connected — because
+ * they are three ways to write `remote.origin.url`, and a rule kept at one of them is a rule with a
+ * hole.
+ */
+fun localOriginSaid(): String =
+    "Projects in Local stay on this phone: it has no host and no key, so there is nothing to " +
+        "reach an address with. Move the project into an account and set the address there."
+
 internal fun noreplyEmail(login: String, id: Long = 0L, host: String = GITHUB_HOST): String {
     if (!Secrets.isHost("https://$host/", GITHUB_HOST) && host.isNotBlank()) {
         // Not GitHub's domain, so not GitHub's address form. `user@host` is what every mail-shaped
@@ -97,8 +113,13 @@ class AccountStore(private val filesDir: File) {
     val accountsDir: File get() = File(filesDir, ACCOUNTS)
 
     /**
-     * **The account that exists before anybody signs in, and again whenever the last one is
-     * removed.**
+     * **The account that exists before anybody signs in, and that is never removed.**
+     *
+     * It is made once, on a phone that has no account at all, and from then on it is as fixed as the
+     * app's own folder: `remove` and `forget` refuse it. That is the operator's 2026-11-09 ruling —
+     * *"make ~local undeletable … so that local always exist and we dont need machinery for its
+     * recreation"* — and its consequence is the good part: there is no code that remakes it, because
+     * there is no state in which it is gone.
      *
      * Its folder is a real account folder in every respect - projects, git repositories, the
      * system project, the request history - so every part of the app that asks "is there a
@@ -121,11 +142,12 @@ class AccountStore(private val filesDir: File) {
     fun dirOf(login: String): File = File(accountsDir, login)
 
     /**
-     * Makes sure the provisional account exists on disk, and answers its folder.
+     * Makes sure the provisional account exists on disk — **on a phone that has no account at all.**
      *
-     * Called when the app starts and after the last account is removed. **It writes nothing if the
-     * folder is already there**, because that folder may hold months of a person's work - this is
-     * the one account whose contents are never disposable.
+     * Called when the app starts. It is *creation*, not recreation: the account cannot be removed, so
+     * the only state this answers to is a fresh install, and nothing has to remake it later. **It
+     * writes nothing if the folder is already there**, and that matters more now than it did: the
+     * folder it would otherwise touch holds the only copy of work on a phone that has never signed in.
      */
     fun ensureProvisional(): Account {
         val dir = dirOf(PROVISIONAL)
@@ -134,44 +156,6 @@ class AccountStore(private val filesDir: File) {
             save(provisional)
         }
         return provisional
-    }
-
-    /**
-     * Hands everything in the provisional account to [login], **by renaming its folder.**
-     *
-     * **A rename, not a copy.** The two folders are both under `accountsDir`, so this is one
-     * atomic step: either the projects are the new account's or they are still the provisional
-     * account's, and there is no moment at which both hold them or neither does. A copy would
-     * leave two workspaces claiming the same projects if it failed halfway, and nothing on screen
-     * would say which one was real.
-     *
-     * **Refuses when [login] already has a folder.** Merging two workspaces is not a rename - it
-     * needs a rule for two projects of the same name, and two git repositories that disagree about
-     * their history. Refusing and leaving the provisional account untouched is the only answer that
-     * cannot lose work; the caller decides what to tell the person.
-     *
-     * Answers true when the provisional content is now the account's.
-     */
-    fun adoptProvisional(login: String): Boolean {
-        val from = dirOf(PROVISIONAL)
-        val to = dirOf(login)
-        // **Nothing to hand over**: no provisional folder, or one that never got anything in it.
-        // The second case still removes it, so a sign-in does not leave an empty `~local` behind.
-        val hasContent = from.isDirectory &&
-            (from.listFiles() ?: emptyArray()).any { it.name != STATE }
-        if (!hasContent) {
-            Workspace.deleteTree(from)
-            return false
-        }
-        if (to.exists()) return false
-        to.parentFile?.mkdirs()
-        return try {
-            from.renameTo(to)
-        } catch (t: Throwable) {
-            // A rename that throws leaves the provisional folder where it was, which is the safe
-            // half of the failure: the person's projects are still reachable.
-            false
-        }
     }
 
     /** Every account with an `account.json` on disk. */
@@ -242,10 +226,17 @@ class AccountStore(private val filesDir: File) {
      * is told the account was removed while it is still on the phone. A caller that cannot see the
      * `false` cannot ask again or say so.
      */
-    fun remove(login: String): Boolean =
+    fun remove(login: String): Boolean {
+        // **The provisional account is not removable, and it is the store that says so.** Every other
+        // answer about a removal — the sentence on screen, the second attempt on the worker — is a
+        // report; this is the rule. `~local` is the account this phone always has: work that has never
+        // been signed in lives in it, and a phone with no account at all would be a phone with nowhere
+        // to type. Its projects leave by `Transfer`, one at a time, and the folder stays.
+        if (isProvisional(login)) return false
         // The whole account goes, so following a link here would delete nothing that is not already
         // being deleted - but the same function is used for both, so it uses the safe walk.
-        Workspace.deleteTree(dirOf(login))
+        return Workspace.deleteTree(dirOf(login))
+    }
 
     /**
      * Forgets [login] and leaves everything the person made.
@@ -256,6 +247,9 @@ class AccountStore(private val filesDir: File) {
      * app's own folder inside it: the identity, the history, the pretend GitHub.
      */
     fun forget(login: String): Boolean {
+        // **Kept as a workspace, and that is the same rule the other half follows**: "forget" removes
+        // an identity this phone can act as, and `~local` never had one.
+        if (isProvisional(login)) return false
         // **`Workspace.deleteTree`, because this folder holds links to something that survives.**
         // `.muffy/worktrees/<project>/<branch>/system` points at the account's own system folder, and
         // `deleteRecursively()` follows a symlink - so forgetting an account while keeping its files
@@ -281,18 +275,23 @@ class AccountStore(private val filesDir: File) {
     /** The identity file of [login]. */
     fun detailsOf(login: String): File = File(stateDir(login), DETAILS)
 
-    private companion object {
+    companion object {
         const val ACCOUNTS = "accounts"
         /**
          * The provisional account's name.
          *
          * **`~` because a GitHub login cannot contain one**, so this is provably not a real
          * account and can never be shadowed by somebody who registers the name.
+         *
+         * **Public, because a caller needs the name when it is not choosing an account but naming the
+         * one that is always there** — `removeAccount`'s takeover chain answers with it when no real
+         * account is left, and asking the store to *make* it there would be asking for something that
+         * cannot be missing.
          */
         const val PROVISIONAL = "~local"
         /** Every file the app keeps for an account, in one hidden folder. */
-        const val STATE = ".muffy"
-        const val DETAILS = "account.json"
-        const val DEV_GITHUB = "test-github"
+        private const val STATE = ".muffy"
+        private const val DETAILS = "account.json"
+        private const val DEV_GITHUB = "test-github"
     }
 }
