@@ -131,17 +131,21 @@ object Schemas {
     }
 
     /**
-     * Writes [schema] at [path] — the app's one writer.
+     * Writes [schema] as the unit [name] of [kind] — the app's one writer, and it takes a **name**
+     * rather than a path.
+     *
+     * **A name, because a path is a thing to read and a name is a thing to write.** The pointer is a
+     * path, so a form may be kept anywhere; but the app only ever writes the unit it is asked to
+     * write, in the folder that kind's picker reads. A path here would be a second way to say where a
+     * file lands, and the leaf check would not catch `sub/chat.json` — which is a name that is fine
+     * and a folder that is not.
      *
      * A unit the app rewrites loses its comments, because [Schema.text] writes plain JSON: acceptable,
      * and worth saying because it is the one place a comment can vanish.
      */
-    fun write(ws: Workspace, path: String, schema: Schema): Result<Unit> {
-        val clean = path.trim().trim('/')
-        nameProblem(clean.substringAfterLast('/'))?.let {
-            return Result.failure(IllegalArgumentException(it))
-        }
-        return putFile(ws, clean, schema.text())
+    fun write(ws: Workspace, kind: ShapeKind, name: String, schema: Schema): Result<Unit> {
+        nameProblem(name)?.let { return Result.failure(IllegalArgumentException(it)) }
+        return putFile(ws, unitPath(kind, name.trim()), schema.text())
     }
 
     /** Removes one. A missing file is not an error: the state asked for is the state reached. */

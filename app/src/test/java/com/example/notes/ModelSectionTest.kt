@@ -64,7 +64,7 @@ class ModelSectionTest {
         url = "chat/completions",
         body = org.json.JSONObject("""{"model":"m","messages":"{{messages}}"}"""),
     )) {
-        Schemas.write(scene.workspace!!, Schemas.unitPath(ShapeKind.CHAT, name), form).getOrThrow()
+        Schemas.write(scene.workspace!!, ShapeKind.CHAT, name, form).getOrThrow()
     }
 
     // ---- the folder is the manager ---------------------------------------------

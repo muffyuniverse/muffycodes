@@ -200,10 +200,8 @@ class SchemasTest {
             forget = 2_000,
             trim = 3_000,
         )
-        val path = Schemas.unitPath(ShapeKind.CHAT, "mine.json")
-
-        Schemas.write(ws, path, form).getOrThrow()
-        val back = Schemas.read(ws, path).getOrThrow()
+        Schemas.write(ws, ShapeKind.CHAT, "mine.json", form).getOrThrow()
+        val back = Schemas.read(ws, Schemas.unitPath(ShapeKind.CHAT, "mine.json")).getOrThrow()
 
         assertEquals(form.address, back.address)
         assertEquals(form.url, back.url)
@@ -215,8 +213,12 @@ class SchemasTest {
 
     @Test
     fun `a number of zero is not written, because off is said by saying nothing`() {
-        val path = Schemas.unitPath(ShapeKind.CHAT, "quiet.json")
-        Schemas.write(ws, path, Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}")))
+        Schemas.write(
+            ws,
+            ShapeKind.CHAT,
+            "quiet.json",
+            Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}")),
+        )
         val text = File(Schemas.unitsDir(ws, ShapeKind.CHAT), "quiet.json").readText()
 
         // **The file a person opens is the shortest true statement of the request.** A `"trim": 0` in
@@ -304,7 +306,10 @@ class SchemasTest {
     fun `writing under a bad name writes nothing`() {
         val form = Schema("https://x.test/v1", url = "chat/completions", body = JSONObject("{}"))
 
-        assertTrue(Schemas.write(ws, Schemas.unitPath(ShapeKind.CHAT, "sub/chat.json"), form).isFailure)
+        // **A name, not a path** — so the failure does not depend on somebody remembering to look at
+        // the folder rather than only the leaf: `sub/chat.json` has a fine leaf and is still a second
+        // folder nobody chose.
+        assertTrue(Schemas.write(ws, ShapeKind.CHAT, "sub/chat.json", form).isFailure)
         assertFalse(File(Schemas.unitsDir(ws, ShapeKind.CHAT), "sub/chat.json").exists())
     }
 
