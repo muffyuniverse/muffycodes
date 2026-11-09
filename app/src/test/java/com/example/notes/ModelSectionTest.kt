@@ -80,8 +80,8 @@ class ModelSectionTest {
         var opened = 0
         compose.setContent { Section(onOpenTemplates = { opened++ }) }
 
-        // The shipped three, written when the folder was first read.
-        compose.onNodeWithText("3 templates — tap to edit").assertIsDisplayed()
+        // The shipped one, written when the folder was first read.
+        compose.onNodeWithText("1 template — tap to edit").assertIsDisplayed()
         compose.onNodeWithText("Request templates").performClick()
 
         assertEquals("the row asked for the folder", 1, opened)

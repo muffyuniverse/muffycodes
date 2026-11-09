@@ -203,6 +203,11 @@ class ModelConfigTest {
         val read = ModelConfigFile.parse(old).getOrThrow()
 
         assertEquals("the chat model still loads", "deepseek/deepseek-v4.1-flash-1017", read.active.model)
-        assertEquals("and the app writes the file without them", 1, ModelConfigFile.text(read).split("embedding").size - 1)
+        // **And the file the app writes holds neither of them**, which is what "still loads" has to
+        // mean for a build that no longer has the fields: reading an old file is not the same as
+        // keeping it, and the next write is what makes the old blocks go.
+        val written = ModelConfigFile.text(read)
+        assertEquals("no embedding block", false, written.contains("\"embedding\""))
+        assertEquals("no rerank block", false, written.contains("\"rerank\""))
     }
 }

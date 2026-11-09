@@ -447,10 +447,10 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `one server record carries a shape per kind, and a missing kind is the preset`() {
-        // **One connection, three requests.** A self-hosted server answers a chat, an embedding and a
-        // rerank at three paths with three bodies; a single shape on the row would have had to be the
-        // chat's, and a server that speaks all three would have been told how to answer one.
+    fun `a connection answers with the shape it stored, and falls back to the preset`() {
+        // **One kind is left, and both halves still matter.** A connection stored by another build may
+        // carry no shape for the chat turn, and a row that answered null would be a request that cannot
+        // be sent; the preset is what a compatible server needs, and it is the app's own fallback.
         val ollama = Shape(
             url = "/api/chat",
             // **A template, not a document**: a placeholder is a whole value, so the field that
@@ -458,17 +458,18 @@ class ConnectionsTest {
             body = JSONObject("""{"model":"{{model}}","messages":"{{messages}}"}"""),
             kind = ShapeKind.CHAT,
         )
-        val connection = Connection(
+        val stored = Connection(
             address = "http://127.0.0.1:11434",
             secret = "",
             shapes = mapOf(ShapeKind.CHAT to ollama),
         )
+        assertEquals("the shape it stored", "/api/chat", stored.shapeFor(ShapeKind.CHAT).url)
 
-        assertEquals("/api/chat", connection.shapeFor(ShapeKind.CHAT).url)
+        val bare = Connection(address = "http://127.0.0.1:11434", secret = "", shapes = emptyMap())
         assertEquals(
-            "and the kind it carries answers with the shape the connection stored",
-            "api/chat",
-            connection.shapeFor(ShapeKind.CHAT).url,
+            "and a row with no shape answers the app's preset",
+            Shape.CHAT.url,
+            bare.shapeFor(ShapeKind.CHAT).url,
         )
     }
 
