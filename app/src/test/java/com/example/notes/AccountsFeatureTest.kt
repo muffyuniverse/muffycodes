@@ -111,11 +111,11 @@ class AccountsFeatureTest : FeatureTest() {
         scene.signedIn()
 
         assertTrue("the account's folder is there", scene.workspace!!.accountDir.isDirectory)
-        // **Two rows, and neither is the person's project.** A brand-new account has the settings
-        // project, because that is where the system prompt is written and a prompt with nowhere to
-        // live is one nobody can edit — and `.muffy/`, the app's own flags, which report 28 asked to
-        // stop hiding. Folders sort by lowercase name, so the dot comes first.
-        assertEquals("and no project of their own yet", listOf(".muffy", "shared"), scene.names())
+        // **One row, and it is not the person's project.** `.muffy/` is the app's own flags, which
+        // report 28 asked to stop hiding. The `shared` row is still drawn — it is the app's folder,
+        // which is where the system prompt lives — but it comes from the workspace's second root
+        // rather than from the account's folder (§3.11), so it is not one of these entries.
+        assertEquals("and no project of their own yet", listOf(".muffy"), scene.names())
     }
 
     @Test

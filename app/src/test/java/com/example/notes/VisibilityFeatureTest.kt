@@ -28,15 +28,14 @@ class VisibilityFeatureTest : FeatureTest() {
         File(scene.workspace!!.accountDir, "loose").mkdirs()
         scene.viewModel.refresh()
 
-        // **The system folder is at the root too**, as a folder — it holds the settings that belong to
-        // the whole account, and a row is how a person reaches them. It is not a *project* (§13f);
-        // this list is the folder's contents, which is a different question from `projectNames`.
-        // Folders sort before files, then by name, so it lands after `Shopping`.
-        // **`.muffy` is a folder at the root now**, because report 28 asked for the app's own things
-        // to be visible and locked rather than hidden. Folders sort first by lowercase name.
-        // Folders sort by lowercase name, so `shared` lands before `Shopping` — one "sha" against one
-        // "sho" — and that ordering is the sort's, not this list's.
-        assertEquals(listOf(".muffy", "loose", "shared", "Shopping", "notes.txt"), scene.names())
+        // **`shared` is not in this list any more, and it is still a row.** The app's folder moved out
+        // of the account (§3.11): it is one per phone, so it is drawn as a row of its own by
+        // `ProjectList` rather than being one of the account folder's entries. What a person sees at
+        // the root is unchanged — a `shared` row they can open — and what changed is which list it
+        // comes from.
+        // **`.muffy` is a folder at the root**, because report 28 asked for the app's own things to be
+        // visible and locked rather than hidden. Folders sort first by lowercase name.
+        assertEquals(listOf(".muffy", "loose", "Shopping", "notes.txt"), scene.names())
     }
 
     @Test
@@ -59,8 +58,8 @@ class VisibilityFeatureTest : FeatureTest() {
         File(dir, "shown.txt").writeText("c")
         scene.viewModel.refresh()
 
-        // Folders first, then files, each by lowercase name - so `.muffy` comes before `system`.
-        assertEquals(listOf(".muffy", "shared", ".anything", "shown.txt"), scene.names())
+        // Folders first, then files, each by lowercase name.
+        assertEquals(listOf(".muffy", ".anything", "shown.txt"), scene.names())
     }
 
     @Test
@@ -135,7 +134,7 @@ class VisibilityFeatureTest : FeatureTest() {
 
         // **Sorted case-insensitively, which is the ordering rule** — and the names keep their
         // capitals now, because the app no longer lowercases what a person typed.
-        assertEquals(listOf(".muffy", "shared", "zebra", "apple.txt", "Milk.txt"), scene.names())
+        assertEquals(listOf(".muffy", "zebra", "apple.txt", "Milk.txt"), scene.names())
     }
 
     @Test
