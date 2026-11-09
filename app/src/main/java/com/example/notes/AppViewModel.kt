@@ -139,15 +139,14 @@ class AppViewModel @JvmOverloads constructor(
     // ---- who and where -----------------------------------------------------
 
     /**
-     * The login of the active account.
+     * The login of the active account, **or null when this phone has none.**
      *
-     * **Never null, because the provisional account always exists.** Before anybody signs in this
-     * is `~local`, whose folder is a real workspace - so a local project, the system project and the
-     * request history all work with no account, and every caller that asks "is there a workspace"
-     * answers yes. When the last account is removed it becomes `~local` again rather than nothing,
-     * which is why the screen can never be left pointing at an account that is gone.
+     * It used to be never null: a `~local` account always existed, so "which account" always had an
+     * answer. There is no account an app can ship (§3.11), so the honest value is exactly what the
+     * person has signed in — and every reader of [workspace] finds nothing rather than a workspace
+     * belonging to nobody.
      */
-    var activeLogin: String? by mutableStateOf(credentials.activeLogin ?: accounts.ensureProvisional().login)
+    var activeLogin: String? by mutableStateOf(credentials.activeLogin)
         private set
 
     /** The path from the account's root, as names. Empty means the root. */
@@ -387,9 +386,6 @@ class AppViewModel @JvmOverloads constructor(
 
     val account: Account? get() = accounts.account(activeLogin)
 
-    /** True while the workspace is the provisional one - the state before any sign-in. */
-    val isProvisionalAccount: Boolean get() = accounts.isProvisional(activeLogin)
-
     /**
      * **GitHub's own question, for the account that is signed in** — and nothing else of GitHub's.
      *
@@ -404,13 +400,13 @@ class AppViewModel @JvmOverloads constructor(
     val who: Who? get() = whoFor(activeLogin)
 
     /**
-     * True when there is a GitHub account behind the workspace.
+     * True when an account is open, **which is now the same question as "is there a workspace"**.
      *
-     * **Not "an account exists"**, because the provisional account is one and is not signed in to
-     * anything. Anything that needs a real account - pushing, pulling, listing repositories - asks
-     * this, and the provisional workspace answers no while still being a workspace.
+     * It used to be two: a `~local` account existed before anybody signed in, so "an account exists"
+     * and "this phone can act as somebody" were different answers. With no account shipped (§3.11)
+     * there is nothing to distinguish — a phone with no account has no workspace at all.
      */
-    val signedIn: Boolean get() = account != null && !isProvisionalAccount
+    val signedIn: Boolean get() = account != null
 
     /**
      * The active account's tree, or null when nobody is signed in.
@@ -438,17 +434,14 @@ class AppViewModel @JvmOverloads constructor(
     private var cachedWorkspace: Pair<String, Workspace>? = null
 
     /**
-     * Who commits, when nobody has signed in.
+     * Who commits. **An account's own identity, or the app's placeholder when there is none.**
      *
-     * **Not a `@users.noreply.github.com` address.** The provisional account's login is `~local`,
-     * and the derived address would be `~local@users.noreply.github.com` - a shape that claims to
-     * belong to a GitHub account that cannot exist. A commit made on this phone before signing in
-     * should say so, and it keeps saying so after the projects are adopted, because that is when it
-     * was made.
+     * The placeholder is reachable only on a phone with no account — where nothing can be committed
+     * anyway, because there is no project — so it is a value that must exist rather than one a person
+     * can meet.
      */
     private val author: GitAuthor
-        get() = if (accounts.isProvisional(activeLogin)) PROVISIONAL_AUTHOR
-        else account?.author() ?: DEFAULT_AUTHOR
+        get() = account?.author() ?: DEFAULT_AUTHOR
 
     private val git: ProjectGit?
         get() = workspace?.let { ws -> projectGit(ws) }
@@ -523,12 +516,6 @@ class AppViewModel @JvmOverloads constructor(
         // name the phone installed, which is what a person says when they say "on 149".
         Trace.build = buildName
         Trace.note("app-opened", versionLine)
-        // **The floor is made on every start, and it is creation rather than recreation.** `~local`
-        // cannot be removed (§3.9), so the only state this answers to is a phone that has no account
-        // folder at all — a fresh install, or one that signed in before the rule and had its local
-        // folder renamed away by the adoption this replaced. It writes nothing when the folder is
-        // there, so a phone that has never signed in keeps the only copy of its work untouched.
-        accounts.ensureProvisional()
         refresh()
         // **The introduction, once.** The report that asked for it: *"remove this sign in to begin
         // text box. Instead I want on first open to move operator to readme.md file from system
@@ -672,8 +659,8 @@ class AppViewModel @JvmOverloads constructor(
      * pages is not the goal; connecting is. A person who connected on page three should not have to
      * swipe through three more to be let out.
      *
-     * **GitHub is [signedIn]**, not "an account exists": the provisional `~local` workspace is an
-     * account and is signed in to nothing.
+     * **GitHub is [signedIn]**, which is now the same question as "is there an account at all" — with
+     * no account shipped (§3.11) there is no workspace belonging to nobody.
      *
      * **The model key is [hasModelKey]**, which is `READABLE` — a key that is stored but locked
      * behind the phone's own lock is not a key the app can use, and closing onboarding on it would
@@ -3517,21 +3504,29 @@ class AppViewModel @JvmOverloads constructor(
         private set
 
     /**
-     * Makes a **local** project: a folder with a repository of its own and nothing to push to.
+     * **Makes a project in the open account**: a folder with a repository of its own, and no address.
      *
-     * A local project is a project: it has versions, an agent, and a row in the same list — and the
-     * row says `local` instead of a count, because "up to date" is a claim about GitHub and this
-     * folder has never been there. That is what makes it useful for work that does not belong to any
-     * repository: the app's history and the agent still apply, and nothing leaves the phone.
+     * Every project starts this way. It has versions, an agent and a row in the same list — the row
+     * says `local` rather than a count, because "up to date" is a claim about a host and this folder
+     * has never been to one. Giving it an address (`setAddress`) is what publishes it, and that is
+     * the one act that makes it a remote repository too.
      *
-     * The name is checked with [Workspace.nameProblem], unlike a GitHub project's: this one is a
-     * folder the person typed, not a repository whose name GitHub already accepted.
+     * **It used to be called `createProject`**, from when "local" meant a whole account with no
+     * host. The account is gone (§3.11) and the property stayed: being on this phone and nowhere else
+     * is a fact about a project, not about the identity that owns it.
+     *
+     * The name is checked with [Workspace.nameProblem], unlike a cloned project's: this one is a
+     * folder the person typed, not a repository whose name a host already accepted.
      */
-    fun createLocalProject(
+    fun createProject(
         name: String,
         onDone: (Boolean) -> Unit = {},
     ) {
-        val ws = workspace ?: return
+        val ws = workspace ?: run {
+            message = "No account is open, so there is nowhere to make a project. Add one first."
+            onDone(false)
+            return
+        }
         // **As typed, and only blank falls back.** The app no longer rewrites names — see
         // `Workspace.nameProblem` for the measurement that removed it.
         val clean = name.trim().ifBlank { "local" }
@@ -3562,10 +3557,7 @@ class AppViewModel @JvmOverloads constructor(
             val git = ProjectGit(
                 ws,
                 { null },
-                {
-                    if (accounts.isProvisional(activeLogin)) PROVISIONAL_AUTHOR
-                    else accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR
-                },
+                { accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR },
                 index = indexer(ws),
             )
             val made = git.init(clean)
@@ -3590,7 +3582,7 @@ class AppViewModel @JvmOverloads constructor(
                 // deleting a project shows the change only after you exit and enter the project
                 // menue again".
                 message = if (made.isSuccess) {
-                    "Made \"$clean\" on this phone. It goes nowhere until it has an address."
+                    "Made \"$clean\". It stays on this phone until you give it an address."
                 } else {
                     "Made the folder, but its history could not be started"
                 }
@@ -3624,13 +3616,11 @@ class AppViewModel @JvmOverloads constructor(
      * changed rather than reporting a rename that did not happen.
      */
     fun setAddress(project: String, url: String, onDone: (Boolean) -> Unit = {}) {
-        val ws = workspace ?: return
-        // **Local projects have no remote, and the operator's 2026-11-09 ruling is why.** `~local` is
-        // not an identity: no host, no key, and `whoFor` answers null, so an address here would be a
-        // repository nothing on this phone can push to. The way out is stated, not implied — the
-        // project moves to an account (`Transfer`) and the address is set there.
-        if (isProvisionalAccount) {
-            message = localOriginSaid()
+        // **No account, no address — and it is said rather than dropped.** With no account shipped
+        // (§3.11) a phone that has not signed in has no project to address, so this is the door for
+        // somebody who reached it anyway: an agent, or a screen that has not redrawn.
+        val ws = workspace ?: run {
+            message = "No account is open, so there is nowhere to keep an address."
             onDone(false)
             return
         }
@@ -3792,8 +3782,7 @@ class AppViewModel @JvmOverloads constructor(
             message = "\"$toLogin\" is not an account on this phone, so \"$project\" did not move."
             return false
         }
-        val toIsLocal = accounts.isProvisional(toLogin)
-        Transfer.problem(ws, to, project, toIsLocal)?.let { message = it; return false }
+        Transfer.problem(ws, to, project)?.let { message = it; return false }
         val verb = if (copy) "Copied" else "Moved"
         val done = Transfer.go(ws, to, project, copy)
         // **One refusal, one sentence**, and it is the transfer's own: it names the folder it could not
@@ -3918,12 +3907,8 @@ class AppViewModel @JvmOverloads constructor(
         name: String,
         onDone: (Boolean) -> Unit = {},
     ) {
-        val ws = workspace ?: return
-        // **A clone arrives with an origin, so it is the same act as `setAddress`** — and refused here
-        // for the same reason: Local has no host to reach the address with. Said at the door rather
-        // than hidden in the menu, because an agent reaches this verb too.
-        if (isProvisionalAccount) {
-            message = localOriginSaid()
+        val ws = workspace ?: run {
+            message = "No account is open, so there is nowhere to put the clone."
             onDone(false)
             return
         }
@@ -5128,9 +5113,8 @@ class AppViewModel @JvmOverloads constructor(
      * Both then arrive here, and everything after this point is the same act.
      *
      * **Splitting it into two functions is what made the app GitHub-shaped**, because the second
-     * function would then have to re-decide what signing in means: whether the provisional account is
-     * adopted, whether the branch screen is forgotten, whether onboarding is finished. Those are not
-     * per-door questions.
+     * function would then have to re-decide what signing in means: whether the branch screen is
+     * forgotten, whether onboarding is finished. Those are not per-door questions.
      */
     fun addAccount(
         login: String,
@@ -5140,11 +5124,10 @@ class AppViewModel @JvmOverloads constructor(
         commitName: String,
         commitEmail: String,
     ) {
-        // **Nothing is moved, and this is the operator's 2026-11-09 ruling rather than a tidy-up.**
-        // `~local` cannot be removed, so it cannot be renamed away at sign-in either: the projects a
-        // person made before signing in are still in Local, and they move when the person says so
-        // (`moveSelectedAccount`/`copySelelectedAccount`, §3.9 of the credentials plan). The account
-        // that arrives is empty, which is the truth: it is a new identity with a new key.
+        // **A sign-in makes an empty account, and nothing else goes with it.** There is no existing
+        // workspace to adopt or rename — no account is shipped (§3.11) — and a project made in one
+        // account reaches another only by `Transfer`, when the person says so (§3.9). The account
+        // that arrives is new, which is the truth: it is an identity with a key.
         //
         // **The key is stored at account scope**, not project scope, because a clone happens before a
         // project exists: a project-scoped secret could never be present the moment it is first needed.
@@ -5643,15 +5626,6 @@ class AppViewModel @JvmOverloads constructor(
      * without it the folders stay and signing in again returns to them (§5).
      */
     fun removeAccount(login: String, deleteCopies: Boolean) {
-        // **Refused at the door, in words.** `AccountStore` refuses too — this is the sentence, and the
-        // rule is there. Local is not an identity this phone can act as, it is the workspace every
-        // phone has, so there is nothing to remove and no key to forget; what leaves is a project, by
-        // `Transfer`, and it leaves into an account.
-        if (accounts.isProvisional(login)) {
-            message = "Local is this phone's own workspace and cannot be removed. " +
-                "Move its projects into an account and they are there; the folder stays."
-            return
-        }
         // **The answer decides whether there is a second attempt.** A save already on its way to the
         // worker can write into the tree while this walks it, and then `delete` fails on a folder
         // that has just been re-made — the account stays on the phone and the person is told nothing.
@@ -5662,16 +5636,15 @@ class AppViewModel @JvmOverloads constructor(
         // Another stored account takes over, so the screen is never left pointing
         // at an account that is no longer here.
         // The disk is what says which accounts this phone has; the keys only say
-        // which of them can still open GitHub.
-        // **The provisional account is the floor, and it is now a fact rather than a call.** It cannot
-        // be removed, so it is always in `accounts()` — the chain below is about which of the *real*
-        // accounts takes over, and `~local` is the answer when none does. The old last resort made it
-        // here (`ensureProvisional()`), because a sign-in could have adopted it away; nothing can any
-        // more, and a line that remakes what cannot be missing is a line that hides a bug.
+        // which of them can still open a host.
+        //
+        // **Null is a real answer, and it is the one this step exists for.** There is no account an
+        // app can ship (§3.11), so a phone whose last account was just removed has none — and the
+        // screen that answers that is the accounts list with its two doors, not a workspace with
+        // nowhere to be.
         val next = accounts.accounts().map { it.login }
-            .firstOrNull { it != login && !accounts.isProvisional(it) }
+            .firstOrNull { it != login }
             ?: credentials.logins().firstOrNull { accounts.exists(it) && it != login }
-            ?: AccountStore.PROVISIONAL
         credentials.activeLogin = next
         activeLogin = next
         path = emptyList()
@@ -6019,16 +5992,6 @@ class AppViewModel @JvmOverloads constructor(
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
 
         /**
-         * Who commits while the provisional account is active.
-         *
-         * **A local address, because there is no GitHub account behind it.** `.local` is reserved
-         * for exactly this - an identity that names no remote - and it cannot be confused with a
-         * real address by anyone reading a commit log or a `git blame` after the projects are
-         * adopted into a signed-in account.
-         */
-        val PROVISIONAL_AUTHOR = GitAuthor("Muffy Codes", "local@muffy.local")
-
-        /**
          * Which GitHub a login talks to — **the rule, in one place, for the app and the agent alike.**
          *
          * It was a method on [AppViewModel] only, and the agent's CI tools need the same answer
@@ -6036,13 +5999,12 @@ class AppViewModel @JvmOverloads constructor(
          * a release build must refuse to act as one even when a stored account claims to be. Writing
          * that twice would be writing it two slightly different ways.
          *
-         * **The provisional account has no GitHub.** Its folder is a real workspace, but there is no
-         * account behind it, so answering with an `HttpWho` would give every caller something that
-         * looks usable and sends unauthenticated requests to the internet. `null` is the honest
-         * answer, and it is the one the screens already handle.
+         * **No account, no host.** A login this phone does not have is not an identity to send with,
+         * and answering with an `HttpWho` would give every caller something that looks usable and
+         * send unauthenticated requests to the internet. `null` is the honest answer, and it is the
+         * one the screens already handle.
          */
         fun whoFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): Who? {
-            if (accounts.isProvisional(login)) return null
             val stored = accounts.account(login) ?: return null
             if (stored.dev && testAccountsAllowed) {
                 // **A host that says who a key is and nothing else.** Its repositories are bare

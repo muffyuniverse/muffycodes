@@ -49,7 +49,6 @@ object Transfer {
         from: Workspace,
         toAccountDir: File,
         project: String,
-        toIsLocal: Boolean,
     ): String? {
         val folder = from.projectDir(project)
         if (!from.isProjectFolder(folder)) {
@@ -61,13 +60,6 @@ object Transfer {
         if (destination.exists()) {
             return "\"$project\" is already a project in ${toAccountDir.name}. " +
                 "Rename one of them on this phone, or move it to another account."
-        }
-        // **A connected project cannot arrive in Local**, which has no host and no key to reach its
-        // address with (§3.9). Said here rather than in the view model because this is the third door
-        // that writes `remote.origin.url`, and a rule kept at two of three is a rule with a hole.
-        if (toIsLocal && connected(folder)) {
-            return "\"$project\" has an address, and projects in Local stay on this phone. " +
-                "Move it to an account instead, or keep a copy with no address."
         }
         return null
     }
@@ -128,12 +120,6 @@ object Transfer {
         } catch (e: Exception) {
             Result.failure(IllegalArgumentException("\"$project\" could not be transferred: ${e.message}"))
         }
-    }
-
-    /** True when the repository in [folder] names a remote — a project with somewhere to push. */
-    private fun connected(folder: File): Boolean {
-        val repo = GitService.openExisting(folder) ?: return false
-        return repo.use { !GitService.remoteUrl(it).isNullOrBlank() }
     }
 
     /**

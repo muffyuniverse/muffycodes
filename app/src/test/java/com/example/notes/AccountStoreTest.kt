@@ -31,77 +31,32 @@ class AccountStoreTest {
     }
 
     @Test
-    fun `the provisional account exists, and is not a GitHub login`() {
-        // **`~` is the whole guarantee.** A GitHub login cannot contain one, so this name can never
-        // be shadowed by somebody who registers `local` - and a folder called `~local` in a path or
-        // a log is unmistakably not a person's account.
-        val provisional = store.ensureProvisional()
-        assertTrue("it is a real account folder", store.detailsOf(provisional.login).isFile)
-        assertTrue("and the store knows it", store.isProvisional(provisional.login))
-        assertTrue("the name cannot be a GitHub login", provisional.login.contains('~'))
-        assertFalse("a real login is not provisional", store.isProvisional("muffyuniverse"))
-        assertFalse("and neither is nothing", store.isProvisional(null))
-    }
-
-    @Test
-    fun `making the provisional account twice leaves its contents alone`() {
-        // **This folder is the one account whose contents are never disposable.** A person's local
-        // projects live here before they sign in, so a second call must be a no-op rather than a
-        // rewrite - and `ensureProvisional` runs on every app start.
-        val first = store.ensureProvisional()
-        val kept = File(store.dirOf(first.login), "my-project")
-        kept.mkdirs()
-        File(kept, "notes.txt").writeText("work in progress")
-
-        store.ensureProvisional()
-
-        assertTrue("the project is still there", kept.isDirectory)
-        assertEquals(
-            "and its file is untouched",
-            "work in progress",
-            File(kept, "notes.txt").readText(),
+    fun `a new store has no accounts, and the app's folder is not one`() {
+        // **The operator's ruling of 2026-11-09**: *"scrapping local account so that there are no
+        // prebuilt accounts and projects"*. A store that has never been signed in to holds nothing —
+        // and the app's own folder is a sibling of `accounts/`, not inside it, so it can never be
+        // mistaken for one however much it holds.
+        assertTrue("no accounts at all", store.accounts().isEmpty())
+        assertFalse("and nothing is an account by accident", store.exists("~local"))
+        assertTrue(
+            "the app's folder is beside the accounts, not inside them",
+            !store.sharedDir.path.startsWith(store.accountsDir.path + File.separator),
         )
     }
 
     @Test
-    fun `signing in leaves the local account and its projects exactly where they are`() {
-        // **The operator's 2026-11-09 ruling, and it reverses what this test used to assert.**
-        // `~local` cannot be removed, so a sign-in cannot rename it away either: a person who made
-        // projects before signing in still finds them in Local, and moves the ones they want with
-        // the transfer verb. The account that arrives is empty, which is what it is - a new identity
-        // with a new key, and none of Local's history.
-        val provisional = store.ensureProvisional()
-        val project = File(store.dirOf(provisional.login), "first-project")
-        project.mkdirs()
-        File(project, "milk.txt").writeText("2 litres")
-
+    fun `a sign-in makes an empty account and nothing is adopted`() {
+        // **There is nothing to adopt.** A person who has just signed in gets exactly the folder the
+        // identity makes — no projects, no rename, no copy. Work reaches another account only by
+        // `Transfer`, when the person says so (§3.9).
         store.save(Account(login = "muffyuniverse", commitName = "Muffy", commitEmail = "m@example.com"))
 
-        assertTrue(
-            "the project is still Local's",
-            File(store.dirOf(provisional.login), "first-project/milk.txt").isFile,
+        assertEquals("one account", 1, store.accounts().size)
+        assertEquals(
+            "with no projects of its own",
+            emptyList<String>(),
+            File(store.dirOf("muffyuniverse"), "projects").list()?.toList().orEmpty(),
         )
-        assertFalse(
-            "and nothing was copied into the account",
-            File(store.dirOf("muffyuniverse"), "first-project").exists(),
-        )
-    }
-
-    @Test
-    fun `the local account cannot be removed, however it is asked`() {
-        // **Two verbs, one answer**, because "delete the copies" and "keep them on the phone" are the
-        // same act for an account that is not an identity: neither can leave the phone without a
-        // workspace. The files stay because nothing ran.
-        val provisional = store.ensureProvisional()
-        val project = File(store.dirOf(provisional.login), "first-project")
-        project.mkdirs()
-        File(project, "milk.txt").writeText("2 litres")
-
-        assertFalse("removing it is refused", store.remove(provisional.login))
-        assertFalse("and forgetting it too", store.forget(provisional.login))
-        assertTrue("so the project is still there", File(project, "milk.txt").isFile)
-        assertTrue("and it is still an account", store.exists(provisional.login))
-        assertTrue("with its own details", store.detailsOf(provisional.login).isFile)
     }
 
     @Test

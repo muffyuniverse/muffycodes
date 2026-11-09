@@ -406,10 +406,11 @@ class Scenario(
     /**
      * Signs the test account in, and waits until the app knows it.
      *
-     * **Waiting on the LOGIN, not on "an account exists".** The provisional account means there is
-     * always one, so `account != null` was true before the sign-in had done anything - the wait
-     * returned at once, and every scenario carried on with `~local` as its workspace. The failure
-     * surfaced as a GitHub request going to the internet, which is a long way from the cause.
+     * **Waiting on the LOGIN, not on "an account exists".** `account != null` used to be true before
+     * the sign-in had done anything, because a provisional account always existed — the wait returned
+     * at once and every scenario carried on with it as its workspace, and the failure surfaced as a
+     * GitHub request going to the internet. The provisional account is gone (§3.11); the wait is kept
+     * as it is because the login is what the rest of the fixture means.
      */
     fun signedIn(): Scenario {
         viewModel.signInAsTestAccount()
@@ -625,13 +626,23 @@ class Scenario(
      * The one a person can make without signing in, and the one most tests of version history want -
      * they are about commits, not about GitHub.
      */
-    fun localProject(name: String): Scenario {
-        viewModel.createLocalProject(name)
-        // **Waits for the name the app actually made.** A local project's name is checked rather
-        // than rewritten, so asking for "Shopping" now makes `Shopping` — but a name that is
-        // refused makes nothing at all, and this waits for the one that happened.
+    /**
+     * **A project with no address** — made inside the open account, which is the only place a project
+     * can be made (§3.11).
+     *
+     * It used to be called "local" because there was a local *account*; the property outlived the
+     * account. The scene must be signed in: `createProject` says so rather than doing nothing.
+     */
+    fun localProject(name: String): Scenario = projectWithoutRemote(name)
+
+    /** A project made here, with no remote: the ordinary first state of a repository. */
+    fun projectWithoutRemote(name: String): Scenario {
+        viewModel.createProject(name)
+        // **Waits for the name the app actually made.** A project's name is checked rather than
+        // rewritten, so asking for "Shopping" makes `Shopping` — but a name that is refused makes
+        // nothing at all, and this waits for the one that happened.
         val made = name.trim().ifBlank { "local" }
-        await("local project \"$made\" to exist") {
+        await("project \"$made\" to exist") {
             viewModel.projectNames.any { it == made }
         }
         await("the making of $made to finish", 60_000) { !viewModel.busy }

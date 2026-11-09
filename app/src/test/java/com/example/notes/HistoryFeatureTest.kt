@@ -776,7 +776,7 @@ class HistoryFeatureTest : FeatureTest() {
     fun `a local project's history has no remote, and needs no key`() {
         // The merged shape makes this a statement about a **local project**: its folder is a
         // repository, its versions are real, and there is nowhere to push to and no key involved.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }

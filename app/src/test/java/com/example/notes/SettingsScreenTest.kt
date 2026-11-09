@@ -240,8 +240,9 @@ class SettingsScreenTest {
         // them would have been a test that passes only by never being run against this scene. What
         // the grouping promises is that the label, the account and the buttons are one thing, and
         // that is checkable with what is on the screen.
-        // **"Working as", not "Signed in as"**: the provisional account is a real workspace that is
-        // not signed in to anything, so the label has to be true in both states.
+        // **"Working as", not "Signed in as"**: the label had to be true for a workspace with no
+        // GitHub behind it. That state is gone (§3.11) and the assertion below still holds, because
+        // the account block lives on the accounts screen now.
         // **The account block used to be the thing this asserted.** It is gone (§13c.5 step 3), so
         // the grouping promise now belongs to the accounts screen and this screen's own first block
         // is the agent's. What is checkable here is that the screen still draws and that the account

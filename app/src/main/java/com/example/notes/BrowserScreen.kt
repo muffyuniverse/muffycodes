@@ -361,23 +361,19 @@ fun AccountsScreen(
                                         onConnection()
                                     },
                                 )
-                                // **No removal for Local, because there is nothing to remove.**
-                                // `removeAccount` refuses it and `AccountStore` refuses it twice
-                                // over; this is the third place, for the ordinary reason — a menu
-                                // item whose only outcome is a sentence about why it cannot work is
-                                // a press wasted. The row says what Local *is* in its subtitle
-                                // instead, which is where a person looks for it.
-                                if (!viewModel.accounts.isProvisional(account.login)) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text("Remove…", color = MaterialTheme.colorScheme.error)
-                                        },
-                                        onClick = {
-                                            menu = null
-                                            onRemove(account.login)
-                                        },
-                                    )
-                                }
+                                // **Every account can go, because every account is a real one.**
+                                // There used to be a `~local` account that could not be removed, and
+                                // this menu item was hidden for it; with no account shipped (§3.11)
+                                // the condition has nothing to be about.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Remove…", color = MaterialTheme.colorScheme.error)
+                                    },
+                                    onClick = {
+                                        menu = null
+                                        onRemove(account.login)
+                                    },
+                                )
                             }
                         }
                     }
@@ -1058,20 +1054,16 @@ private fun ProjectList(
                             // is no separate "put on GitHub" because there is no repository to make
                             // here: that is the host's own page, and this window takes its result.
                             //
-                            // **Not offered in the local account**, which has no host and no key to
-                            // reach an address with (§3.9): `setAddress` refuses it, and a menu item
-                            // whose only outcome is a refusal is a press spent learning a rule the
-                            // screen could have said. A project kept local *inside* an account still
-                            // has this item — that is how one is published.
-                            if (!viewModel.isProvisionalAccount) {
-                                DropdownMenuItem(
-                                    text = { Text("Set the address…") },
-                                    onClick = {
-                                        menu = false
-                                        onRename(name)
-                                    },
-                                )
-                            }
+                            // **Every project has this item**, because every project may be published:
+                            // a project on this phone and nowhere else is the ordinary beginning, and
+                            // pasting its host's address is the whole of the second step.
+                            DropdownMenuItem(
+                                text = { Text("Set the address…") },
+                                onClick = {
+                                    menu = false
+                                    onRename(name)
+                                },
+                            )
                             // **The two credentials this project may hold** (§2.2 of the credentials
                             // plan). Two entries rather than one window with a switch, because the
                             // two kinds are independent: a person may want the agent to ask the model

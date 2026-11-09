@@ -33,10 +33,10 @@ class KeySafetyFeatureTest : FeatureTest() {
 
         releaseLike.signInAsTestAccount()
 
-        // **The provisional account, and only it.** A release build may not make a TEST account;
-        // it still has the provisional workspace, which is what makes the app usable before anybody
-        // signs in. The claim is that the test account was refused, not that the phone is empty.
-        assertTrue("still the provisional workspace", releaseLike.isProvisionalAccount)
+        // **No account at all.** A release build may not make a TEST account, and there is no
+        // account an app can ship (§3.11) — so the phone is exactly as it was: empty, with the
+        // sentence saying why.
+        assertNull("no account was made", releaseLike.activeLogin)
         assertTrue(
             "and no test account was written",
             releaseLike.accounts.accounts().none { it.dev },

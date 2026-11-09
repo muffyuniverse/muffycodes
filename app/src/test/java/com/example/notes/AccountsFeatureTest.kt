@@ -45,36 +45,30 @@ class AccountsFeatureTest : FeatureTest() {
 
             assertEquals("the key was refused", false, answered)
             assertEquals("and it said so", "Bad credentials", sawMessage)
-            // **The provisional account, not an absence.** A refused key leaves the app where it
-            // started: working as ~local, with its own real folder. The claim is that the REFUSED
-            // login was not kept - not that there is no account at all.
-            assertNotEquals("the refused login was not kept", "a-key-github-does-not-like", phone.viewModel.activeLogin)
-            assertTrue("still working locally", phone.viewModel.isProvisionalAccount)
+            // **An absence, and that is the claim.** A refused key leaves the app exactly where it
+            // started: with no account, because there is no account an app can ship (§3.11). The
+            // sentence is on screen and nothing was written.
+            assertNull("no account was made", phone.viewModel.activeLogin)
+            assertNull("so there is no workspace", phone.viewModel.workspace)
         } finally {
             phone.close()
         }
     }
 
     @Test
-    fun `with nobody signed in the app works as the provisional account`() {
-        // **This test used to assert the opposite**, and the reversal is the whole feature: before
-        // a sign-in the app now has a real workspace - `~local` - so local projects, the system
-        // project and the request history all work with no account at all.
-        //
-        // What is still true is the thing that mattered: nothing of a *GitHub account's* is here,
-        // and nothing reaches the network.
-        assertTrue("there is an account", scene.viewModel.account != null)
-        assertTrue("and it is the provisional one", scene.viewModel.isProvisionalAccount)
-        assertTrue("with a real workspace", scene.viewModel.workspace != null)
-        assertFalse("but nobody is signed in to GitHub", scene.viewModel.signedIn)
+    fun `with nobody signed in there is no workspace at all`() {
+        // **The operator's ruling, and it reverses what this test asserted twice.** There used to be
+        // a `~local` account so that the app had somewhere to write before anybody signed in. There
+        // is no account an app can ship (§3.11): a phone with no account has no workspace, no
+        // project, and no door — and the screen that answers that is the accounts list, which the
+        // introduction explains first.
+        assertNull("no account", scene.viewModel.account)
+        assertNull("no workspace", scene.viewModel.workspace)
+        assertFalse("nothing is signed in", scene.viewModel.signedIn)
         // **No door, deliberately.** Answering with an `HttpWho` would give every caller
         // something that looks usable and sends unauthenticated requests to the internet.
         assertNull("so there is no GitHub to ask who a key is", scene.viewModel.who)
-        // Nothing of the person's yet: the system project is all a fresh provisional account has.
-        assertTrue(
-            "nothing of the person's is listed",
-            scene.names().all { Workspace.isSystemLocked(it) || it == Workspace.SYSTEM_PROJECT },
-        )
+        assertTrue("and no account is listed", scene.viewModel.accountsWithProjects.isEmpty())
     }
 
     @Test
@@ -165,7 +159,7 @@ class AccountsFeatureTest : FeatureTest() {
             // no such action left, which is the stronger fact. A project is made here, with the git
             // protocol, and the account's host never comes into it.
             var made: Boolean? = null
-            phone.viewModel.createLocalProject("anything") { made = it }
+            phone.viewModel.createProject("anything") { made = it }
             phone.await("the project to be made") { made != null }
             assertEquals("a project on this phone needs no host", true, made)
             assertTrue(
@@ -222,51 +216,21 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the local account is not offered for removal, and is refused if it is asked for`() {
-        // **The operator, 2026-11-09**: *"make ~local undeletable … so that local always exist and we
-        // dont need machinery for its recreation."* Two doors and one rule: the store refuses it, and
-        // the view model says so instead of doing nothing. A silent no-op here would be the one thing
-        // this app does not do — the menu is gone, the sentence stays, because the sentence is the rule.
-        scene.folder("mine")
-        val inside = File(scene.workspace!!.accountDir, "mine")
+    fun `a project made here can be given an address, and the row says where it goes`() {
+        // **The ordinary second step of a project's life.** A project is made in an account with no
+        // remote, and pasting the host's address is what publishes it — there is no "put it on
+        // GitHub" act, because making the repository is the host's own page and this window takes
+        // its result.
+        scene.signedIn()
+        scene.project("notes")
 
-        scene.viewModel.removeAccount(AccountStore.PROVISIONAL, deleteCopies = true)
-        scene.viewModel.removeAccount(AccountStore.PROVISIONAL, deleteCopies = false)
+        scene.viewModel.setAddress("notes", "https://host/owner/notes.git")
 
-        assertTrue("still the account we are in", scene.viewModel.isProvisionalAccount)
-        // **`known` is about keys, not folders** — it answers "can this phone act as that login", and
-        // `~local` never had a key. The question here is whether the workspace is still on the phone.
-        assertTrue(
-            "the account is still listed",
-            scene.viewModel.accountsWithProjects.any { it.first.login == AccountStore.PROVISIONAL },
+        assertEquals(
+            "the address is stored",
+            "https://host/owner/notes.git",
+            scene.viewModel.remoteUrlOf("notes"),
         )
-        assertTrue("its folder is still there", inside.isDirectory)
-        assertTrue(
-            "and the refusal says why: ${scene.viewModel.message}",
-            scene.viewModel.message.orEmpty().contains("cannot be removed"),
-        )
-    }
-
-    @Test
-    fun `a local project cannot be given an address, and the sentence says where to go`() {
-        // **§3.9's second ruling, measured at both doors.** Local stores no host and no key, and
-        // `whoFor` answers null for it, so an address here names a repository this phone cannot speak
-        // to. The refusal names the transfer rather than the prohibition — the same shape the write
-        // refusals use, and the reason a person is not left guessing at "no".
-        scene.localProject("notes")
-        var answered: Boolean? = null
-        scene.viewModel.setAddress("notes", "https://host/owner/notes.git") { answered = it }
-
-        assertEquals("refused", false, answered)
-        assertNull("and nothing was written", scene.viewModel.remoteUrlOf("notes"))
-        val said = scene.viewModel.message.orEmpty()
-        assertTrue("it names the rule: $said", said.contains("Local"))
-        assertTrue("and the way out: $said", said.contains("Move the project into an account"))
-
-        // **The second door is the same act**, because a clone arrives with the address already in it.
-        scene.viewModel.addProjectFromUrl("https://host/owner/arriving.git", "arriving") { answered = it }
-        assertEquals("a clone is refused too", false, answered)
-        assertFalse("and made nothing", scene.viewModel.projectNames.contains("arriving"))
     }
 
     @Test
@@ -277,9 +241,10 @@ class AccountsFeatureTest : FeatureTest() {
 
         scene.viewModel.removeAccount(scene.login, deleteCopies = false)
 
-        // **The provisional account, not nothing.** Removing the last real account leaves `~local`
-        // rather than an absence, so the screen always has a workspace to be in.
-        assertTrue("back to working locally", scene.viewModel.isProvisionalAccount)
+        // **No account is left, and that is an answer rather than a bug.** There used to be a
+        // `~local` fallback; with no account shipped (§3.11) a phone whose last account was removed
+        // has none, and the screen that says so is the accounts list with its two doors.
+        assertNull("no account is open", scene.viewModel.activeLogin)
         assertFalse("the account is no longer known", scene.viewModel.known(scene.login))
         assertFalse(
             "and it is not something to switch to",
@@ -672,7 +637,8 @@ class AccountsFeatureTest : FeatureTest() {
             scene.await("onboarding to open") { scene.viewModel.onboarding }
             assertFalse("nobody is signed in", scene.viewModel.signedIn)
 
-            // A key on the provisional workspace. It is kept, and it is not a connection to GitHub.
+            // A model key with no account. It is kept — the vault does not need an identity — and it
+            // is not a connection to GitHub, which is why onboarding stays open.
             scene.viewModel.saveModelKey("sk-or-v1-a-key")
 
             assertTrue(

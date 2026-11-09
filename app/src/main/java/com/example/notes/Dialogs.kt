@@ -398,14 +398,6 @@ fun AddProjectDialog(
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
     onAddUrl: (url: String, name: String) -> Unit,
-    /**
-     * **Whether an address may be typed here at all** — false for the local account, which has no host
-     * to reach one with (§3.9 of the credentials plan).
-     *
-     * The half is *missing* rather than disabled, and a sentence takes its place: a dialog that shows a
-     * field and refuses what is typed into it spends the person's press to teach them the rule.
-     */
-    fromAddress: Boolean = true,
 ) {
     var address by remember { mutableStateOf("") }
     // **Follows the address until the person types a name of their own.** A prefill that overrides
@@ -428,51 +420,37 @@ fun AddProjectDialog(
                     Text("＋ New project…", style = MaterialTheme.typography.bodyLarge)
                 }
                 HorizontalDivider()
-                Text(
-                    if (fromAddress) "Or from an address" else "A project here stays on this phone",
-                    style = MaterialTheme.typography.titleSmall,
+                Text("Or from an address", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = {
+                        address = it
+                        if (!nameEdited) name = Workspace.repoNameOf(it)
+                    },
+                    label = { Text("Repository address") },
+                    singleLine = true,
+                    supportingText = {
+                        Text(
+                            "https://host/owner/repository.git — checked with ls-remote before " +
+                                "anything is cloned.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
                 )
-                if (!fromAddress) {
-                    Text(
-                        "Local has no host to reach an address with. Sign in, and a repository can " +
-                            "arrive from anywhere — or move this project into an account and set its " +
-                            "address there.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (fromAddress) {
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = {
-                            address = it
-                            if (!nameEdited) name = Workspace.repoNameOf(it)
-                        },
-                        label = { Text("Repository address") },
-                        singleLine = true,
-                        supportingText = {
-                            Text(
-                                "https://host/owner/repository.git — checked with ls-remote before " +
-                                    "anything is cloned.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        },
-                    )
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = {
-                            name = it
-                            nameEdited = it != suggested
-                        },
-                        label = { Text("Name on this phone") },
-                        singleLine = true,
-                    )
-                    TextButton(
-                        enabled = address.isNotBlank() && name.isNotBlank(),
-                        onClick = { onAddUrl(address, name) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Add it") }
-                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        nameEdited = it != suggested
+                    },
+                    label = { Text("Name on this phone") },
+                    singleLine = true,
+                )
+                TextButton(
+                    enabled = address.isNotBlank() && name.isNotBlank(),
+                    onClick = { onAddUrl(address, name) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add it") }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

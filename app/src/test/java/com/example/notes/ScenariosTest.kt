@@ -252,7 +252,7 @@ class ScenariosTest {
         ) {
             before()
             then("A new project is made and named groceries.") {
-                viewModel.createLocalProject("groceries")
+                viewModel.createProject("groceries")
                 scene.await("the project to exist") {
                     viewModel.projectNames.any { it.equals("groceries", true) }
                 }

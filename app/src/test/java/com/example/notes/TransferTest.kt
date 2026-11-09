@@ -131,52 +131,13 @@ class TransferTest {
         File(toDir, "Shopping").mkdirs()
         File(toDir, "Shopping/theirs.txt").writeText("not mine\n")
 
-        val problem = Transfer.problem(from, toDir, "Shopping", toIsLocal = false)
+        val problem = Transfer.problem(from, toDir, "Shopping")
 
         assertNotNull("it refuses", problem)
         assertTrue("naming the project: $problem", problem!!.contains("Shopping"))
         assertTrue("and where it is taken: $problem", problem.contains("muffyuniverse"))
         assertTrue("nothing was moved", File(from.accountDir, "Shopping/a.txt").isFile)
         assertTrue("and nothing was overwritten", File(toDir, "Shopping/theirs.txt").isFile)
-    }
-
-    @Test
-    fun `a project with an address may not arrive in the local account`() {
-        // **§3.9's second ruling, at the third door that can write `origin`.** Local has no host and no
-        // key, so a connected project there would name a repository nothing on this phone can reach.
-        //
-        // The project is made in the **account** and asked to go into Local, because that is the
-        // direction the rule is about — a local project has no address to begin with.
-        val dir = to.projectDir("Shopping")
-        dir.mkdirs()
-        File(dir, "a.txt").writeText("on main\n")
-        val repo = GitService.initOrOpen(dir, author)
-        repo.use {
-            org.eclipse.jgit.api.Git(it).use { git ->
-                git.add().addFilepattern(".").call()
-                git.commit().setMessage("first").setAuthor(author.ident())
-                    .setCommitter(author.ident()).call()
-            }
-            it.config.setString("remote", "origin", "url", "https://host/owner/shopping.git")
-            it.config.save()
-        }
-
-        val problem = Transfer.problem(to, from.accountDir, "Shopping", toIsLocal = true)
-
-        assertNotNull("it refuses", problem)
-        assertTrue("naming the rule: $problem", problem!!.contains("Local"))
-        assertTrue("and the way out: $problem", problem.contains("Move it to an account"))
-        // **A project with no address may come here**, which is the half that makes the rule about the
-        // address rather than about projects: `Bare` is a repository in the account that has never been
-        // given one.
-        val bare = to.projectDir("Bare")
-        bare.mkdirs()
-        File(bare, "b.txt").writeText("local work\n")
-        GitService.initOrOpen(bare, author).close()
-        assertNull(
-            "a project with no address is welcome",
-            Transfer.problem(to, from.accountDir, "Bare", toIsLocal = true),
-        )
     }
 
     @Test
@@ -220,7 +181,7 @@ class TransferTest {
     fun `a folder that is not a project is refused`() {
         File(from.accountDir, "loose").mkdirs()
 
-        val problem = Transfer.problem(from, toDir, "loose", toIsLocal = false)
+        val problem = Transfer.problem(from, toDir, "loose")
 
         assertNotNull("it refuses", problem)
         assertTrue("saying what it is: $problem", problem!!.contains("not a project"))

@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -148,13 +149,12 @@ class SyncFeatureTest : FeatureTest() {
     fun `nothing can be synced when nobody is signed in`() {
         val alone = Scenario(scene.app, signIn = false)
 
-        // **The provisional workspace has no projects at all**, because the system folder is not one
-        // (§13f): `ensure()` has made the folder, but a folder with no repository is not a project.
-        // There is also no GitHub behind it, which is the thing this test is actually about - syncing
-        // must therefore do nothing and say nothing happened.
+        // **There is no workspace at all**, which is stronger than "no projects": with no account
+        // shipped (§3.11) a phone that has not signed in has nowhere for a repository to live, so a
+        // sync has nothing to walk and nothing to reach.
         assertEquals("no projects to sync", emptyList<String>(), alone.viewModel.projectNames)
-        assertTrue("with no GitHub behind it", alone.viewModel.isProvisionalAccount)
+        assertNull("with no workspace behind it", alone.viewModel.workspace)
         alone.viewModel.sync(Workspace.SYSTEM_PROJECT)
-        assertEquals("and it stays local", true, alone.viewModel.isProvisionalAccount)
+        assertNull("and nothing was made by asking", alone.viewModel.activeLogin)
     }
 }

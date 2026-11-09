@@ -889,10 +889,6 @@ private fun Dialogs(
 
         Pending.AddProject -> AddProjectDialog(
             onDismiss = dismiss,
-            // **Local has no host, so there is no address to type** (§3.9): the half is missing with a
-            // sentence in its place, and `addProjectFromUrl` refuses the same act if it arrives from
-            // somewhere else.
-            fromAddress = !viewModel.isProvisionalAccount,
             onNewProject = {
                 dismiss()
                 newProject()
@@ -1260,7 +1256,7 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
             // Making one used to require a GitHub account, because making one meant making a
             // repository — and that is the coupling this plan removes. An address can be added
             // whenever the person wants it to live somewhere else as well.
-            viewModel.createLocalProject(name)
+            viewModel.createProject(name)
         },
     )
 }

@@ -2382,17 +2382,16 @@ internal val README_TEXT = """
     This app keeps projects on your phone, versions every change, and puts an agent beside
     the files that can read them, edit them and answer questions about them.
 
-    ## It works before you sign in
+    ## It begins with an account
 
-    Everything here runs without an account. You are working as **~local**: a real
-    workspace that lives only on this phone.
+    An account is where your projects live: a name, a host and a key. Sign in with GitHub, or
+    add any host by hand — a GitLab, a Gitea, a server of your own.
 
-    - **Projects** you make locally, with their versions, need no account at all.
-    - **An account is for GitHub**, and only for GitHub: pulling a repository, pushing to one,
-      and having your work somewhere other than this phone.
+    **Nothing is here until you do.** There is no account the app ships and no project it makes
+    for you: a project is a repository, and a repository belongs to somebody.
 
-    When you sign in for the first time, whatever you made as **~local** comes with you. It is
-    moved, not copied, so there is never a second copy to wonder about.
+    The introduction you are reading lives in the app's own folder, so it is readable before
+    an account exists and stays readable afterwards.
 
     ## The three things here
 

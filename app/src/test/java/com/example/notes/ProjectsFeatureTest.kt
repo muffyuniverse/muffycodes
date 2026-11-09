@@ -129,7 +129,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.viewModel.message = null
 
-        scene.viewModel.createLocalProject("shopping")
+        scene.viewModel.createProject("shopping")
 
         assertTrue(
             "the app says why",
@@ -142,7 +142,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
     @Test
     fun `a project cannot be made with a name a file could not have`() {
-        scene.viewModel.createLocalProject("bad/name")
+        scene.viewModel.createProject("bad/name")
 
         assertTrue("the app says no", scene.viewModel.message != null)
         // **Empty, and that is the point**: a folder at the account root with no repository is not a
@@ -319,7 +319,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // deserves versions and an agent; what it does not have is somewhere to send them. The
         // test is here rather than in a file of its own because this is what a project is now —
         // a folder with a history, optionally with a remote.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
@@ -405,7 +405,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // each project when it is added and put there subfolders for all of our doc types"*. Empty is
         // the point — a starter document would be a project type by another name, and the types were
         // removed.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
@@ -429,7 +429,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // git, so each subject folder holds a marker — and a marker left uncommitted is a project
         // that opens showing four changes nobody made. That is the same fault the preset copy had,
         // one layer down, and this is the assertion that catches it.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
@@ -450,7 +450,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // **The whole point of the folder**: a person asks the agent to write a rule, it writes a
         // file, and from that moment the rule is in every brief. This is the seam between the
         // project tree and what the agent is actually given.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
@@ -468,7 +468,7 @@ class ProjectsFeatureTest : FeatureTest() {
     fun `sync on a local project says why it cannot, rather than doing nothing`() {
         // The button is not offered, and the act refuses in words if it is asked anyway — a press
         // that silently does nothing is the failure this app keeps fixing.
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
@@ -810,7 +810,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
     @Test
     fun `a local project keeps its versions like any other`() {
-        scene.viewModel.createLocalProject("scratch")
+        scene.viewModel.createProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
