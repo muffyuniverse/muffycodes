@@ -34,7 +34,9 @@ class VisibilityFeatureTest : FeatureTest() {
         // Folders sort before files, then by name, so it lands after `Shopping`.
         // **`.muffy` is a folder at the root now**, because report 28 asked for the app's own things
         // to be visible and locked rather than hidden. Folders sort first by lowercase name.
-        assertEquals(listOf(".muffy", "loose", "Shopping", "shared", "notes.txt"), scene.names())
+        // Folders sort by lowercase name, so `shared` lands before `Shopping` — one "sha" against one
+        // "sho" — and that ordering is the sort's, not this list's.
+        assertEquals(listOf(".muffy", "loose", "shared", "Shopping", "notes.txt"), scene.names())
     }
 
     @Test
