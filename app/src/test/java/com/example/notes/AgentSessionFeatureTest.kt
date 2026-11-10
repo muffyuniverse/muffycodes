@@ -790,9 +790,13 @@ class AgentSessionFeatureTest : FeatureTest() {
         // **Only the lines this turn wrote.** `Trace` is one ring for the whole process, and it is
         // not cleared between tests, so `lines.any` here would pass on a previous test's note and
         // mean nothing. The count before the turn is what makes this a measurement.
+        //
+        // **`take` from the front, because `report()` is newest-first.** Taking the first `before`
+        // lines would have taken the *newest* ones — the exact opposite of the intent, and it
+        // passed for that wrong reason until the second test failed on a line the first had written.
         assertTrue(
             "the request says so on the trace",
-            Trace.report().lines.take(before).any { it.contains("agent-clear-up") },
+            newLines(before).any { it.contains("agent-clear-up") },
         )
     }
 
@@ -817,9 +821,13 @@ class AgentSessionFeatureTest : FeatureTest() {
         )
         assertFalse(
             "and nothing on the trace from this turn",
-            Trace.report().lines.take(before).any { it.contains("agent-clear-up") },
+            newLines(before).any { it.contains("agent-clear-up") },
         )
     }
+
+    /** The trace lines written since [before] was measured — `report()` is newest-first. */
+    private fun newLines(before: Int): List<String> =
+        Trace.report().lines.let { it.take(it.size - before) }
 
     @Test
     fun `a session that was on gets its clock back without anybody pressing anything`() {
