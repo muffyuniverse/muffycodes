@@ -1205,7 +1205,7 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "the readme")
         ws.write(File(ws.repoOf("shopping"), "notes.md"), "notes")
 
-        val body = tool("search", """{"scope":"\\.md$"}""")
+        val body = tool("search", """{"path":"\\.md$"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the readme is in the answer: $body", body.contains("README.md"))
@@ -1217,7 +1217,7 @@ class AgentTest {
     fun `a query answers with the line that matched, and where it is`() {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "one line\ntwo litres\n")
 
-        val body = tool("search", """{"query":"litres"}""")
+        val body = tool("search", """{"grep":"litres"}""")
 
         assertTrue(
             "the file, the line number and the line: $body",
@@ -1321,7 +1321,7 @@ class AgentTest {
         // on, which made it search again to find the places the answer had already counted.
         ws.write(File(ws.repoOf("shopping"), "list.txt"), "milk\nbread\nmilk again\neggs\nmilk\n")
 
-        val body = tool("search", """{"query":"^milk"}""")
+        val body = tool("search", """{"grep":"^milk"}""")
 
         assertEquals(
             "all three places, each with its own line number",
@@ -1339,10 +1339,10 @@ class AgentTest {
         val many = (1..25).joinToString("\n") { "line $it milk" }
         ws.write(File(ws.repoOf("shopping"), "list.txt"), many + "\n")
 
-        // **`paths` raised past the per-file cap**, so this test is about `HITS_PER_FILE` rather
+        // **`count` raised past the per-file cap**, so this test is about `HITS_PER_FILE` rather
         // than about the answer running out of room — the two bounds are different questions and
         // a test that let them overlap would pass while either one was wrong.
-        val body = tool("search", """{"query":"milk","paths":100}""")
+        val body = tool("search", """{"grep":"milk","count":100}""")
 
         assertTrue("the cap is honoured: $body", body.contains("shopping/list.txt:20: line 20 milk"))
         assertFalse("and it stopped there: $body", body.contains("shopping/list.txt:21:"))
@@ -1358,7 +1358,7 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "b.txt"), "milk\n")
         ws.write(File(ws.repoOf("shopping"), "c.txt"), "bread\n")
 
-        val body = tool("search", """{"query":"milk","count":true}""")
+        val body = tool("search", """{"grep":"milk","total":true}""")
 
         assertEquals("two files, each with its own number", "0\nshopping/a.txt: 2\nshopping/b.txt: 1", body)
     }
@@ -1375,7 +1375,7 @@ class AgentTest {
         // is on disk, and an unchanged file is not a second version of its content.
         git.commit("shopping", CommitMessage.SAVE)
 
-        val body = tool("search", """{"query":"milk","history":true}""")
+        val body = tool("search", """{"grep":"milk","history":true}""")
 
         // **Two rows and not three.** The current file is one answer, and its one version is the
         // other — the second commit touched the path without changing the content, so it is the
@@ -1556,7 +1556,7 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "list.txt")
         ws.write(file, "bread\nmilk\neggs\n")
 
-        val found = tool("search", """{"query":"^milk$"}""")
+        val found = tool("search", """{"grep":"^milk$"}""")
         val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
 
         // The search answers where it is; `read` answers where it is too, because `^milk$` matches a
@@ -1595,14 +1595,14 @@ class AgentTest {
 
     @Test
     fun `a search can answer with a folder's name, and a content search never can`() {
-        // **A folder is a name, not a text.** `{"scope":"notes"}` used to answer nothing when the
-        // only key was a pattern on names, which reads as "there is no such folder". A `query` stays
+        // **A folder is a name, not a text.** `{"path":"notes"}` used to answer nothing when the
+        // only key was a pattern on names, which reads as "there is no such folder". A `grep` stays
         // files-only: a folder would be in the result because something inside it matched, and that
         // is a line nobody asked about.
         ws.write(File(ws.repoOf("shopping"), "notes/inner.txt"), "a needle here")
 
-        val named = tool("search", """{"scope":"notes/"}""")
-        val grepped = tool("search", """{"query":"needle"}""")
+        val named = tool("search", """{"path":"notes/"}""")
+        val grepped = tool("search", """{"grep":"needle"}""")
 
         // **Named from the account**, like every other path a search answers with — `tree` named it
         // from the project, which is a spelling no other command uses.
@@ -1652,12 +1652,12 @@ class AgentTest {
         //
         // **And the paths come back spelled from the account** — `groceries/milk.txt` — where the
         // old `tree` answered `../groceries/milk.txt` because it was resolving the path the call
-        // wrote. A listing has no such path now: `scope` is a pattern, and the name of a file is the
+        // wrote. A listing has no such path now: `path` is a pattern, and the name of a file is the
         // same name however a caller reached it.
         val other = File(ws.accountDir, "groceries").apply { mkdirs() }
         File(other, "milk.txt").writeText("two litres")
 
-        val listed = tool("search", """{"scope":"^groceries/"}""")
+        val listed = tool("search", """{"path":"^groceries/"}""")
 
         assertTrue("it is a listing: $listed", listed.startsWith(AgentLog.SUCCESS))
         assertTrue("and it has the file: $listed", listed.contains("groceries/milk.txt"))
@@ -1709,8 +1709,8 @@ class AgentTest {
             return // a filesystem that cannot make one cannot be escaped through one either
         }
 
-        val listed = tool("search", """{"scope":"^shopping/"}""")
-        val found = tool("search", """{"query":"needle"}""")
+        val listed = tool("search", """{"path":"^shopping/"}""")
+        val found = tool("search", """{"grep":"needle"}""")
 
         assertFalse("the link is not listed: $listed", listed.contains("escape"))
         // **The file behind the link, not the word.** "nothing matches \"needle\"" echoes the
@@ -1726,7 +1726,7 @@ class AgentTest {
         // the same path by another name. A command that needs a file says so before it does anything.
         val before = File(ws.repoOf("shopping"), "milk.txt").readText()
 
-        // **`search` is not in this list**, because it does not name a file: `scope` is a pattern
+        // **`search` is not in this list**, because it does not name a file: `path` is a pattern
         // over paths and an empty one means the account, which is a legitimate call.
         for (name in listOf("write", "delete", "move", "restore")) {
             for (path in listOf("", ".")) {
@@ -1797,7 +1797,7 @@ class AgentTest {
 
         val body = tool(
             "search",
-            """{"scope":"milk\\.txt$","query":"bread","history":true}""",
+            """{"path":"milk\\.txt$","grep":"bread","history":true}""",
         )
 
         assertTrue("the line that matched: $body", body.contains("two litres of bread"))
@@ -1814,8 +1814,8 @@ class AgentTest {
 
         // **5, because `depth` counts from the account**: account 0, shopping 1, a 2, b 3, c 4, the
         // file 5. `tree` counted from the project, so the same number meant one level more.
-        val text = tool("search", """{"scope":"a/","depth":"5"}""")
-        val silly = tool("search", """{"scope":"a/","depth":99}""")
+        val text = tool("search", """{"path":"a/","depth":"5"}""")
+        val silly = tool("search", """{"path":"a/","depth":99}""")
 
         assertTrue("a depth written as text is read: $text", text.contains("a/b/c/"))
         assertTrue("and a huge one is clamped rather than refused: $silly", silly.startsWith(AgentLog.SUCCESS))
@@ -1882,7 +1882,7 @@ class AgentTest {
         // because there is no save to name. That is truthful and needs no special sentence.
         ws.write(File(ws.repoOf("shopping"), "fresh.txt"), "not committed yet")
 
-        val body = tool("search", """{"scope":"fresh\\.txt$","history":true}""")
+        val body = tool("search", """{"path":"fresh\\.txt$","history":true}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the file is there: $body", body.contains("fresh.txt"))
@@ -2170,7 +2170,7 @@ class AgentTest {
         // it looks authoritative.
         val said = AgentTools(ws, "shopping", git, log).run(Call("h", "help", "{}"))
         assertTrue("answered: $said", said.startsWith("0\n"))
-        for (spec in specs) {
+        for (spec in AgentTools.specs()) {
             assertTrue(
                 "the list names `${spec.name}`: $said",
                 said.contains("`${spec.name}`"),
@@ -2347,7 +2347,7 @@ class AgentTest {
         ws.write(file, "three litres")
         git.commit("shopping", CommitMessage.SAVE)
 
-        val body = tool("search", """{"scope":"milk\\.txt$","history":true,"paths":20}""")
+        val body = tool("search", """{"path":"milk\\.txt$","history":true,"count":20}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the newer save is recognisable: $body", body.contains("three litres"))
@@ -2379,7 +2379,7 @@ class AgentTest {
             git.commit("shopping", "save $n")
         }
 
-        val body = tool("search", """{"scope":"milk\\.txt$","history":true}""")
+        val body = tool("search", """{"path":"milk\\.txt$","history":true}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         // **Ten is the default when `history` is on**, which is the operator's own number: "an
@@ -2392,8 +2392,8 @@ class AgentTest {
             body.substringAfter('\n').lines().count { it.isNotBlank() && !it.startsWith("stopped") },
         )
 
-        // **`paths` raises it**, and the newest versions come first.
-        val all = tool("search", """{"scope":"milk\\.txt$","history":true,"paths":14}""")
+        // **`count` raises it**, and the newest versions come first.
+        val all = tool("search", """{"path":"milk\\.txt$","history":true,"count":14}""")
         assertTrue("all fourteen, so no note about stopping: $all", !all.contains("stopped at"))
         assertTrue("and the newest is first: $all", all.indexOf("version 12") < all.indexOf("version 11"))
     }
@@ -2419,7 +2419,7 @@ class AgentTest {
 
         val body = tool(
             "search",
-            """{"scope":"milk\\.txt$","query":"milk","history":true,"paths":2}""",
+            """{"path":"milk\\.txt$","grep":"milk","history":true,"count":2}""",
         )
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
@@ -2441,7 +2441,7 @@ class AgentTest {
 
         val body = tool(
             "search",
-            """{"scope":"milk\\.txt$","query":"bread","history":true}""",
+            """{"path":"milk\\.txt$","grep":"bread","history":true}""",
         )
 
         assertTrue("the version whose text matched: $body", body.contains("bread"))
@@ -4209,7 +4209,7 @@ class AgentTest {
         val door = ScriptedDoor(
             Reply("", listOf(call("search", """{}"""))),
             Reply("done"),
-            Reply("", listOf(call("search", """{"scope":"milk\\.txt$"}"""))),
+            Reply("", listOf(call("search", """{"path":"milk\\.txt$"}"""))),
             Reply("done again"),
         )
         val agent = agent(door)

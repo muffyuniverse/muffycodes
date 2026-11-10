@@ -344,7 +344,7 @@ class AgentTools(
         const val DEFAULT_PATHS = 10
 
         /**
-         * The most files one `search` will name, however large `paths` is.
+         * The most files one `search` will name, however large `count` is.
          *
          * A hundred is a page of paths, which is as many as a model can hold beside the question it
          * is answering. Past this the answer is not "more results", it is "a narrower query" — and
@@ -359,7 +359,7 @@ class AgentTools(
          * Eight is deep enough to reach any file a person would put in a project — the deepest thing
          * the app itself writes is `system/muffycodes_data/starters/<kind>/workflows/<file>`, at
          * five — while still being a bound rather than a promise. `depth` raises it, and the number
-         * matters most for a *listing*, where there is no `query` to narrow what the walk visits.
+         * matters most for a *listing*, where there is no `grep` to narrow what the walk visits.
          */
         const val SEARCH_DEPTH = 8
 
@@ -373,7 +373,7 @@ class AgentTools(
         const val SEARCH_DEPTH_MOST = 16
 
         /**
-         * How many versions of one file the history pass considers before `paths` cuts the answer.
+         * How many versions of one file the history pass considers before `count` cuts the answer.
          *
          * **A ceiling on the walk, not on the answer.** `versionsOf` opens a tree per commit, so a
          * file saved two thousand times would be two thousand tree reads for a question about the
@@ -493,14 +493,16 @@ class AgentTools(
             // query), history (optional flag to also search historic file versions), depth (how
             // deeply search the branch), rows (how many results to show)".
             //
-            // - **`scope` is a pattern over the path**, so a folder (`wiki/`), a file (`milk.txt`)
+            // - **`path` is a pattern over the path**, so a folder (`wiki/`), a file (`milk.txt`)
             //   and a name suffix (`\\.md$`) are one kind of filter rather than three. That is what
             //   removed `tree`'s `name`: the basename is part of the path.
-            // - **`query` is optional**, and absent means a listing — `scope` + `depth` is "what is
+            // - **`grep` is optional**, and absent means a listing — `path` + `depth` is "what is
             //   here", which is not a degenerate search but the same walk with no filter applied.
-            // - **`paths` is the count**, named that because the answer is `path` or `path@sha7`.
+            // - **`count` is how many paths to answer with**, named that because the answer is
+            //   `path` or `path@sha7`. The boolean that used to be called `count` is now `total`,
+            //   because "count" naming a flag and a number was the confusion this rename removed.
             //   A content match answers **one row per path**, so the count and the rows agree.
-            "search" to setOf("scope", "query", "mode", "history", "depth", "paths", "word", "count"),
+            "search" to setOf("path", "grep", "history", "depth", "count", "total", "word"),
             // **`from`/`to` stay here, and only here plus `write`.** You cannot grep text you have
             // not found yet: "show me lines 40-60 of a file I have never seen" has no pattern to
             // search with, and it is the most common first read an agent does.
@@ -649,31 +651,24 @@ class AgentTools(
             ),
             spec(
                 "search",
-                "**One question, six filters.** Find files by where they are (`scope`), what they " +
-                    "say (`query`), how they say it (`mode`), whether the answer is a saved version " +
-                    "(`history`), how deep to look (`depth`), and how many paths to answer with " +
-                    "(`paths`). Every filter is optional; **with none of them you get a listing of " +
-                    "the account**, which is `scope` and `depth` with nothing to filter out. " +
+                "**One question, six filters.** Find files by where they are (`path`), what they " +
+                    "say (`grep`), whether the answer is a saved version (`history`), how deep to " +
+                    "look (`depth`), and how many paths to answer with (`count`). Every filter is " +
+                    "optional; **with none of them you get a listing of the account**, which is " +
+                    "`path` and `depth` with nothing to filter out. " +
                     "\n\n" +
-                    "**`scope` is a pattern over the path**, matched anywhere in it — so `\"wiki/\"` is " +
+                    "**`path` is a pattern over the path**, matched anywhere in it — so `\"wiki/\"` is " +
                     "the wiki of every project, `\"groceries/wiki/\"` is one, `\"milk.txt\"` is one file, " +
-                    "and `\"\\.md\$\"` is every markdown file there is. Paths are relative to the " +
+                    "and `\"\\.md$\"` is every markdown file there is. Paths are relative to the " +
                     "**account**, so a hit in another project says which one, and the search reaches " +
                     "every project — a thing worth finding may live in another one, and a search " +
                     "that silently missed it would answer \"there is nothing\" about a question it " +
                     "never asked. " +
                     "\n\n" +
-                    "**`query` is optional, and absent means \"list what is in scope\".** Present, it " +
+                    "**`grep` is optional, and absent means \"list what is in scope\".** Present, it " +
                     "is a case-insensitive regular expression matched inside one line, and each " +
                     "answer line is `path:line: the text` with a count of further matches in that " +
-                    "file. One row per **path**, because `paths` counts paths. " +
-                    "\n\n" +
-                    "**`mode` is `regex`, the only mode this build has.** It matches the words of " +
-                    "`query` against the text. `semantic` existed and is gone: it searched by " +
-                    "meaning, which needed an embedding model and an index the app no longer " +
-                    "carries, and an answer that quietly fell back to text would read like the " +
-                    "answer that was asked for. Ask it anyway and it is refused with this " +
-                    "sentence. `mode` without `query` is refused. " +
+                    "file. One row per **path**, because `count` counts paths. " +
                     "\n\n" +
                     "**`history: true` also searches every saved version** of this project's files " +
                     "and answers `path@sha7` — which **`read` takes directly**, so a hit is usable " +
@@ -686,19 +681,19 @@ class AgentTools(
                     "places a pattern occurs in a file rather than the first and a count. A file " +
                     "with more than 20 matching lines answers 20 and says how many were left. " +
                     "`word: true` matches whole words only. " +
-                    "**`count: true` answers `path: N` per file** — how many lines match, not which " +
+                    "**`total: true` answers `path: N` per file** — how many lines match, not which " +
                     "ones — for a question about where something is used most. " +
                     "**`history: true` searches saved versions too**, so a hit in a version is " +
                     "answered as `path@sha7` — which `read {revision}` takes directly. In text mode " +
                     "every version that changed the file is a row, newest first, so the newest " +
                     "version that matches is the first. The same text twice under one commit is one " +
                     "row. " +
-                    "**`paths`** is how many paths to answer with: 10 by default when a `query` " +
+                    "**`count`** is how many paths to answer with: 10 by default when a `grep` " +
                     "filters, 100 (the most) when nothing does, because a listing is read whole. " +
                     "It says when it stopped.",
-                "{\"scope\":\"src/\",\"query\":\"a case-insensitive regular expression\"," +
-                    "\"mode\":\"regex\",\"history\":false,\"depth\":8,\"paths\":10,\"word\":false," +
-                    "\"count\":false}",
+                "{\"path\":\"src/\",\"grep\":\"a case-insensitive regular expression\"," +
+                    "\"history\":false,\"depth\":8,\"count\":10,\"word\":false," +
+                    "\"total\":false}",
                 // **Nothing is required**, because every key is a filter and `{}` is a valid call —
                 // it lists the account. Marking them all required would tell a provider that a
                 // listing is malformed, which is the mode the operator named.
@@ -1276,8 +1271,8 @@ class AgentTools(
     }
 
     /**
-     * The one search: **where** (`scope`), **what** (`query`), **how** (`mode`), **when**
-     * (`history`), **how deep** (`depth`), **how many** (`paths`).
+     * The one search: **where** (`path`), **what** (`grep`), **when**
+     * (`history`), **how deep** (`depth`), **how many** (`count`).
      *
      * ## Why three commands became one
      *
@@ -1288,21 +1283,21 @@ class AgentTools(
      * rows (how many results to show)"* — and answered the objections that made it one command
      * rather than three:
      *
-     * - **`tree`'s `name` folds into `scope`**, because the basename is part of the path, so
+     * - **`tree`'s `name` folds into `path`**, because the basename is part of the path, so
      *   `scope: "\\.md$"` is the name filter.
      * - **A listing is not a degenerate search.** The filters are independent axes, and setting none
      *   of them is setting none — unlike `grep`/`from`/`to`/`at`, which competed to say *where* and
      *   refused each other. That distinction is why this is one command and that was three keys.
-     * - **`paths` is the count** because the answer is `path` or `path@sha7`, and a content match
+     * - **`count` is the count** because the answer is `path` or `path@sha7`, and a content match
      *   answers **one row per path**, so the count and the rows cannot disagree.
      *
      * ## The filters, and what each one is asked of
      *
-     * - **`scope`** is a case-insensitive pattern asked of the **account-relative path**, matched
+     * - **`path`** is a case-insensitive pattern asked of the **account-relative path**, matched
      *   anywhere in it. So `wiki/` is the wiki of every project, `groceries/wiki/` is one,
      *   `milk.txt` is one file, and `\\.md$` is every markdown file. A folder is matched with its
      *   trailing slash, so `scope: "src/"` lists the folder as well as its contents.
-     * - **`query`** is asked of each **line** of a text file, with the same [hit] `read` uses, so the
+     * - **`grep`** is asked of each **line** of a text file, with the same [hit] `read` uses, so the
      *   two commands cannot disagree about whether a file matches.
      * - **`depth`** counts folder levels below the account. Eight by default: deep enough to reach
      *   any file whose project keeps its text in a subfolder, bounded so a pathological tree cannot
@@ -1312,56 +1307,31 @@ class AgentTools(
      *
      * A file matching forty times is one answer, with the first match, its line number, and a count
      * of the rest — because a list that hid "and 39 more" would read as a file that says it once,
-     * and because `paths` is a count of paths.
+     * and because `count` is a count of paths.
      */
     private fun searchTool(args: JSONObject, deadline: Deadline): String {
-        val scope = pattern(args, "scope")
-            .getOrElse { return refusal("`scope` is not a pattern: ${it.message}") }
-        val query = pattern(args, "query")
-            .getOrElse { return refusal("`query` is not a pattern: ${it.message}") }
-        val mode = args.optString("mode", "").trim().lowercase()
-        // **`mode` without `query` is refused, not ignored.** It says what the query *means*, so on
-        // its own it is a setting for a question nobody asked, and silently accepting it would let a
-        // model believe it had searched by meaning.
-        if (mode.isNotEmpty() && query == null) {
-            return refusal(
-                "`mode` says what `query` means, and there is no `query` here. Give a `query` to " +
-                    "search text, or leave `mode` out to list what is in `scope`.",
-            )
-        }
-        if (mode.isNotEmpty() && mode != "regex") {
-            // **Named, not dropped.** A model repeating a call it read in an old session is told what
-            // changed, rather than that its argument is not a thing — the second sentence leaves it
-            // guessing whether it misspelled a mode that exists.
-            return refusal(
-                if (mode == "semantic") {
-                    "This build has no `semantic` mode: `mode` is `regex`. Searching by meaning " +
-                        "needed an embedding model and an index the app no longer carries. A `query` " +
-                        "here matches the text itself."
-                } else {
-                    "`mode` is `regex`, and \"$mode\" is not a mode. A `query` matches the text " +
-                        "itself."
-                },
-            )
-        }
+        val scope = pattern(args, "path")
+            .getOrElse { return refusal("`path` is not a pattern: ${it.message}") }
+        val query = pattern(args, "grep")
+            .getOrElse { return refusal("`grep` is not a pattern: ${it.message}") }
         val depth = count(args, "depth", SEARCH_DEPTH)
             .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
             .coerceIn(1, SEARCH_DEPTH_MOST)
         val history = args.optBoolean("history", false)
-        // **The default depends on whether anything narrows the answer**, and `paths` means the same
+        // **The default depends on whether anything narrows the answer**, and `count` means the same
         // thing in both cases — how many paths to answer with.
         //
-        // - **A pure listing** (`scope` + `depth`, nothing else) is a folder's contents and is read
+        // - **A pure listing** (`path` + `depth`, nothing else) is a folder's contents and is read
         //   whole, so it is bounded at the most rather than at ten. Stopping it at ten would make
-        //   `scope` useless for "what is here", which is the case the operator named.
-        // - **Anything that filters** — a `query`, or `history`, which turns every listed file into
+        //   `path` useless for "what is here", which is the case the operator named.
+        // - **Anything that filters** — a `grep`, or `history`, which turns every listed file into
         //   a row per save — answers a handful, and ten is the default the operator asked for:
         //   *"an optional key to set how many rows are shown (with default max of 10)"*.
-        val most = count(args, "paths", if (query == null && !history) MOST_PATHS else DEFAULT_PATHS)
+        val most = count(args, "count", if (query == null && !history) MOST_PATHS else DEFAULT_PATHS)
             .getOrElse { return refusal(it.message ?: "that count cannot be used") }
             .coerceIn(1, MOST_PATHS)
 
-        val state = SearchState(most, args.optBoolean("count", false))
+        val state = SearchState(most, args.optBoolean("total", false))
         val found = mutableListOf<String>()
         // **A file that is in scope but whose text does not match is still a directory entry**, and
         // in listing mode it is the answer. Content mode drops it, which is the difference between
@@ -1399,7 +1369,7 @@ class AgentTools(
         // were more entries to look at; if it finished exactly on the limit there is nothing more to
         // promise, and the sentence would send a model looking for a remainder that does not exist.
         val head = if (state.full && state.more) {
-            "stopped at $most paths; narrow `scope`, lower `depth`, or raise `paths` for the rest\n"
+            "stopped at $most paths; narrow `path`, lower `depth`, or raise `count` for the rest\n"
         } else {
             ""
         }
@@ -1423,7 +1393,7 @@ class AgentTools(
      * listed is skipped rather than failing the whole search: one unreadable folder must not make
      * the account unsearchable.
      *
-     * **A folder is answered only in listing mode.** With a `query` the answer is files and lines:
+     * **A folder is answered only in listing mode.** With a `grep` the answer is files and lines:
      * a folder in the result would be there because something inside it matched, and printing the
      * folder adds a line nobody asked about.
      *
@@ -1472,7 +1442,7 @@ class AgentTools(
             if (!withinProject(entry.file)) continue
             if (entry.isFolder) {
                 // **The folder is listed when it is in scope**, and the walk continues regardless —
-                // a file inside may be in scope even when its folder is not, because `scope` is a
+                // a file inside may be in scope even when its folder is not, because `path` is a
                 // pattern over the whole path and not a prefix test.
                 if (query == null) {
                     val shown = relToAccount(entry.file) + "/"
@@ -1522,9 +1492,9 @@ class AgentTools(
                 // instead of the lines themselves. A model asking "where is this used most" wants
                 // numbers it can compare, and twenty rows per file is the wrong shape for that.
                 if (state.counting) continue
-                // **Bounded by both the per-file cap and what is left of `paths`.** `paths` is how
+                // **Bounded by both the per-file cap and what is left of `count`.** `count` is how
                 // many ROWS the answer holds, so a file with twenty hits would otherwise fill an
-                // answer of ten and crowd out every other file — which is the defect `paths` exists
+                // answer of ten and crowd out every other file — which is the defect `count` exists
                 // to prevent, arriving from the other direction.
                 if (shown >= HITS_PER_FILE || state.count >= state.limit - 1) continue
                 shown++
@@ -1550,7 +1520,7 @@ class AgentTools(
     }
 
     /**
-     * True when [path] is in `scope` — **anywhere in the path, or anywhere at all when there is no
+     * True when [path] is in `path` — **anywhere in the path, or anywhere at all when there is no
      * scope.**
      *
      * The pattern is not anchored, which is what makes one key cover the three questions the old
@@ -1610,7 +1580,7 @@ class AgentTools(
      * ## What it answers
      *
      * `path@sha7` for each version whose text matches, which is **exactly what `read` and `restore`
-     * accept** — so a hit is directly usable as the next call, with no translation. With no `query`
+     * accept** — so a hit is directly usable as the next call, with no translation. With no `grep`
      * it answers every version in scope, which is what `history` used to be.
      *
      * @return how many candidates were skipped because they belong to another project.

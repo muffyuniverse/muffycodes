@@ -12,7 +12,7 @@ import java.io.File
 /**
  * `search` — **one question, six filters**, and the command that replaced `tree` and `history`.
  *
- * The operator's shape: *"scope (path of folder/file which branch to search), query (optional
+ * The operator's shape: *"path (of folder/file which branch to search), grep (optional
  * filecontent filter), regex/semantic (type of search - when there is query), history (optional flag
  * to also search historic file versions), depth (how deeply search the branch), rows (how many
  * results to show)"*.
@@ -21,10 +21,10 @@ import java.io.File
  *
  * 1. **It crosses projects**, because a search that silently stayed in one project would answer
  *    "nothing" about a question it never asked.
- * 2. **`scope` is a pattern over the path**, so one key covers a folder (`wiki/`), a project
+ * 2. **`path` is a pattern over the path**, so one key covers a folder (`wiki/`), a project
  *    (`^shopping/`), a file (`milk.txt`) and a name suffix (`\\.md$`). The last of those is what
  *    removed `tree`'s separate `name` argument.
- * 3. **No `query` is a listing, not an error.** `scope` plus `depth` is "what is here" — the same
+ * 3. **No `grep` is a listing, not an error.** `path` plus `depth` is "what is here" — the same
  *    walk with nothing filtered out. That is the objection the operator answered and the reason
  *    `tree` could go.
  * 4. **`paths` counts paths, not matches**, because a file matching forty times is one thing to read.
@@ -69,7 +69,7 @@ class SearchTest {
         write("shopping", "notes.txt", "milk\neggs\n")
         write("work", "notes.txt", "the retry timeout is ninety seconds\n")
 
-        val answer = tools().run(call("""{"query":"retry timeout"}"""))
+        val answer = tools().run(call("""{"grep":"retry timeout"}"""))
 
         assertTrue("it is an answer, not a refusal: $answer", answer.startsWith("0\n"))
         assertTrue("and it names the other project: $answer", answer.contains("work/notes.txt"))
@@ -84,22 +84,22 @@ class SearchTest {
         write("shopping", "notes.txt", "milk\n")
         write("shared", "muffycodes_data/wiki/retries.md", "exponential backoff, capped at 90 s\n")
 
-        val answer = tools().run(call("""{"query":"exponential backoff"}"""))
+        val answer = tools().run(call("""{"grep":"exponential backoff"}"""))
 
         assertTrue("found: $answer", answer.contains("shared/muffycodes_data/wiki/retries.md"))
     }
 
-    // ---- `scope` is a pattern over the path ---------------------------------
+    // ---- `path` is a pattern over the path ----------------------------------
 
     @Test
-    fun `a scope with one segment means that folder in every project`() {
+    fun `a path with one segment means that folder in every project`() {
         // **A pattern, not a list of prefixes.** `wiki/` is not a mode called "wiki"; it is a
         // substring of the path, so it finds the wiki of every project at once.
         write("shopping", "wiki/milk.md", "milk is bought on Saturdays\n")
         write("work", "wiki/retries.md", "milk is not involved here\n")
         write("shopping", "notes.txt", "milk, twice\n")
 
-        val answer = tools().run(call("""{"query":"milk","scope":"wiki/"}"""))
+        val answer = tools().run(call("""{"grep":"milk","path":"wiki/"}"""))
 
         val said = answer.replace("\n", " | ")
         assertTrue("both wikis are searched: $said", answer.contains("shopping/wiki/milk.md"))
@@ -108,30 +108,30 @@ class SearchTest {
     }
 
     @Test
-    fun `a scope with the project in it means one project`() {
+    fun `a path with the project in it means one project`() {
         write("shopping", "wiki/milk.md", "milk is bought on Saturdays\n")
         write("work", "wiki/retries.md", "milk is not involved here\n")
 
-        val answer = tools().run(call("""{"query":"milk","scope":"shopping/wiki/"}"""))
+        val answer = tools().run(call("""{"grep":"milk","path":"shopping/wiki/"}"""))
 
         assertTrue("the one asked for: $answer", answer.contains("shopping/wiki/milk.md"))
         assertFalse("and only that one: $answer", answer.contains("work/wiki/retries.md"))
     }
 
     @Test
-    fun `a scope that matches nothing says so about the scope`() {
+    fun `a path that matches nothing says so about the path`() {
         // **The sentence has to name what was searched.** "nothing matches" without the scope reads
         // as "the account has no such text", and the agent then stops looking everywhere.
         write("shopping", "notes.txt", "milk\n")
 
-        val answer = tools().run(call("""{"query":"milk","scope":"nowhere/"}"""))
+        val answer = tools().run(call("""{"grep":"milk","path":"nowhere/"}"""))
 
         assertTrue("it is not a failure: $answer", answer.startsWith("0\n"))
         assertTrue("and names the scope: $answer", answer.contains("nowhere/"))
     }
 
     @Test
-    fun `a scope that is a name suffix replaces tree's name argument`() {
+    fun `a path that is a name suffix replaces tree's name argument`() {
         // **The reason `tree` could lose its `name` key.** The basename is part of the path, so a
         // pattern that anchors at the end of the path is the same filter — and it works on the whole
         // account rather than one folder, which is more than `tree` could do.
@@ -139,7 +139,7 @@ class SearchTest {
         write("shopping", "milk.txt", "milk, twice\n")
         write("work", "notes.md", "# other\n")
 
-        val answer = tools().run(call("""{"scope":"\\.md$"}"""))
+        val answer = tools().run(call("""{"path":"\\.md$"}"""))
 
         assertTrue("the markdown is listed: $answer", answer.contains("shopping/milk.md"))
         assertTrue("including the other project's: $answer", answer.contains("work/notes.md"))
@@ -147,11 +147,11 @@ class SearchTest {
     }
 
     @Test
-    fun `a scope naming one file answers that file and its folder's siblings not at all`() {
+    fun `a path naming one file answers that file and its folder's siblings not at all`() {
         write("shopping", "milk.txt", "milk\n")
         write("shopping", "eggs.txt", "eggs\n")
 
-        val answer = tools().run(call("""{"scope":"milk\\.txt$"}"""))
+        val answer = tools().run(call("""{"path":"milk\\.txt$"}"""))
 
         assertTrue("the file asked for: $answer", answer.contains("shopping/milk.txt"))
         assertFalse("and nothing beside it: $answer", answer.contains("eggs.txt"))
@@ -169,7 +169,7 @@ class SearchTest {
 
         // **`paths` raised past the per-file cap**, so the answer is bounded by `HITS_PER_FILE`
         // and not by `paths` — otherwise this test would be measuring the wrong bound.
-        val answer = tools().run(call("""{"query":"milk","paths":100}"""))
+        val answer = tools().run(call("""{"grep":"milk","count":100}"""))
 
         // **One line in the message, because CI truncates at a newline.** An assertion that fails
         // with half its evidence missing is one that costs a second CI run to understand.
@@ -198,7 +198,7 @@ class SearchTest {
         // there is more to ask for, and the sentence names the two things that would narrow it.
         for (i in 1..5) write("shopping", "note$i.txt", "milk $i\n")
 
-        val answer = tools().run(call("""{"query":"milk","paths":2}"""))
+        val answer = tools().run(call("""{"grep":"milk","count":2}"""))
 
         assertTrue("it says it stopped: $answer", answer.contains("stopped at 2 paths"))
         assertTrue("and how to see the rest: $answer", answer.contains("narrow"))
@@ -218,7 +218,7 @@ class SearchTest {
         write("shopping", "a.txt", "a\n")
         write("shopping", "z/inner.txt", "inner\n")
 
-        val answer = tools().run(call("""{"scope":"^shopping/","paths":2}"""))
+        val answer = tools().run(call("""{"path":"^shopping/","count":2}"""))
 
         assertEquals("two entries", 2, answer.lines().count { it.contains("shopping/") })
         assertTrue("and it says there was more: $answer", answer.contains("stopped at 2 paths"))
@@ -231,7 +231,7 @@ class SearchTest {
         // looking for something that does not exist.
         for (i in 1..2) write("shopping", "note$i.txt", "milk $i\n")
 
-        val answer = tools().run(call("""{"query":"milk","paths":2}"""))
+        val answer = tools().run(call("""{"grep":"milk","count":2}"""))
 
         assertFalse("no false promise: $answer", answer.contains("stopped at"))
         assertEquals("both are there", 2, answer.lines().count { it.contains("note") })
@@ -254,8 +254,8 @@ class SearchTest {
         git.commit("shopping", "Shortened")
 
         // **The current file no longer says 90**, so a search without `history` must not find it.
-        val now = tools().run(call("""{"query":"90 seconds"}"""))
-        val past = tools().run(call("""{"query":"90 seconds","history":true}"""))
+        val now = tools().run(call("""{"grep":"90 seconds"}"""))
+        val past = tools().run(call("""{"grep":"90 seconds","history":true}"""))
 
         assertTrue("the old text is not in the file: $now", now.contains("nothing matches"))
         assertTrue(
@@ -270,7 +270,7 @@ class SearchTest {
 
     @Test
     fun `history with no query lists a file's versions, which is what the old command did`() {
-        // **A version list is a listing too.** The merged command reaches it with `scope` naming one
+        // **A version list is a listing too.** The merged command reaches it with `path` naming one
         // file and `history` set, and each row is `path@sha7` plus the line that tells the saves
         // apart — so nothing the old command answered became unreachable.
         val repo = File(ws.accountDir, "shopping")
@@ -281,7 +281,7 @@ class SearchTest {
         file.writeText("three litres\n")
         git.commit("shopping", "save 2")
 
-        val answer = tools().run(call("""{"scope":"milk\\.txt$","history":true}"""))
+        val answer = tools().run(call("""{"path":"milk\\.txt$","history":true}"""))
 
         assertTrue("a version is named: $answer", answer.contains("milk.txt@"))
         assertTrue("the newer text is there: $answer", answer.contains("three litres"))
@@ -304,7 +304,7 @@ class SearchTest {
         file.writeText("second version\n")
         git.commit("shopping", "Changed")
 
-        val answer = tools().run(call("""{"query":"first version","history":true}"""))
+        val answer = tools().run(call("""{"grep":"first version","history":true}"""))
         val sha = Regex("""notes\.txt@([0-9a-f]{7})""").find(answer)?.groupValues?.get(1)
         assertTrue("a sha came back: $answer", sha != null)
 
@@ -318,7 +318,7 @@ class SearchTest {
     // ---- what it refuses ----------------------------------------------------
 
     @Test
-    fun `a search with no query lists what is in scope`() {
+    fun `a search with no grep lists what is in scope`() {
         // **The objection the operator answered.** I argued a listing was a degenerate search; they
         // said *"why searching all is degenerative? you just provide scope and get all of current
         // paths inside of it in return."* They were right: the filters are independent axes, and
@@ -327,7 +327,7 @@ class SearchTest {
         write("shopping", "src/Main.kt", "fun main() {}\n")
         write("work", "notes.txt", "other\n")
 
-        val answer = tools().run(call("""{"scope":"^shopping/"}"""))
+        val answer = tools().run(call("""{"path":"^shopping/"}"""))
 
         assertTrue("it is an answer: $answer", answer.startsWith("0\n"))
         assertTrue("the file is listed: $answer", answer.contains("shopping/milk.txt"))
@@ -344,10 +344,10 @@ class SearchTest {
     fun `a listing is not cut at ten, because it is read whole`() {
         // **`paths` means the same thing in both modes, but what a sensible number is depends on the
         // question.** A search answers a handful; a listing is a folder's contents, and stopping it
-        // at ten would make `scope` useless for "what is here".
+        // at ten would make `path` useless for "what is here".
         for (i in 1..15) write("shopping", "note$i.txt", "text $i\n")
 
-        val answer = tools().run(call("""{"scope":"^shopping/"}"""))
+        val answer = tools().run(call("""{"path":"^shopping/"}"""))
 
         assertEquals("all fifteen", 15, answer.lines().count { it.contains("note") })
         assertFalse("and no note about stopping: $answer", answer.contains("stopped at"))
@@ -357,7 +357,7 @@ class SearchTest {
     fun `depth counts folders below the account`() {
         // **`depth` is counted from the account, not from the project**, which is the one thing the
         // merge changed about it: `tree` counted from the project it was opened in, and the merged
-        // command has no such starting point — `scope` is a pattern, so there is no root to measure
+        // command has no such starting point — `path` is a pattern, so there is no root to measure
         // from. The account is the only well-defined origin, and the numbers in this test are the
         // arithmetic of that: the account is level 0, a project is 1.
         write("shopping", "top.txt", "top\n")
@@ -365,11 +365,11 @@ class SearchTest {
         write("shopping", "a/b/two.txt", "two\n")
 
         // 3 reaches `a/one.txt` (account 0, shopping 1, a 2, the file 3).
-        val shallow = tools().run(call("""{"scope":"^shopping/","depth":3}"""))
+        val shallow = tools().run(call("""{"path":"^shopping/","depth":3}"""))
         assertTrue("one level down is there: $shallow", shallow.contains("shopping/a/one.txt"))
         assertFalse("two levels is not: $shallow", shallow.contains("shopping/a/b/two.txt"))
 
-        val deep = tools().run(call("""{"scope":"^shopping/","depth":5}"""))
+        val deep = tools().run(call("""{"path":"^shopping/","depth":5}"""))
         assertTrue("raising depth reaches it: $deep", deep.contains("shopping/a/b/two.txt"))
     }
 
@@ -377,7 +377,7 @@ class SearchTest {
     fun `paths bounds a listing when it is given`() {
         for (i in 1..5) write("shopping", "note$i.txt", "text $i\n")
 
-        val answer = tools().run(call("""{"scope":"note","paths":2}"""))
+        val answer = tools().run(call("""{"path":"note","count":2}"""))
 
         // **The scope names the files, so the project folder is not one of the two.** With a scope
         // of `^shopping/` the folder itself occupies a row, which is correct for a listing and would
@@ -386,49 +386,36 @@ class SearchTest {
         assertTrue("and it says it stopped: $answer", answer.contains("stopped at 2 paths"))
     }
 
-    // ---- `mode`: what the query means --------------------------------------
+    // ---- `mode` is gone ----------------------------------------------------
 
     @Test
-    fun `mode semantic is refused, and the sentence names the mode that went`() {
-        // **Named, not dropped.** A model repeating a call from an old session is told that searching
-        // by meaning needed an embedding model and an index the app no longer carries, and what a
-        // `query` does now — the alternative is "not a thing", which leaves it guessing whether it
-        // misspelled a mode that still exists.
-        val answer = tools().run(
-            call("""{"scope":"shopping/","query":"milk","mode":"semantic","history":true}"""),
-        )
+    fun `mode is refused like any key the command does not take, and the refusal points at help`() {
+        // **`mode` had one value and a refusal for every other one**, which made it a parameter whose
+        // whole job was to refuse things. Deleted on 2026-11-10 (operator: *"why mode when there is
+        // only one?"*), and **no alias** — an old call gets the same answer any wrong key gets.
+        //
+        // This is the honest replacement for the three tests that asserted the bespoke sentences:
+        // they tested wording that no longer exists, and keeping them would have meant keeping the
+        // sentences.
+        val answer = tools().run(call("""{"path":"shopping/","grep":"milk","mode":"semantic"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("naming the missing mode: $answer", answer.contains("no `semantic` mode"))
-        assertTrue("and what a query does instead: $answer", answer.contains("matches the text itself"))
+        assertTrue("naming the key that is gone: $answer", answer.contains("`mode`"))
+        assertTrue("and the keys that work: $answer", answer.contains("`grep`"))
+        assertTrue("and pointing at help: $answer", answer.contains("`help`"))
     }
 
     @Test
-    fun `mode without a query is refused, because there is nothing to interpret`() {
-        // **Silently ignoring it is the dangerous option**: a model that asked for semantic and got
-        // a listing would believe its question was answered.
-        val answer = tools().run(call("""{"scope":"shopping/","mode":"regex"}"""))
-
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names the missing key: $answer", answer.contains("query"))
-    }
-
-    @Test
-    fun `a mode that is neither regex nor semantic is refused, naming what exists`() {
-        val answer = tools().run(call("""{"scope":"shopping/","query":"milk","mode":"fuzzy"}"""))
-
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and it says what is on offer: $answer", answer.contains("`mode` is `regex`"))
-    }
-
-    @Test
-    fun `mode regex is accepted and is what the default already does`() {
+    fun `a call that never mentioned mode searches text, because that is the only search`() {
+        // **What `mode: regex` used to say is now the only behaviour**, so a call without it must be
+        // indistinguishable from one that named it. This is the test that would fail if deleting
+        // `mode` had changed what a search does.
         write("shopping", "milk.txt", "milk is bought on Saturdays\n")
 
-        val said = tools().run(call("""{"query":"Saturdays","mode":"regex"}"""))
-        val implied = tools().run(call("""{"query":"Saturdays"}"""))
+        val said = tools().run(call("""{"grep":"Saturdays"}"""))
 
-        assertEquals("the same answer either way", implied, said)
+        assertTrue("it found it: $said", said.contains("Saturdays"))
+        assertTrue("with a line number, which is the text search's answer", said.contains(":1:"))
     }
 
     @Test
@@ -450,7 +437,7 @@ class SearchTest {
 
     @Test
     fun `a broken pattern is a refusal that quotes the mistake`() {
-        val answer = tools().run(call("""{"query":"["}"""))
+        val answer = tools().run(call("""{"grep":"["}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and says the pattern is the problem: $answer", answer.contains("pattern"))
@@ -461,7 +448,7 @@ class SearchTest {
         // **The same rule every tool has**, and it matters more here: `lines` was a key once and
         // silently became "everything". A search that ignored an unknown key would answer about a
         // different question than the one asked.
-        val answer = tools().run(call("""{"query":"milk","lines":5}"""))
+        val answer = tools().run(call("""{"grep":"milk","lines":5}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names the key: $answer", answer.contains("lines"))
@@ -475,7 +462,7 @@ class SearchTest {
         png.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 'm'.code.toByte()))
         write("shopping", "notes.txt", "milk\n")
 
-        val answer = tools().run(call("""{"query":"milk"}"""))
+        val answer = tools().run(call("""{"grep":"milk"}"""))
 
         assertTrue("the text file is found: $answer", answer.contains("notes.txt"))
         assertFalse("and the picture is not: $answer", answer.contains("logo.png"))
