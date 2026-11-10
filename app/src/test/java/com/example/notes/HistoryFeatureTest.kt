@@ -107,35 +107,41 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an empty folder has no version, and stops being empty the moment it has one`() {
+    fun `an empty folder is a version, because the app marks it so it can come back`() {
         start()
-        // **This is a fact about git, not a gap in the app.** A folder is made of the files in it,
-        // so an empty one is not a change to commit and has no version to go back to. The app
-        // records nothing and says nothing, which is right; the alternative — putting a marker
-        // file in the person's repository so an empty folder leaves a trace — would be the app
-        // writing something they never asked for into the thing that goes to GitHub.
-        start()
-
+        // **This test used to assert the opposite, and it was wrong about the app.**
+        //
+        // Its comment said an empty folder "is not a change to commit and has no version to go back
+        // to", and called a marker file "the app writing something they never asked for". Both were
+        // false: `Workspace.markTrackable` puts a `.gitkeep` in an empty folder precisely so it *can*
+        // be rolled back, and `createFolder` calls it. The promise in §4 is that any folder state can
+        // be rolled back, and git stores content — so without the marker the promise has a hole in it
+        // exactly the shape of a new folder.
+        //
+        // It went on passing because it called `start()` twice, so its first question was asked of a
+        // project that had not finished being made and its "no version" answer came from the app not
+        // having got there yet. It now asks once, and asks what the app actually does.
         scene.folder("empty")
         scene.await("the folder to be made") { scene.names().contains("empty") }
-        assertTrue("no version, because there is nothing to have one of",
-            scene.versionsOfFolder("empty").isEmpty())
+        assertTrue("a new folder is a version, so it can come back",
+            scene.versionsOfFolder("empty").isNotEmpty())
+
+        // The marker is the app's own and is never shown as the person's file — a folder whose only
+        // content is the marker reads as empty, which is the whole point of it being hidden.
+        assertFalse("and the marker is not one of their files",
+            scene.names().any { it == ".gitkeep" })
 
         scene.openIn("empty")
         val one = scene.file("one.txt", "first")
         scene.openIn()
-        scene.await("a version, now that there is something in it") {
-            scene.versionsOfFolder("empty").isNotEmpty()
-        }
         // The text has to be the version that is restored, or this asks whether an empty file comes
         // back empty — which it does, and which says nothing about restoring anything.
         scene.await("the text to be a version") {
             scene.versionsOf(one).any { it.second == "first" }
         }
 
-        // And from that version the folder *can* come back, which is the thing the old test was
-        // reaching for.
-        val version = scene.versionsOfFolder("empty").first().first.id
+        // And from the folder's *first* version it comes back empty — the case the marker exists for.
+        val version = scene.versionsOfFolder("empty").last().first.id
         val folder = File(scene.workspace!!.projectDir("work"), "empty")
         delete(folder)
         assertFalse("the folder is gone", folder.exists())
@@ -143,7 +149,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.restore(version)
 
         assertTrue("and it is back", folder.isDirectory)
-        assertEquals("with what gave it a version", "first", File(folder, "one.txt").readText())
+        assertFalse("empty, which is what it was", File(folder, "one.txt").exists())
     }
 
     @Test
