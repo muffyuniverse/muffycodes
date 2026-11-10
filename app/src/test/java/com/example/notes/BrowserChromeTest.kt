@@ -322,6 +322,10 @@ class BrowserChromeTest {
             // **One more file, one more to send.** Counted from the repository rather than from a
             // number the app keeps: a diff against the last push, so a batch that moved ten files
             // reads "10" and two saves of one file read "1".
+            // **`ahead`, which is `unsentPaths` — the index against the last push.** A save stages
+            // (2026-11-10), so this is the number a row shows: what a push would carry. The wait is
+            // on the *app's* count, because `viewModel.saveEditor` stages on a worker and returns
+            // before the index has changed.
             scene.await("save ${i + 1} to be recorded", 20_000) {
                 ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
                     .changes("groceries").ahead == i + 1
@@ -609,19 +613,29 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `the account root offers nothing to add`() {
+    fun `the account root offers one way to add a project, and no way to make a loose file`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open()
         browser()
 
-        // The root is the list of projects. A project is made by adding one — from GitHub,
-        // or on this phone — not by making a file to stand beside the projects, which nothing
-        // on this screen would show. So no Add button here is a decision, not an omission.
+        // **The root is the list of projects, and the `+` is the one door in** (2026-11-10: "when you
+        // add the address you clone from remote" — the address is optional, so there is one window).
+        // What the root must not offer is a way to make a *file* standing beside the projects, which
+        // nothing on this screen would show.
+        //
+        // **This test used to assert `thereIcon("Add")` was false**, and it passed for a reason that
+        // was not the reason it claimed: the button was there all along, described as "New project or
+        // pull one in", so a search for "Add" missed it. Renaming the description to "Add a project"
+        // — a truthful name for the one door — turned that accident into a failure. The premise was
+        // wrong, not the name.
         awaitText("groceries")
-        // Wait for the row to be painted before reading the absence as a decision.
+        // Wait for the row to be painted before reading anything as a decision.
         compose.waitForIdle()
-        assertFalse("no Add at the account root", thereIcon("Add"))
+        assertTrue("the one way in is offered", thereIcon("Add a project"))
+        // And the menu it opens offers the address and the name, not a kind of file.
+        assertFalse("no folder type to pick", there("Add a folder"))
+        assertFalse("and no note type to pick", there("New note"))
     }
 
     @Test

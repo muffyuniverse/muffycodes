@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextReplacement
+import org.eclipse.jgit.api.Git
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -1229,18 +1230,25 @@ class EditorScreenTest {
         scene.await("the drawn-on picture to be written", 20_000) {
             file.readBytes().toList() == OTHER_PIXEL_PNG.toList()
         }
+        // **Staged, not committed** (2026-11-10: a save stages and a push makes the version). The
+        // assertion moved from HEAD to the index, and the comment above it about "the newest commit's
+        // tree" was the rule before that one — the question is now "did the save record the bytes",
+        // which the index answers directly.
         scene.await(
-            "the drawn-on picture to be committed (head was $before, " +
-                "project=${scene.viewModel.workspace!!.projectOf(file)}, " +
-                "tracked=${scene.repo("groceries").tracked()})",
+            "the drawn-on picture to be staged (head was $before, " +
+                "project=${scene.viewModel.workspace!!.projectOf(file)})",
             20_000,
         ) {
-            val now = scene.repo("groceries").head()
-            now != null && now != before
+            Git.open(scene.workspace!!.repoOf("groceries")).use { git ->
+                GitService.stagedPaths(git.repository).contains(file.name)
+            }
         }
         assertTrue(
-            "the picture is tracked: ${scene.repo("groceries").tracked()}",
-            file.name in scene.repo("groceries").tracked(),
+            "and it is in the index, which is where a push reads it: " +
+                "${scene.repo("groceries").tracked()}",
+            Git.open(scene.workspace!!.repoOf("groceries")).use { git ->
+                git.repository.readDirCache().getEntry(file.name) != null
+            },
         )
     }
 

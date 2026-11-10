@@ -47,16 +47,23 @@ class HistoryFeatureTest : FeatureTest() {
      * rather than recording anything — which is the rule these tests are not about.
      */
     private fun delete(file: File) {
+        val project = scene.workspace!!.projectOf(file) ?: return
         scene.viewModel.delete(file)
-        scene.sendIfWaiting(file)
+        // **Waits for the stage, then sends.** `commitProject` stages on a worker, so the act has
+        // returned before the index has changed — a send asked immediately after would find nothing
+        // staged and quietly do nothing, which reads as "the delete was not recorded".
+        scene.awaitStaged(project)
+        scene.sendProjectIfWaiting(project)
     }
 
     /** See [delete]: a move is a change like any other, and its version arrives at the send. */
     private fun move(item: File, into: File): Boolean {
+        val project = scene.workspace!!.projectOf(item) ?: return false
         val answer = scene.viewModel.move(item, into)
-        // **The destination's project**, because that is the repository the move is recorded in — and
-        // the file that changed is the one that arrived there.
-        scene.sendIfWaiting(File(into, item.name).takeIf { it.exists() } ?: into)
+        // **The project, not the moved file.** The move is staged on a worker and the file's new path
+        // may not exist yet when this is asked; the project is what the send is about either way.
+        scene.awaitStaged(project)
+        scene.sendProjectIfWaiting(project)
         return answer
     }
 
@@ -68,8 +75,10 @@ class HistoryFeatureTest : FeatureTest() {
      * exist. The project is the same either way, and the send is about the project.
      */
     private fun rename(item: File, name: String): Boolean {
+        val project = scene.workspace!!.projectOf(item) ?: return false
         val answer = scene.viewModel.rename(item, name)
-        scene.sendIfWaiting(item.parentFile ?: item)
+        scene.awaitStaged(project)
+        scene.sendProjectIfWaiting(project)
         return answer
     }
 
@@ -571,9 +580,13 @@ class HistoryFeatureTest : FeatureTest() {
         // already included the restore's own commit — so "one more than before" was a
         // comparison that could never be true, and it cost three red runs to notice an
         // ordering mistake in a test rather than a bug in the app.
-        val unsentBefore = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
-            .changes("shopping").ahead
-        assertTrue("the file's saves are already waiting to be sent", unsentBefore >= 1)
+        // **What is waiting before the restore**, so the assertion at the end can say the restore
+        // added to it rather than asserting a number that depends on whether a sync's own commit
+        // landed first. This used to assert `ahead >= 1` — a fact about the *previous* rule, where a
+        // save committed and nothing pushed it. Now a save stages and `saveAsVersion` presses Sync, so
+        // the baseline is whatever the sync left behind.
+        val before = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+            .changes("shopping").total
         scene.viewModel.openHistory(file)
         scene.restore(first)
         scene.viewModel.closeHistory()
@@ -591,12 +604,12 @@ class HistoryFeatureTest : FeatureTest() {
         // row is checked where it can be: CopyFeatureTest and ProjectsFeatureTest both assert it
         // after a change lands, and ProjectGitTest pins commit-and-push.
         val unsentNow =
-            ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") }).changes("shopping").ahead
+            ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") }).changes("shopping").total
         // **One file, however many times it was written.** The restore is a third commit on the
         // same path, so a commit count would say three and a file count says one — which is the
         // number a person is looking at when the row says "1 to send".
         assertTrue(
-            "the project still has something to send: $unsentNow after $unsentBefore",
+            "the restore is waiting to be sent: $unsentNow after $before",
             unsentNow >= 1,
         )
     }

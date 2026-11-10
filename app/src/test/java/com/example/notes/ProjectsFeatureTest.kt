@@ -370,7 +370,11 @@ class ProjectsFeatureTest : FeatureTest() {
             scene.viewModel.unreachableOf("groceries").orEmpty().contains("No address"),
         )
 
-        val remote = File(scene.root, "new-home")
+        // **The address is named `groceries`, because a project's name follows its address.** Setting
+        // an address whose repository is called something else renames the project — that is the
+        // documented rule, and a test that used a different name would be testing the rename rather
+        // than the fault clearing.
+        val remote = File(scene.root, "groceries")
         GitService.initOrOpen(remote, GitAuthor("Test", "test@example.com")).use { repo ->
             File(remote, "README.md").writeText("# Groceries\n")
             GitService.commitAll(repo, "readme", GitAuthor("Test", "test@example.com"))
@@ -919,20 +923,26 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a local project keeps its versions like any other`() {
-        scene.viewModel.createProject("scratch")
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
+    fun `a project with no address keeps its versions when something records them`() {
+        // **A project that cannot send still has versions** — its folder is a repository, and going
+        // back to how it was does not need a host. What it does not have is a *push* to make a
+        // version at, so a version here is made deliberately, by `commitOutcome` — which is what the
+        // scaffold and the app's own writes use. The earlier shape of this test asserted that a save
+        // was enough, and that was true only while a save committed.
+        scene.localProject("scratch")
         scene.open("scratch")
         val file = scene.file("note.txt", "first")
-        scene.await("the first version", 30_000) { scene.repo("scratch").tracked().contains("note.txt") }
+        val git = ProjectGit(
+            scene.workspace!!,
+            { null },
+            { GitAuthor("Muffy", "muffy@example.com") },
+        )
+        git.commitOutcome("scratch", "a version decided on")
+        scene.await("the version", 30_000) { scene.versionsOf(file).any { it.second == "first" } }
 
         scene.openEditor(file)
         scene.saveEditor("second")
-        // **Waited for by its text, not by a count.** The file already has two versions (the empty
-        // one it was made as, and `first`), so "at least two" was true before the save had run and
-        // the assertion after it read the history too early.
+        git.commitOutcome("scratch", "another version")
         scene.await("the second version to be recorded", 30_000) {
             scene.versionsOf(file).any { it.second == "second" }
         }

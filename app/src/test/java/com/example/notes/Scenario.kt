@@ -564,6 +564,18 @@ class Scenario(
      */
     fun sendIfWaiting(file: File): Boolean {
         val project = projectOf(file) ?: return false
+        return sendProjectIfWaiting(project)
+    }
+
+    /**
+     * **The same send, named by project** — for a change whose file no longer exists.
+     *
+     * A delete and a rename leave no path to ask about: `projectOf` resolves a *path*, and the path
+     * that changed is the one that is gone. The project is what the send is about either way, so the
+     * question is asked about the project and the caller does not have to invent a surviving file to
+     * stand for it.
+     */
+    fun sendProjectIfWaiting(project: String): Boolean {
         if (viewModel.unreachableOf(project) != null) return false
         val staged = try {
             Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
@@ -573,6 +585,30 @@ class Scenario(
         if (staged.isEmpty()) return false
         sync(project)
         return true
+    }
+
+    /**
+     * **Waits until [project]'s index holds something** — the half of "recorded" that a save, a
+     * move, a delete or a rename promises now that a push is what commits.
+     *
+     * `commitProject` stages on a worker, so every one of those acts returns before the index has
+     * changed. A test that asked "is it staged" the moment the act returned found nothing and quietly
+     * did nothing — which then read as "the change was never recorded" when it was recorded a moment
+     * later. This is the wait, named once.
+     *
+     * **A timeout here is a real failure and says so**: it means the act did not stage anything, which
+     * is exactly what these tests are about.
+     */
+    fun awaitStaged(project: String) {
+        await("$project's index to hold the change", 20_000) {
+            try {
+                Git.open(workspace!!.repoOf(project)).use { git ->
+                    GitService.stagedPaths(git.repository).isNotEmpty()
+                }
+            } catch (e: Exception) {
+                false
+            }
+        }
     }
 
     /** How many versions a project's history holds. */
@@ -896,7 +932,13 @@ class Scenario(
         // here instead was the same race one level up: a save's two facts land at different moments,
         // and asking "is anything staged" between them answers no.
         saveEditor(text)
-        sendIfWaiting(file)
+        // **A save that staged nothing is a failure, not a quiet skip.** `saveEditor` has already
+        // waited for the index, so the only way this is false is that there was nothing to send —
+        // and a test asking for a *version* that silently got none is the class of no-op this
+        // project does not allow.
+        check(sendIfWaiting(file)) {
+            "saving \"$text\" to ${file.name} staged nothing, so no push could make it a version"
+        }
         await("a version of ${file.name} holding \"$text\"", 30_000) {
             newestVersionText(file) == text && file.readText() == text
         }
