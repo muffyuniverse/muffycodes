@@ -135,7 +135,12 @@ class HistoryFeatureTest : FeatureTest() {
         assertFalse("but it is not one of their files",
             scene.names().any { it == ".gitkeep" })
 
-        scene.sendProjectIfWaiting("work")
+        // **`awaitStaged` first, because a folder is staged on a worker and `createFolder` returns
+        // before it has.** Sending straight away found an empty index and sent nothing — the helper
+        // said so (`sendProjectIfWaiting` returns false) and the wait that followed was waiting for a
+        // version no act in the test would ever make. This is the same race `restoreAndSend` documents.
+        scene.awaitStaged("work")
+        assertTrue("the send made a version", scene.sendProjectIfWaiting("work"))
         scene.await("the folder to be a version, now that a send carried the marker") {
             scene.versionsOfFolder("empty").isNotEmpty()
         }

@@ -535,9 +535,15 @@ jobs:
       # `allow-forwarding: loopback` lets a debugger reach a port on the runner. Neither needs an
       # approval prompt, which is why the actor restriction has to be there.
       #
-      # The step sits *after* the failure report and *before* the results check, so the report is
-      # already printed when the session opens: whoever connects reads the same sentence the log
-      # carries and then reproduces it.
+      # **Detached, so the job keeps working while the session waits.** Attached mode stops the job
+      # at this step and holds it until a person connects and leaves — which means the failure report,
+      # the results check and the artifact upload all happen *after* the debugging, and a run that
+      # nobody joins is a run that produced nothing. Detached opens the session now and does the
+      # waiting in the action's post step, after every regular step has run: whoever connects finds
+      # the job's output already complete, and the job is not blocked by a person being asleep.
+      #
+      # The step sits *after* the failure report on purpose, so the report is printed before the
+      # session exists — the first thing read after connecting is the sentence the log already carries.
       - name: Open an SSH session on the runner
         if: failure() && inputs.ssh_debug
         uses: owenthereal/action-upterm@6c2d60e09009f59cb4c45c88767c78701f14d121 # v2.8.1
@@ -547,8 +553,10 @@ jobs:
           # owner as well costs nothing and covers a run dispatched from either.
           limit-access-to-users: muffyuniverse,Zhukov-Alexander
           full-access: true
-          # **Ten minutes, not the job's twenty.** The session holds the runner until it ends, and
-          # a job that is waiting for a person is a job that has stopped reporting.
+          # **Detached is the whole point.** Without it this step is a wall the job waits behind.
+          detached: true
+          # **Ten minutes, counted from when the regular steps are done** — which in detached mode is
+          # the wait for a guest to arrive. Once one joins, the session stays until it ends.
           wait-timeout-minutes: 10
 
       - name: Check that the tests that ran are the tests that were asked for
