@@ -921,9 +921,17 @@ class AgentTools(
                     "path answers for that file. " +
                     "The answer names each changed file with its added and removed counts; a binary " +
                     "file is named and not diffed, because a diff of a zip is a page of replacement " +
-                    "characters.",
+                    "characters. " +
+                    "**`op` is also `tag`**, which marks a version: `{\"op\":\"tag\",\"to\":\"1.4.0\"}`. " +
+                    "A tag is a git ref, so it works on every host — what a host builds from it is " +
+                    "that host's business, and `http` is how to ask for it. A tag is refused off " +
+                    "`main` and over unsent work, because either would mark a commit nobody can see.",
                 "{\"op\":\"diff\",\"path\":\"a file or folder\",\"from\":\"a revision id\"," +
                     "\"to\":\"another revision id\"}",
+                // **Nothing is required**, because which keys apply depends on `op`: a `diff` needs
+                // `from` and `to`, a `tag` needs `to` and nothing else. Marking all four required
+                // would tell a provider that a tag is malformed. The refusal names what each op takes.
+                required = emptyList(),
             ),
             spec(
                 "pull",
@@ -2916,6 +2924,65 @@ class AgentTools(
     }
 
     /**
+     * **A version, marked — the portable half of a release.**
+     *
+     * `tagRelease` (the person's button) makes a tag on `main` and pushes it. This is the same act with
+     * two differences, and both are deliberate:
+     *
+     * 1. **No host API anywhere in it.** A tag is a git ref, so `git push --tags` works on every host
+     *    there is. What a host *builds* from a tag — a GitHub release, a GitLab release, a page — is
+     *    that host's business, and an agent that wants one writes the request with `http`. That is the
+     *    whole of P2 in one sentence: the app knows about git and about HTTP, and nothing in between.
+     * 2. **It refuses on any branch but `main`**, for the reason `tagRelease` does: a version names the
+     *    commit the person is looking at, and a tag on a feature branch marks work that `main` does not
+     *    have yet.
+     *
+     * **Unsent work refuses it too.** A tag over a commit the remote does not have would send that
+     * commit along with the tag and leave `main` behind it — a version of different code from the one
+     * on screen, and nothing would say so.
+     */
+    private fun tagTool(args: JSONObject, deadline: Deadline): String {
+        val name = args.optString("to", "").trim()
+        if (name.isEmpty()) {
+            return refusal(
+                "`tag` needs `to`: the version's name, like 1.4.0. It is what the history shows and " +
+                    "what a host builds from, so it is the one thing that cannot be guessed.",
+            )
+        }
+        // **`to` and not a new key**, because a version is where a change arrives at — the same word
+        // `move` uses for its destination. Adding `name` or `tag` would be a fourth word for it.
+        if (branch != AgentSession.MAIN) {
+            return refusal(
+                "A version is tagged on ${AgentSession.MAIN}, and you are on $branch. A tag there " +
+                    "would mark work ${AgentSession.MAIN} does not have. Merge it into " +
+                    "${AgentSession.MAIN} first, or tag from a chat on ${AgentSession.MAIN}.",
+            )
+        }
+        deadline.check("git")
+        // **Read before tagging, not after.** A tag that went over unsent work is already sent by the
+        // time the count could be taken, so the check has to come first or it reports the wrong thing.
+        val unsent = try {
+            repo.changes(project).total
+        } catch (t: Throwable) {
+            0
+        }
+        if (unsent > 0) {
+            return refusal(
+                "$project has $unsent change(s) not sent yet, so a version would name a commit the " +
+                    "remote does not have. `push` first, then tag.",
+            )
+        }
+        val result = repo.tag(project, name, "Version $name")
+        // **Traced either way**, like the person's button: a version that did not go is the report
+        // that reads as "the tag did nothing".
+        // **The same name the person's own button writes**, because it is the same act: one word for
+        // one thing, so a log reader comparing an agent's release with a person's is comparing like
+        // with like.
+        Trace.note("release", "$project · $name · ${if (result.success) "tagged" else "refused"}")
+        return if (result.success) success(result.message.ifBlank { "Tagged $name" }) else refusal(result.message)
+    }
+
+    /**
      * Reads a page.
      *
      * **The engine is not this file's business.** [browser] is an interface, and what answers is
@@ -3771,16 +3838,21 @@ class AgentTools(
         val op = args.optString("op", "").trim().lowercase()
         if (op.isEmpty()) {
             return refusal(
-                "`git` needs an `op`, and there is one: `diff`. It takes `path`, `from` and `to`.",
+                "`git` needs an `op`: `diff` (takes `path`, `from`, `to`) or `tag` (takes `to`, the " +
+                    "version's name).",
             )
+        }
+        if (op == "tag") {
+            return tagTool(args, deadline)
         }
         if (op != "diff") {
             // **Named, because a model that guessed `log` or `status` deserves to know why not.**
             return refusal(
-                "`op` is `diff`, and \"$op\" is not it. A diff is the one question `read` cannot " +
-                    "answer: it shows what changed between two revisions rather than what a file " +
-                    "says. For history, `search` with `history: true`; for what is unsent, `push` " +
-                    "tells you.",
+                "`op` is `diff` or `tag`, and \"$op\" is not either. A diff is the one question " +
+                    "`read` cannot answer: it shows what changed between two revisions rather than " +
+                    "what a file says. A tag is the portable half of a release — it marks a commit " +
+                    "and sends the mark, and what a host builds from it is the host's business. For " +
+                    "history, `search` with `history: true`; for what is unsent, `push` tells you.",
             )
         }
         val path = args.optString("path", "").trim()

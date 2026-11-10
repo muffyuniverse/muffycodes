@@ -2920,7 +2920,8 @@ class AgentTest {
 
     // ---- the agent's own compaction: forget, by id ---------------------------
 
-    private fun tools() = AgentTools(ws, "shopping", git, log)
+    private fun tools(branch: String = com.example.notes.AgentSession.MAIN) =
+        AgentTools(ws, "shopping", git, log, branch = branch)
 
     /** Calls a tool the way the loop does, and answers the raw result. */
     private fun call(tool: String, args: JSONObject = JSONObject()) =
@@ -2942,6 +2943,50 @@ class AgentTest {
 
         assertTrue("it is refused: $said", said.startsWith("1"))
         assertTrue("and names what is missing: $said", said.contains("no address"))
+    }
+
+    @Test
+    fun `tag refuses a name it was not given, and says what a version is`() {
+        // **The one thing that cannot be guessed.** A version's name is what the history shows and
+        // what a host builds from, so a tag with no `to` is refused rather than given a number.
+        val said = call("git", JSONObject("""{"op":"tag"}"""))
+
+        assertTrue("it is refused: $said", said.startsWith("1"))
+        assertTrue("and asks for the version's name: $said", said.contains("`to`"))
+    }
+
+    @Test
+    fun `tag is refused off main, because a version names what main has`() {
+        // A tag on a feature branch marks work `main` does not have — the same refusal `tagRelease`
+        // makes for the person's button, so an agent cannot do what the button will not.
+        val said = tools(branch = "feature").run(
+            Call("c-git", "git", JSONObject("""{"op":"tag","to":"1.4.0"}""").toString()),
+        )
+
+        assertTrue("it is refused: $said", said.startsWith("1"))
+        assertTrue("and names the branch it is on: $said", said.contains("feature"))
+        assertTrue("and says where a version belongs: $said", said.contains("main"))
+    }
+
+    @Test
+    fun `tag refuses over unsent work, because the commit would not be on the remote`() {
+        // **A tag over unsent work sends that commit with the tag** and leaves `main` behind it — a
+        // version of different code from the one on screen, with nothing saying so. The count is read
+        // before the tag, because afterwards it would be reporting what already went.
+        val bare = File(File(account, "remote"), "shopping.git")
+        org.eclipse.jgit.api.Git.init().setBare(true).setDirectory(bare).call().close()
+        org.eclipse.jgit.api.Git.open(ws.repoOf("shopping")).use { git ->
+            git.repository.config.setString("remote", "origin", "url", bare.absolutePath)
+            git.repository.config.save()
+        }
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "three litres")
+        git.stage("shopping")
+
+        val said = call("git", JSONObject("""{"op":"tag","to":"1.4.0"}"""))
+
+        assertTrue("it is refused: $said", said.startsWith("1"))
+        assertTrue("and says the work is unsent: $said", said.contains("not sent"))
+        assertTrue("and says what to do instead: $said", said.contains("push"))
     }
 
     @Test
