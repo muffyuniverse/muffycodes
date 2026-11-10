@@ -760,6 +760,21 @@ class Scenario(
         val file = viewModel.editingFile ?: error("the editor is not open")
         viewModel.saveEditor(text)
         await("${file.name} to hold the new text") { viewModel.textOf(file) == text }
+        // **And staged, which is what a save now promises.** The write and the stage are one act on the
+        // worker, but they are two facts, and a test that went on to read the index the moment the file
+        // held its text was racing the second one — which is exactly how `BranchFeatureTest` saw an
+        // empty index for a save that had happened.
+        val project = workspace?.projectOf(file) ?: return
+        await("${file.name} to be staged") {
+            try {
+                Git.open(workspace!!.repoOf(project)).use { git ->
+                    val relative = file.relativeTo(workspace!!.projectDir(project)).invariantSeparatorsPath
+                    GitService.stagedPaths(git.repository).any { it == relative }
+                }
+            } catch (e: Exception) {
+                false
+            }
+        }
     }
 
     /**
@@ -772,16 +787,6 @@ class Scenario(
         val ws = workspace ?: return null
         val path = ws.relative(file) ?: return null
         val project = ws.projectOf(file) ?: return null
-        // **Nothing is a version until a push makes it** (2026-11-10): a save stages, and the commit
-        // happens when somebody sends the work. So a test that wants "the newest version holds this
-        // text" has to say what a person does — press Sync — and this is where it says so once rather
-        // than in twenty callers.
-        //
-        // **Only when something is staged**, because most callers of this helper are waiting for a
-        // version that already exists (`saveAsVersion` calls it in its own wait loop), and a sync on a
-        // clean tree is a network round trip for an answer that is already "up to date".
-        val staged = Git.open(ws.repoOf(project)).use { GitService.stagedPaths(it.repository) }
-        if (staged.isNotEmpty()) sync(project)
         return try {
             Git.open(ws.repoOf(project)).use { git ->
                 git.repository.resolve("HEAD")?.let { head ->
@@ -805,9 +810,32 @@ class Scenario(
      * times as fast as it could would get fewer versions than saves and would be
      * measuring the debounce rather than the history.
      */
+    /**
+     * Saves, and then **presses Sync** — because that is what makes a version now.
+     *
+     * The operator's rule (2026-11-10): *"we dont commit on save, we commit on push, on save changes
+     * are only staged."* So a test that wants a history entry has to do the second half of what a
+     * person does, and doing it here means the twenty callers that ask for "a version holding this
+     * text" go on reading like the thing they mean.
+     *
+     * **`sync` is pressed once, not inside the wait.** A sync inside the predicate would run again on
+     * every poll — a worker round trip per fifty milliseconds — and would make the wait's own timing
+     * the thing under test.
+     */
     fun saveAsVersion(text: String) {
         val file = viewModel.editingFile ?: error("the editor is not open")
         viewModel.saveEditor(text)
+        await("${file.name} to hold \"$text\"") { file.readText() == text }
+        projectOf(file)?.let { project ->
+            // Only when something is staged: a project with no remote has nothing to send, and its
+            // count is zero, so pressing Sync is a no-op that says so.
+            val staged = try {
+                Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (staged.isNotEmpty()) sync(project)
+        }
         await("a version of ${file.name} holding \"$text\"", 30_000) {
             newestVersionText(file) == text && file.readText() == text
         }

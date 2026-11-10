@@ -57,8 +57,9 @@ class SelectionFeatureTest : FeatureTest() {
     @Test
     fun `a move of several into a project is recorded by that project`() {
         // The crossing, with more than one file making it. The project's repository has to gain
-        // both files and commit them — a file that arrived but was never committed is a change
-        // GitHub never learns about, which is what the project's row counts as "to send".
+        // both files **in its index** — a file that arrived but was never staged is a change the
+        // next push cannot carry, which is what the project's row counts as "to send". (It was
+        // "and commit them" until 2026-11-10, when the commit moved to the push.)
         scene.project("groceries")
         scene.open()
         scene.file("milk.txt", "two litres")
@@ -91,11 +92,13 @@ class SelectionFeatureTest : FeatureTest() {
                     tracked.untracked.none { it.endsWith("bread.txt") } &&
                     tracked.missing.none { it.endsWith("milk.txt") },
             )
-            assertTrue(
-                "and committed, not merely staged",
-                git.log().call().any { commit ->
-                    commit.fullMessage.contains("Moved 2 items into")
-                },
+            // **Staged, and that is the promise now** (2026-11-10: a save records the work and a push
+            // makes the version). The old assertion here said "committed, not merely staged", which is
+            // the exact opposite of the rule — it would fail on the app doing the right thing.
+            assertEquals(
+                "and staged, so the next push carries both",
+                listOf("bread.txt", "milk.txt"),
+                GitService.stagedPaths(git.repository).filter { it.endsWith(".txt") },
             )
         }
     }

@@ -173,11 +173,13 @@ class CopyFeatureTest : FeatureTest() {
         // **Recorded is "staged", since 2026-11-10** — a copy is a save, and a save leaves its work in
         // the index for the next push to make a version of. Waiting for a commit here would wait
         // forever, which is how this test found the rule.
+        // **`trackedFiles` reads the newest commit**, which a copy does not make any more — so the
+        // index is the only place to look, and looking in both would wait on a commit that is not
+        // coming.
         scene.await("the project to record the arrival", 30_000) {
-            scene.trackedFiles("groceries").any { it.endsWith("shopping.txt") } &&
-                Git.open(scene.workspace!!.repoOf("groceries")).use { git ->
-                    GitService.stagedPaths(git.repository).any { it.endsWith("shopping.txt") }
-                }
+            Git.open(scene.workspace!!.repoOf("groceries")).use { git ->
+                GitService.stagedPaths(git.repository).any { it.endsWith("shopping.txt") }
+            }
         }
 
         // Then the project's own history holds the copy — a file that existed but was never
