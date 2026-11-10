@@ -628,15 +628,12 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a deleted picture cannot be brought back, and the refusal says why`() {
-        // **This test used to assert the opposite**, and the change is the point: it proved a
-        // picture came back byte for byte, which was right while a picture had versions. A binary now
-        // keeps one version — the newest — and the older bytes are released at the next collection, so
-        // "the version at that revision" may already be gone. Offering it back would be offering
-        // something that may not exist.
-        //
-        // The operator's rule: *"no restore for binaries - warn that they will not be tracked by
-        // history and removal is irrevercible"*.
+    fun `a deleted picture comes back, because its bytes are in the history`() {
+        // **This test used to assert the opposite**, and the change is the point: a picture was a
+        // pointer in the tree and its bytes lived in an LFS store pruned to what the newest commits
+        // referenced, so "the version at that revision" could already be gone. Nothing stands between
+        // the tree and the working copy now, so a photograph someone deleted by accident is as
+        // recoverable as a note — which is what `HistoryScreen` promises for every row it lists.
         start()
         scene.folder("pictures")
         scene.openIn("pictures")
@@ -652,16 +649,13 @@ class HistoryFeatureTest : FeatureTest() {
 
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "dot.png" }
-        assertTrue("it is still offered, because the row exists", offered != null)
-        assertFalse(
-            "but bringing it back is refused",
+        assertTrue("it is offered, because the row exists", offered != null)
+        assertTrue(
+            "and it comes back: ${scene.viewModel.message}",
             scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered!!),
         )
-        assertFalse("so nothing was written", picture.exists())
-        assertTrue(
-            "and the person is told the deletion is permanent: ${scene.viewModel.message}",
-            scene.viewModel.message.orEmpty().contains("permanent"),
-        )
+        assertTrue("the file is on disk again", picture.exists())
+        assertTrue("with its own bytes", bytes.contentEquals(picture.readBytes()))
     }
 
     @Test

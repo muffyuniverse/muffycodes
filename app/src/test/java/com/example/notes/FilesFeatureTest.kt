@@ -306,34 +306,28 @@ class FilesFeatureTest : FeatureTest() {
         assertTrue("the pin is still there", again.pins.contains("milk.txt"))
     }
 
-    // ---- 8. deleting a picture is the one irreversible act -------------------
+    // ---- 8. deleting is never irreversible, and the warning says so ----------
 
     @Test
-    fun `deleting a picture warns that it cannot be undone, and deleting text does not`() {
-        // **The one place the app has to be louder than usual.** Text keeps every version, so a
-        // deleted text file can be brought back and the confirmation says so. A picture keeps exactly
-        // one — the newest — and the store is swept to what the newest commits reference, so the bytes
-        // a delete removes are the only bytes there were.
+    fun `deleting says the history has it, whatever kind of file it is`() {
+        // **This test used to prove the opposite for a picture**, and the change is the point: a
+        // picture was a pointer whose bytes lived in a store pruned to what the newest commits
+        // referenced, so a delete took the only copy there was and the window had to say so. Every
+        // version of every file is a commit now, so the promise is the same one for all of them.
         //
-        // Both halves are asserted, because a warning that appeared on every file would be noise a
-        // person learns to ignore, which is worse than no warning at all.
+        // **One sentence for a file and one for a folder**, because the folder's says what goes with
+        // it — and both end in the same promise, which is the thing being tested.
         val picture = Entry("page.png", File("/tmp/page.png"), EntryKind.IMAGE)
         val text = Entry("milk.txt", File("/tmp/milk.txt"), EntryKind.TEXT)
         val folder = Entry("drafts", File("/tmp/drafts"), EntryKind.FOLDER)
 
-        val forPicture = deleteWarning(picture)
-        assertTrue("it says it cannot be undone: $forPicture", forPicture.contains("cannot be undone"))
-        assertTrue("and why: $forPicture", forPicture.contains("only one version"))
-
-        val forText = deleteWarning(text)
-        assertFalse("a text file gains no warning: $forText", forText.contains("cannot be undone"))
-        assertTrue("and keeps its promise: $forText", forText.contains("brought back"))
-
+        for (entry in listOf(picture, text)) {
+            val said = deleteWarning(entry)
+            assertTrue("${entry.name} promises the history: $said", said.contains("brought back"))
+            assertFalse("and claims nothing is lost: $said", said.contains("cannot be undone"))
+        }
         val forFolder = deleteWarning(folder)
-        assertFalse("a folder is not itself a picture: $forFolder", forFolder.contains("cannot be undone"))
-        assertTrue(
-            "but it says pictures inside are the exception: $forFolder",
-            forFolder.contains("except pictures"),
-        )
+        assertTrue("a folder's contents go with it: $forFolder", forFolder.contains("everything inside"))
+        assertTrue("and it comes back the same way: $forFolder", forFolder.contains("brought back"))
     }
 }

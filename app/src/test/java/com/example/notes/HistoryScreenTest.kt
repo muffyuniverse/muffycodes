@@ -196,33 +196,18 @@ class HistoryScreenTest {
         waitFor("2 of 4")
     }
 
-    // ---- 7. a picture's history says what it is ------------------------------
+    // ---- 7. an empty history says what makes one appear ----------------------
 
     @Test
-    fun `a picture's empty history explains itself, and a text file's does not need to`() {
-        // **The sentence that stops the screen looking broken.** A picture saved ten times has no
-        // versions to show, and "No earlier versions" would be the right answer for a file nobody has
-        // touched — so it would be read as "this app has lost my saves". The heading names the rule
-        // and the note names the only thing a person can do about it.
-        val pictureTitle = emptyHistoryTitle(EntryKind.IMAGE)
-        val pictureNote = emptyHistoryNote(EntryKind.IMAGE)
-        assertTrue("it names the kind: $pictureTitle", pictureTitle.contains("picture"))
-        assertTrue("it says there are no versions: $pictureTitle", pictureTitle.contains("no versions"))
+    fun `an empty history promises that a change makes a version`() {
+        // **This test used to prove the opposite for a picture**, and the change is the point: a
+        // picture was a pointer whose bytes lived outside the tree, so a picture saved ten times had
+        // no versions and the screen had to say why rather than looking broken. Every version of
+        // every file is a commit now, so there is one sentence and it is true of all of them.
+        assertEquals("No earlier versions", emptyHistoryTitle())
         assertTrue(
-            "and the note says how to keep two states: $pictureNote",
-            pictureNote.contains("new name"),
-        )
-
-        // **A text file keeps its own sentence**, because a text file really does gain versions and
-        // the note is telling the truth about it.
-        assertEquals("No earlier versions", emptyHistoryTitle(EntryKind.TEXT))
-        assertTrue(
-            "and it promises versions: ${emptyHistoryNote(EntryKind.TEXT)}",
-            emptyHistoryNote(EntryKind.TEXT).contains("version appears"),
-        )
-        assertFalse(
-            "a text file is never told it has no versions: ${emptyHistoryTitle(EntryKind.TEXT)}",
-            emptyHistoryTitle(EntryKind.TEXT).contains("no versions"),
+            "and the note says what makes one appear: ${emptyHistoryNote()}",
+            emptyHistoryNote().contains("version appears"),
         )
     }
 }
