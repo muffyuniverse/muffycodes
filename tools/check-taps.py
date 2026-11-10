@@ -227,10 +227,10 @@ VOCABULARY = {
     "session log",
     # the two system settings this app needs, both asked for from settings
     "battery", "notifications",
-    # the two compactions, named for the hand that does them: the agent forgetting rows, and the app
-    # trimming the oldest ones. They share a target and have separate triggers, so they are two
-    # numbers to set rather than one.
-    "forget compaction", "trim compaction", "compaction target",
+    # **The two compactions' names left with their settings.** They were taps on three Settings
+    # fields, and when the numbers became the request form's there was no gesture left to name: a
+    # form is edited in the editor, where the tap is `save`. Keeping the words here would be a
+    # vocabulary entry for a button that does not exist.
     # the browser: whether the agent may reach this phone and the private network, and how long one
     # page may take. Two acts because they answer two questions - *where* may it read, and *how long*
     # may it spend - and the first is a capability rather than a limit.

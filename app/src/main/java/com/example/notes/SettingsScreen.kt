@@ -290,44 +290,17 @@ fun SettingsScreen(
             // BELOW the forget point is a mode rather than a mistake: the agent is never asked, so
             // the app does all the compacting, which is what somebody who would rather the app
             // decide is choosing.
-            LengthField(
-                label = "Compaction target",
-                value = settings.targetTokens,
-                placeholder = "60000",
-                onValueChange = { settings.keepTarget(it) },
-            )
-            LengthField(
-                label = "Forget compaction at",
-                value = settings.triggerTokens,
-                placeholder = "100000",
-                onValueChange = { settings.keepTrigger(it) },
-            )
-            LengthField(
-                label = "Trim compaction at",
-                value = settings.hardTokens,
-                placeholder = "never",
-                onValueChange = { settings.keepHard(it) },
-            )
-            // **The line that resolved the three numbers is gone**, and so is the clamp it showed.
-            // It existed to say "you asked for 500k and this pin allows 105k, so 105k is what is
-            // used"; nothing is clamped now, so the three numbers above *are* the three numbers.
-            // A line repeating them in a second unit would be decoration.
-            // **Said out loud when the trim comes first**, because it is a legitimate choice that
-            // looks like a mistake: with the trim below the forget point the agent is never asked,
-            // so the app does all the compacting. Somebody who meant it should be told it is
-            // working as intended; somebody who did not should see it immediately.
-            // **Read as written**, because that is the only reading left: `hard <= trigger` is a
-            // comparison of the person's two numbers, not of two numbers the app derived.
-            val hardAt = settings.hardTokens.toLong()
-            val triggerAt = settings.triggerTokens.toLong()
-            if (hardAt > 0 && triggerAt > 0 && hardAt <= triggerAt) {
-                Text(
-                    "The app trims before the agent is ever asked, so the agent never compacts. " +
-                        "That is what these numbers say; raise the trim to let the agent go first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            // **The three context numbers left this screen, and the sentence that explained them
+            // went with them.** A compaction limit is a property of a *chat* — which model is asked,
+            // with what effort, and how much context it may carry — so it lives in the request form
+            // beside the model and the effort. Keeping a copy here would be the second answer to one
+            // question that N6 spent a commit deleting elsewhere.
+            //
+            // The warning that read "the app trims before the agent is ever asked" was a comparison
+            // of two numbers a person typed. Those numbers are now two fields of a file, and the
+            // form is read where it is written; a screen comparing them from a different file could
+            // only ever be describing a file it does not own.
+
 
             // **The fate lines are gone, on the operator's instruction**: "settings context
             // block: remove what has happened to the context element and its fields - not needed".

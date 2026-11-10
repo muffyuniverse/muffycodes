@@ -123,6 +123,94 @@ prompt, a secret bound to the host, and `http`. Two small pieces of plumbing are
 | `push`/`pull` without a ref argument | The portable version of "an agent cannot touch another branch", and it needs no host feature. |
 | the **sentence** on a refusal | A bare 403 is what a person sees when a token is under-scoped. The app is the only thing that can say which dial to turn. That is explanation, never enforcement. |
 
+### P4 — `ssh`: the second protocol, and the smallest thing that speaks it
+
+**The operator, correcting me:**
+
+> *"http and ssh are 2 separate protocols. you cant send ssh request with http, and most servers dont have
+> web api - but they do have ssh. we need ssh tool, but really low footprint one, without building it
+> ourselve."*
+
+That correction is right, and the argument I made against it was wrong in a specific way. I had claimed `http`
+"covers the same ground for anything with an API". It does not: an API is a thing a server *may* have, and SSH
+is a thing a server *does* have — it is the oldest and most universal remote interface there is. A tool whose
+only verbs are `http` and `git` can reach a web service and a repository, and nothing else. **Portability is
+not only about git hosts; it is about which servers the app can talk to at all**, and SSH is the protocol that
+makes the long tail reachable.
+
+So the question is not *whether* an SSH tool belongs here. It is **which library, and what is the smallest
+honest shape of the tool**.
+
+#### The library: `com.github.mwiede:jsch`
+
+Measured, not assumed — the numbers are the jar on Maven Central, read on 2026-11-10:
+
+| | `com.github.mwiede:jsch:2.28.8` | `org.connectbot.sshlib:sshlib:0.5.0` (cbssh) | `arcshell-ssh` |
+|---|---|---|---|
+| jar | **700 KB** (717 KB, 380 classes) | **2.6 MB** (sshlib 2.2 MB + protocol 416 KB) | not published |
+| dependencies | **zero** — the POM declares none | ktor-network, tink, kyber, keccak, jbcrypt, kstatemachine, slf4j, coroutines | vendored BC fork |
+| licence | **Revised BSD** (+ ISC jBCrypt, JZlib BSD) | Apache-2.0 | Apache-2.0 |
+| on Maven Central | **yes** | yes | **no — 404** |
+| Android | pure Java, no `java.nio.file`, no native code | same | same |
+
+**`jsch` wins on the only axis the operator named.** Zero dependencies is not a small advantage over six
+dependency families: it means no Ktor inside an app that has its own networking, no Tink inside an app whose
+operator has said *no encryption anywhere*, and no version-alignment work ever. 700 KB against 2.6 MB, for the
+same protocol. `arcshell-ssh` is disqualified by not being published — vendoring 189 files of someone's
+BouncyCastle fork is the opposite of "without building it ourselves".
+
+`jsch` is the maintained fork of JCraft's JSch (the library every Java SSH client has used for twenty years),
+and it has what the tool needs: `ChannelExec`, `ChannelSftp`, `ChannelShell`, public-key/password/
+keyboard-interactive auth, and **`HostKeyRepository`** — the interface that makes host-key pinning the app's
+own business instead of a `known_hosts` file on a phone's filesystem.
+
+#### The shape: one verb, and the vault
+
+1. **One tool, one verb: `run`.** `ssh(command, host)` — not a shell, not a session, not a port forward. A
+   `shell` verb is a different product (an interactive terminal belongs in the UI, not in a tool a model
+   calls), and a forward is a capability nobody has asked for. `run` returns stdout, stderr and the exit
+   status, because a command that failed and a command that printed nothing are different answers.
+2. **The credential is a vault secret, like every other one.** No new store: the existing vault row is
+   `(name, value, host, scope)`, and SSH reads the same row shape — a private key or a password, bound to a
+   host, at project/branch/account scope. `ConnKind` does not grow a member: a secret is a secret, and what
+   makes it an SSH secret is the **form** that names it, exactly as a chat's form names a model key.
+3. **Host keys are pinned on first use, and the fingerprint is shown.** `HostKeyRepository.check` returns
+   `NOT_INCLUDED` the first time, the app records the key and says the fingerprint in words; a *changed* key
+   is a refusal that names it, never a prompt to accept. This is the one place where the "no encryption
+   anywhere" rule does not apply, because a host key is not encryption — it is identity, and skipping it
+   makes the tool worse than useless.
+4. **The refusal speaks, and names the scope.** A missing key, an unreachable host, a rejected auth: each says
+   which of the three it was and which vault row would fix it. A silent no-op here would be indistinguishable
+   from a command that printed nothing.
+5. **The tool list does not grow by a form.** `ssh` takes `host` and `command` and nothing else; the address
+   is `user@host` in the one argument, because inventing `user`, `port`, `key` as separate keys is the same
+   mistake `http`'s four-argument version made and the operator already rejected.
+
+#### What this does **not** do
+
+- **It does not weaken the branch boundary.** The boundary in §1 is about *folders on the device*; `ssh`
+  reaches the network, which is the token's business, not the app's. It is not a write door and does not
+  pretend to be one.
+- **It does not make the app an SSH client.** No terminal, no sftp browser, no port forwarding, no agent
+  forwarding. Those are a product; this is a tool.
+- **It is not a reason to remove `http`.** They answer different questions — `http` speaks to a service that
+  offers one, `ssh` speaks to a machine that does not.
+
+#### Order, and the one open question
+
+The work is small and self-contained: add the dependency, one `SshRun` object (connect, exec, collect, close,
+with a deadline), one tool registration, one vault reader, one `HostKeyRepository` backed by the vault. Tests
+are the ordinary kind — a local `sshd` is not available in CI, so the transport is faked at the `SshRun`
+boundary and the *policy* is what is tested: pinning, a changed key, a missing secret, a non-zero exit.
+
+**The open question, for the operator, before any of it is built:** *a private key in the vault has a
+passphrase or it does not — and if it does, where does the passphrase live?* The two answers are a second
+secret (a row naming a row), or "keys with passphrases are refused, generate a key for this app". The second is
+smaller and safer; the first is what a person with an existing key will want. **This is the decision that
+cannot be undone later, so it is asked rather than guessed.**
+
+---
+
 ## 5. What is not solved by any of this
 
 - **No per-branch scope exists in git or in any token.** "This agent may push only `feature`" is not
@@ -133,6 +221,12 @@ prompt, a secret bound to the host, and `http`. Two small pieces of plumbing are
 - **`http` deletes the app's GitHub vocabulary** — `ciSaid`'s sentences, the "already gone is not a failure"
   rule. That is the price of letting the host's API be the API, and P3's last row is where the remainder
   lives.
+- **`ssh` does not make a server portable, only reachable.** A command run over SSH is the *server's* command:
+  `systemctl restart nginx` on one host is `rc-service nginx restart` on another, and no amount of tooling
+  here closes that gap. The tool's job is to deliver the command and report what came back honestly — not to
+  know what the command should have been.
+- **A shell on a server is the largest blast radius the app can offer.** `run` is one command per call with a
+  deadline, not a session that can be held open, and that limit is deliberate rather than incidental.
 
 ## 6. Order, and why
 
@@ -140,3 +234,7 @@ P0 first because it is the operator's named concern, it is small, and it survive
 that follows (it is about folders, not hosts). P1 second because it is the precondition for P2 — a credential
 that can only be a GitHub token cannot be sent to a host that has not been thought about. P2 third because
 deleting a typed tool is only safe once `http` can do everything it did, and that means pagination and tags.
+
+**P4 is last and is independent of P0–P3**, which is why it is written down and not started: it touches no
+credential the earlier phases change, and it is blocked on one answer (the passphrase question above) that is
+the operator's, not mine. When that answer exists the work is a day, not a phase.

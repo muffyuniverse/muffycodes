@@ -157,62 +157,13 @@ class SettingsStore(context: Context, name: String = "settings") {
         Trace.said(if (clean == 0) "no reminders" else "a reminder every $clean minutes")
     }
 
-    /**
-     * When the agent is told to clear up, in tokens — and when the app trims it, also in tokens.
-     *
-     * Zero means two different things, deliberately: a trigger of zero is "a quarter of what this
-     * pin allows", because an agent with no warning point is one the app surprises; a hard limit
-     * of zero is "never", because an app that silences a conversation on its own is worse than one
-     * that asks the agent to shorten it.
-     */
-    var triggerTokens: Int by mutableStateOf(prefs.getInt(KEY_TRIGGER, 0))
-        private set
-
-    var hardTokens: Int by mutableStateOf(prefs.getInt(KEY_HARD, 0))
-        private set
-
-    /**
-     * Where both compactions aim, in tokens - **one target for the two hands.**
-     *
-     * The operator's correction, 2026-10-29: "both forget and trim compactions should have same
-     * target but different triggers (so that forget triggers much earlier)". Two destinations would
-     * let the app trim to a size the agent was never asked to reach, or ask the agent to reach a
-     * size the app had already given up on; one destination means whichever hand acts, the context
-     * lands in the same place.
-     *
-     * Zero means "half of the clear-up point", which is derived rather than typed - so a person who
-     * sets only the triggers still gets an ask that buys headroom instead of one that lands exactly
-     * on the number that asked for it.
-     */
-    var targetTokens: Int by mutableStateOf(prefs.getInt(KEY_TARGET, 0))
-        private set
-
-    /** Sets the compaction target. Zero follows the clear-up point. */
-    fun keepTarget(tokens: Int) {
-        val clean = tokens.coerceIn(0, MAX_TOKENS)
-        Trace.tap("compaction target", if (clean == 0) "half the clear-up point" else "${ContextBudget.short(clean.toLong())}")
-        targetTokens = clean
-        prefs.edit().putInt(KEY_TARGET, clean).apply()
-        Trace.said(if (clean == 0) "the target follows the clear-up point" else "compact to ${ContextBudget.short(clean.toLong())}")
-    }
-
-    /** Sets the clear-up trigger. Zero leaves it to the pin. */
-    fun keepTrigger(tokens: Int) {
-        val clean = tokens.coerceIn(0, MAX_TOKENS)
-        Trace.tap("forget compaction", if (clean == 0) "when the pin is full" else "${ContextBudget.short(clean.toLong())}")
-        triggerTokens = clean
-        prefs.edit().putInt(KEY_TRIGGER, clean).apply()
-        Trace.said(if (clean == 0) "the trigger follows the pin" else "clear up at ${ContextBudget.short(clean.toLong())}")
-    }
-
-    /** Sets the hard limit. Zero is "never trim", which is the default. */
-    fun keepHard(tokens: Int) {
-        val clean = tokens.coerceIn(0, MAX_TOKENS)
-        Trace.tap("trim compaction", if (clean == 0) "never" else "${ContextBudget.short(clean.toLong())}")
-        hardTokens = clean
-        prefs.edit().putInt(KEY_HARD, clean).apply()
-        Trace.said(if (clean == 0) "the app never trims the context" else "the app trims at ${ContextBudget.short(clean.toLong())}")
-    }
+    // **The three context numbers are not settings any more — they are the form's.** They used to
+    // live here as `triggerTokens`/`hardTokens`/`targetTokens`, and when N6 made the request form the
+    // only answer to "what is this chat asked with", every reader moved to `Wired.ofForm` while these
+    // three fields stayed behind: a person could type a number into Settings and no request ever read
+    // it. A write-only setting is worse than a missing one, because it answers a question it has no
+    // part in. They are deleted rather than kept as a default, on the operator's decision: a limit is
+    // per chat, and the form is where a per-chat fact already lives.
 
     /**
      * Whether an agent waiting on the person has its conversation kept warm — **the operator's
@@ -645,9 +596,9 @@ class SettingsStore(context: Context, name: String = "settings") {
         selectTheme(DEFAULT_THEME)
         selectDarkVariant(false)
         keepRequests(0)
-        keepTrigger(0)
-        keepHard(0)
-        keepTarget(0)
+        // **No context numbers here, because they are not settings.** A reset restores this screen
+        // to its defaults; the three compaction numbers live in each chat's request form, which a
+        // reset has no business reaching into.
         keepWarm(true)
         keepPoll(0)
         keepWarmFor(DEFAULT_WARM_MINUTES)
@@ -691,9 +642,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val KEY_REMIND = "agent_remind_minutes"
 
     /** The two context limits, in tokens, as the operator typed them. */
-    const val KEY_TRIGGER = "agent_trigger_tokens"
-    const val KEY_HARD = "agent_hard_tokens"
-    const val KEY_TARGET = "agent_target_tokens"
 
     /** How tall one chat bubble may be, in lines. `0` is "no cap". */
     const val KEY_BUBBLE_LINES = "chat_bubble_lines"

@@ -5,6 +5,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.json.JSONObject
 import org.junit.Test
 import java.io.File
 
@@ -744,13 +745,59 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the two context limits are the settings', not the design's`() {
-        // Written with numbers the defaults would fail: a screen test on the same fields would
-        // pass with the values ignored, and the agent would warn at the wrong size for ever.
+    fun `the context limits are the form's, not the design's`() {
+        // **The form is the only answer, and this is the test that says so out loud.**
+        //
+        // It used to set `settings.keepTrigger(1)` and assert the request carried the warning. That
+        // passed while the settings were read, and after N6 moved the numbers into the form it failed
+        // — correctly, because the fields it was typing into had become write-only. The form is what
+        // a chat is asked with, so the form is what this writes.
+        //
+        // The numbers are deliberately ones the shipped defaults would fail: `forget = 1` means any
+        // context at all is over the trigger, so a request that does *not* carry the sentence proves
+        // the form's number was ignored. A screen test on the same fields would pass with the value
+        // unread; this one cannot.
         listening()
-        scene.settings.keepTrigger(1)
-        assertEquals("the number typed is what is stored", 1, scene.settings.triggerTokens)
-        assertEquals("and the hard limit is still off", 0, scene.settings.hardTokens)
+        val door = ScriptedDoor(Reply("done"))
+        scene.viewModel.workspace!!.projectDir("groceries").mkdirs()
+        Schemas.write(
+            scene.viewModel.workspace!!,
+            ShapeKind.CHAT,
+            "tight.jsonc",
+            Schema(
+                address = "https://x.test/v1",
+                url = "chat/completions",
+                body = org.json.JSONObject("""{"model":"m","messages":"{{messages}}"}"""),
+                forget = 1,
+                trim = 0,
+                target = 0,
+            ),
+        ).getOrThrow()
+        scene.viewModel.chatDoor = { door }
+        scene.viewModel.openChat("groceries")
+        scene.viewModel.chooseForm("tight")
+        scene.viewModel.startAgent("groceries")
+
+        scene.viewModel.sendChat("do it")
+        scene.await("the turn") { door.asked.isNotEmpty() }
+
+        assertTrue(
+            "a trigger of one token is over any context: ${door.asked.first().system.takeLast(160)}",
+            door.asked.first().system.contains("Clear up your context"),
+        )
+        assertTrue(
+            "the request says so on the trace",
+            Trace.report().lines.any { it.contains("agent-clear-up") },
+        )
+    }
+
+    @Test
+    fun `a form that sets no limit asks the agent for nothing`() {
+        // **The other side of the same coin, and the reason the test above is not enough.** A form
+        // whose `forget` is zero must produce a request with no clear-up sentence at all — otherwise
+        // the sentence could be arriving from somewhere other than the form, and the test above would
+        // pass for the wrong reason.
+        listening()
         val door = ScriptedDoor(Reply("done"))
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
@@ -758,12 +805,12 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.sendChat("do it")
         scene.await("the turn") { door.asked.isNotEmpty() }
 
-        assertTrue(
-            "one token is over a trigger of one: ${door.asked.first().system.takeLast(160)}",
+        assertFalse(
+            "no limit means no sentence: ${door.asked.first().system.takeLast(160)}",
             door.asked.first().system.contains("Clear up your context"),
         )
-        assertTrue(
-            "the request says so on the trace",
+        assertFalse(
+            "and nothing on the trace",
             Trace.report().lines.any { it.contains("agent-clear-up") },
         )
     }
