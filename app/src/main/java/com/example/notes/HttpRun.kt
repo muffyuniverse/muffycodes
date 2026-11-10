@@ -93,7 +93,45 @@ object HttpRun {
         } else {
             ""
         }
-        return head + "\n\n" + body + "\n\nIt is at $rel." + (inside ?: "") + redirect + rateLimitNote(answer)
+        return head + "\n\n" + body + "\n\nIt is at $rel." + (inside ?: "") + redirect +
+            rateLimitNote(answer) + linkNote(answer)
+    }
+
+    /**
+     * **The next page's address, when the server said there is one.**
+     *
+     * A paginated API answers with the first page and puts the rest behind a `Link` header — GitHub's
+     * `rel="next"`, `rel="last"`, and the rest. Without it, a model asking for "all the open issues"
+     * gets one page and believes it has them all, which is the quiet kind of wrong: the answer looks
+     * complete because nothing in the body says otherwise.
+     *
+     * **Only `next` is named.** `last` is a count and `prev` is a page it has already read; `next` is
+     * the only one that answers "what do I ask for to continue". The address is printed whole so it
+     * can be pasted into another `http` call — a `Link` header is a URL, not a relative path, and the
+     * model should not have to assemble it.
+     */
+    private fun linkNote(answer: Fetcher.Answer): String {
+        val raw = answer.headers.entries
+            .firstOrNull { it.key.equals("Link", ignoreCase = true) }?.value
+            ?: return ""
+        // **The addresses are the bracketed things, and the text between them carries the rel.**
+        // Splitting on commas would cut an address whose query string holds one, which is ordinary in
+        // a pagination cursor — so the bracket pairs are what delimit, and each address is paired
+        // with the text that follows it up to the next address.
+        val parts = raw.split('<').drop(1).map { chunk ->
+            val url = chunk.substringBefore('>', "")
+            val rest = chunk.substringAfter('>', "").substringBefore('<')
+            url to rest
+        }
+        val url = parts.firstOrNull { (_, rest) ->
+            // `; rel="next", ` — the quote is closed before the separator, so both ends and the
+            // separator have to come off before the word is `next`.
+            rest.substringAfter("rel=", "")
+                .trim()
+                .trim(',', ';', ' ', '"') == "next"
+        }?.first ?: return ""
+        if (url.isBlank()) return ""
+        return "\n\nThere is a next page: $url"
     }
 
     /**

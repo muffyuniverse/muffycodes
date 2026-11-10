@@ -176,6 +176,33 @@ class HttpToolTest {
     }
 
     /**
+     * **The next page's address, said out loud.** A paginated API answers with one page and puts the
+     * rest behind a `Link` header; without naming it, "all the open issues" is one page that looks
+     * complete. The address is printed whole so the next call can paste it.
+     */
+    @Test
+    fun `a Link header's next page is named so the agent can continue`() {
+        extraHeaders = mapOf(
+            "Link" to "<https://api.example.com/x?page=2&cursor=a,b>; rel=\"next\", " +
+                "<https://api.example.com/x?page=9>; rel=\"last\"",
+        )
+        val said = send("GET https://api.example.com/x")
+
+        assertTrue("the next page is named: $said",
+            said.contains("https://api.example.com/x?page=2&cursor=a,b"))
+        assertFalse("and only next, not last: $said",
+            said.contains("page=9"))
+    }
+
+    /** A server that pages nothing says nothing about pages — the note is not decoration. */
+    @Test
+    fun `a response with no Link header says nothing about a next page`() {
+        val said = send("GET https://api.example.com/x")
+
+        assertFalse("no page talk: $said", said.contains("next page"))
+    }
+
+    /**
      * **A `#` or `//` line above the request is a comment**, so a file can say what it is for — and
      * neither survives into the request.
      */
