@@ -114,7 +114,17 @@ class BranchFeatureTest : FeatureTest() {
         // **Through the screen, in the order a person does it**: the project's rows, then `main`.
         scene.viewModel.openBranches(project)
         scene.viewModel.enterBranch("main")
-        scene.await("main's files to open") { scene.viewModel.activeBranch == "main" }
+        // **Wait for the resolution, not for the name.** `enterBranch` sets `activeBranch` and then
+        // goes on to `open`, `refreshChanges` and `checkReach` — the last of which is network work.
+        // Awaiting the *name* therefore returned while the tree was still being switched, and the
+        // assertions below read a `fileAt` from the state before the switch. That is the flake this
+        // test carried: it failed once and passed on retry, because on a fast run the rest had landed
+        // by the time the reads happened.
+        scene.await("main's files to open") {
+            scene.viewModel.activeBranch == "main" &&
+                scene.workspace!!.fileAt(listOf(project, "milk.txt")).canonicalPath ==
+                File(scene.workspace!!.repoOf(project), "milk.txt").canonicalPath
+        }
 
         assertEquals("back on main", "main", scene.viewModel.activeBranch)
         // **The same path a person uses**, resolved after the branch changed: `Shopping/milk.txt` must
