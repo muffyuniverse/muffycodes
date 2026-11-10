@@ -225,6 +225,51 @@ class McpTestTools {
     }
 
     @Test
+    fun `an argument may name a file, and its contents are what the server gets`() {
+        // **The same expansion `http` does**, so a person keeps a paragraph in the project rather than
+        // pasting it into a JSON string — and a token never travels through the conversation.
+        article("shopping", "linear")
+        File(ws.projectDir("shopping"), "issue.md").writeText("the build is red")
+        fake.answer = Mcp.Answer("ok", failed = false)
+
+        val answer = tools().run(
+            call("""{"server":"linear","tool":"create_issue","args":{"body":"{{file:issue.md}}"}}"""),
+        )
+
+        assertTrue(answer, answer.startsWith("0\n"))
+        assertEquals("the file's text, not its name", "the build is red", fake.lastArgs!!.optString("body"))
+    }
+
+    @Test
+    fun `an argument may name a secret, and it is supplied for the server's own host`() {
+        article("shopping", "linear", url = "https://mcp.linear.app/mcp")
+        credentials.setSecret("linear-key", "lin_the_real_one", "mcp.linear.app")
+        fake.answer = Mcp.Answer("ok", failed = false)
+
+        val answer = tools().run(
+            call("""{"server":"linear","tool":"x","args":{"key":"{{secret:linear-key}}"}}"""),
+        )
+
+        assertTrue(answer, answer.startsWith("0\n"))
+        assertEquals("lin_the_real_one", fake.lastArgs!!.optString("key"))
+        assertFalse("and never in the answer: $answer", answer.contains("lin_the_real_one"))
+    }
+
+    @Test
+    fun `an argument naming a secret for another host is refused, and nothing is called`() {
+        article("shopping", "linear", url = "https://mcp.linear.app/mcp")
+        credentials.setSecret("linear-key", "lin_the_real_one", "evil.example")
+
+        val answer = tools().run(
+            call("""{"server":"linear","tool":"x","args":{"key":"{{secret:linear-key}}"}}"""),
+        )
+
+        assertTrue(answer, answer.startsWith("1\n"))
+        assertTrue("it names what could not be expanded: $answer", answer.contains("linear-key"))
+        assertEquals("and the server was not called", null, fake.lastTool)
+    }
+
+    @Test
     fun `a server that cannot be reached is refused with its reason`() {
         article("shopping", "linear")
         fake.failure = IllegalStateException("The server answered HTTP 401: bad token")

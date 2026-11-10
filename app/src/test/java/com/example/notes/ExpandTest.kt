@@ -104,7 +104,7 @@ class ExpandTest {
 
     @Test
     fun `carriage returns are not headers`() {
-        val one = HttpRequest.parse("GET https://api.example.com/x\r\nAccept: text/plain\r\n\r\nbody").getOrThrow()
+        val one = HttpRequest.parse("POST https://api.example.com/x\r\nAccept: text/plain\r\n\r\nbody").getOrThrow()
 
         assertEquals("text/plain", one.headers["Accept"])
         assertEquals("body", String(one.body!!, Charsets.UTF_8))
@@ -156,6 +156,27 @@ class ExpandTest {
     fun `a secret header may not be written by hand`() {
         val said = HttpRequest.parse("GET https://api.example.com/x\nAuthorization: Bearer typed")
             .exceptionOrNull()?.message.orEmpty()
+
+        assertTrue(said, said.contains("{{secret:"))
+    }
+
+    @Test
+    fun `a secret header may hold a placeholder behind a scheme word`() {
+        // **The scheme is not secret.** `Bearer` is in every request ever written, and a header that
+        // held nothing but the placeholder would be one an API could not read.
+        val one = HttpRequest.parse("GET https://api.example.com/x\nAuthorization: Bearer {{secret:gh}}")
+            .getOrThrow()
+
+        assertEquals("Bearer {{secret:gh}}", one.headers["Authorization"])
+    }
+
+    @Test
+    fun `a secret header with a placeholder and something else is refused`() {
+        // The value is `Bearer {{secret:gh}} and also ghp_typed`, which is a typed token with a
+        // placeholder beside it — the exact shape a careless edit produces.
+        val said = HttpRequest.parse(
+            "GET https://api.example.com/x\nAuthorization: Bearer {{secret:gh}} and also ghp_typed",
+        ).exceptionOrNull()?.message.orEmpty()
 
         assertTrue(said, said.contains("{{secret:"))
     }

@@ -136,6 +136,11 @@ data class HttpRequest(
                 // with a space in it — which is wrong, but it is wrong in a way the address check can
                 // say better than a guess at the verb.
                 first.substring(0, space).uppercase() in METHODS -> first.substring(0, space).uppercase() to first.substring(space + 1).trim()
+                // **A word where a verb goes is a verb, even when it is the wrong one.** `TRACE
+                // https://…` read as an address would be refused as "not an address", which sends a
+                // model looking for a typo in a URL that is fine. A candidate is a run of letters with
+                // no address punctuation in it, so `https://example.com/a b` stays an address.
+                isVerbLike(first.substring(0, space)) -> first.substring(0, space).uppercase() to ""
                 else -> "GET" to first
             }
             if (url.isEmpty()) {
@@ -186,7 +191,11 @@ data class HttpRequest(
             // **Not trimmed.** The blank line is consumed, and everything after it is the body as the
             // person wrote it — a trailing newline in a script being POSTed is data.
             val body = if (at < lines.size) {
-                lines.drop(at).joinToString("\n").toByteArray(Charsets.UTF_8)
+                // **`at + 1`, because `at` is still on the blank line.** The header loop stops at it
+                // rather than consuming it — a body that began with its separator's own newline would
+                // arrive at the server with a leading blank line, which a JSON parser tolerates and a
+                // script does not.
+                lines.drop(at + 1).joinToString("\n").toByteArray(Charsets.UTF_8)
             } else {
                 null
             }
@@ -200,6 +209,25 @@ data class HttpRequest(
             }
             return Result.success(HttpRequest(method, url, headers, body))
         }
+
+        /**
+         * True when [value] is a vault placeholder, optionally behind a scheme word.
+         *
+         * **The whole rule for a credential header**, and it is deliberately narrow: strip every
+         * `{{secret:…}}` out and what is left may be `Bearer`, `Basic`, `Token`, or nothing. Anything
+         * else is a value somebody typed, and a value somebody typed is a value in the log.
+         */
+        fun onlyPlaceholder(value: String): Boolean {
+            val mentions = Expand.mentions(value).filter { it.kind == Expand.Mention.Kind.SECRET }
+            if (mentions.isEmpty()) return false
+            var rest = value
+            for (one in mentions) rest = rest.replace(one.whole, "")
+            return rest.trim().lowercase() in setOf("", "bearer", "basic", "token", "bot")
+        }
+
+        /** True when [word] looks like it belongs where a verb goes rather than being an address. */
+        fun isVerbLike(word: String): Boolean =
+            word.isNotEmpty() && word.all { it.isLetter() } && word.length <= 12
 
         /** The names a document mentions, for a screen that lists what it will spend. */
         fun namesIn(text: String): List<String> = Expand.namesIn(text)
