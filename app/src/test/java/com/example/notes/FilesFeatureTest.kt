@@ -298,13 +298,17 @@ class FilesFeatureTest : FeatureTest() {
             "the second project has it",
             scene.awaitCommits("work", 1) { paths -> paths.contains("milk.txt") },
         )
-        assertTrue(
-            "the first does not",
-            // **The source's index is what must lose it**, since that is where the removal is recorded
-            // now — a deletion is staged like any other change. `awaitCommits` reads the index and the
-            // newest commit together, so this asks the question of the place the answer lives.
-            scene.awaitCommits("shopping", 1) { paths -> !paths.contains("milk.txt") },
-        )
+        // **The source records the removal, and it is still "there" in the index until a push** — a
+        // staged deletion lists the path, because that is what the index is holding. So the question
+        // is not "does the path appear" but "what does the index say about it": `removed`, and gone
+        // from disk. Asserting `!paths.contains` was asking the index to forget a deletion it exists to
+        // remember.
+        scene.await("shopping to record the removal", 30_000) {
+            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("shopping")).use { git ->
+                git.status().call().removed.contains("milk.txt")
+            }
+        }
+        assertFalse("and the file is not there", File(scene.workspace!!.projectDir("shopping"), "milk.txt").exists())
     }
 
     @Test

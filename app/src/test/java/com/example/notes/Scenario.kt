@@ -846,8 +846,10 @@ class Scenario(
      */
     fun saveAsVersion(text: String) {
         val file = viewModel.editingFile ?: error("the editor is not open")
-        viewModel.saveEditor(text)
-        await("${file.name} to hold \"$text\"") { file.readText() == text }
+        // **Through `saveEditor`, which waits for the stage as well as the write.** Reading the index
+        // here instead was the same race one level up: a save's two facts land at different moments,
+        // and asking "is anything staged" between them answers no.
+        saveEditor(text)
         projectOf(file)?.let { project ->
             // Only when something is staged: a project with no remote has nothing to send, and its
             // count is zero, so pressing Sync is a no-op that says so.

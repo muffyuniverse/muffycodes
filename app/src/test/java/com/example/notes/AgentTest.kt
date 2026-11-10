@@ -2614,10 +2614,13 @@ class AgentTest {
         // create promises here is that the file is *staged*, which is the half of "recorded" that
         // happens on this phone. The other half is covered where a remote exists
         // (`Scenario.saveAsVersion` presses Sync for every history assertion in the feature tests).
-        assertEquals(
+        // **`contains`, not equality**: the folder the file was made in carries its own marker, and a
+        // marker is a real file the app wrote — asserting the whole list would make this test a
+        // statement about the scaffold rather than about the agent's file.
+        assertTrue(
             "the new file is staged, so a push will carry it",
-            listOf("notes/plan.md"),
-            Git.open(ws.repoOf("shopping")).use { GitService.stagedPaths(it.repository) },
+            Git.open(ws.repoOf("shopping")).use { GitService.stagedPaths(it.repository) }
+                .contains("notes/plan.md"),
         )
         // **And it is in the repository's index, not merely on disk**: `tracked` is the question a
         // file that arrived from nowhere would fail.
