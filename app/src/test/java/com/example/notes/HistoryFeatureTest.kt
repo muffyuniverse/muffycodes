@@ -123,25 +123,26 @@ class HistoryFeatureTest : FeatureTest() {
         // having got there yet. It now asks once, and asks what the app actually does.
         scene.folder("empty")
         scene.await("the folder to be made") { scene.names().contains("empty") }
-        assertTrue("a new folder is a version, so it can come back",
-            scene.versionsOfFolder("empty").isNotEmpty())
 
-        // The marker is the app's own and is never shown as the person's file — a folder whose only
-        // content is the marker reads as empty, which is the whole point of it being hidden.
-        assertFalse("and the marker is not one of their files",
+        // **A version is a commit, so the marker has to be sent to become one.** It does not make a
+        // version by itself — it makes one *possible*: `.gitkeep` is something a commit can carry,
+        // where a truly empty directory is something git cannot record at all. That distinction is
+        // the whole test, so it is sent explicitly rather than waited for.
+        assertTrue("the marker is there to be carried",
+            File(scene.workspace!!.projectDir("work"), "empty/.gitkeep").exists())
+        // And it is the app's own, never shown as the person's file — a folder whose only content is
+        // the marker reads as empty, which is the whole point of it being hidden.
+        assertFalse("but it is not one of their files",
             scene.names().any { it == ".gitkeep" })
 
-        scene.openIn("empty")
-        val one = scene.file("one.txt", "first")
-        scene.openIn()
-        // The text has to be the version that is restored, or this asks whether an empty file comes
-        // back empty — which it does, and which says nothing about restoring anything.
-        scene.await("the text to be a version") {
-            scene.versionsOf(one).any { it.second == "first" }
+        scene.sendProjectIfWaiting("work")
+        scene.await("the folder to be a version, now that a send carried the marker") {
+            scene.versionsOfFolder("empty").isNotEmpty()
         }
 
-        // And from the folder's *first* version it comes back empty — the case the marker exists for.
-        val version = scene.versionsOfFolder("empty").last().first.id
+        // **And that version brings back an empty folder**, which is the promise the marker exists to
+        // keep and the one thing a marker-less folder could never do.
+        val version = scene.versionsOfFolder("empty").first().first.id
         val folder = File(scene.workspace!!.projectDir("work"), "empty")
         delete(folder)
         assertFalse("the folder is gone", folder.exists())
