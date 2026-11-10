@@ -67,9 +67,10 @@ class HistoryFeatureTest : FeatureTest() {
      * `sendIfWaiting` about a file that has just been renamed would ask about a path that does not
      * exist. The project is the same either way, and the send is about the project.
      */
-    private fun rename(item: File, name: String) {
-        scene.viewModel.rename(item, name)
+    private fun rename(item: File, name: String): Boolean {
+        val answer = scene.viewModel.rename(item, name)
         scene.sendIfWaiting(item.parentFile ?: item)
+        return answer
     }
 
     @Test
