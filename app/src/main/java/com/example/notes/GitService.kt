@@ -94,12 +94,11 @@ object GitService {
     /**
      * What a project has that GitHub does not.
      *
-     * **Asked as three questions, not one.** [staged], [unstaged] and [untracked] are
-     * git's own view — files not yet committed — and they are zero the moment a save
-     * lands, because every change is committed as it happens. What a person means by
-     * "changed" is [ahead]: work committed here and never pushed. A row built from the
-     * first three alone read `changed 0` with the work unsent, so Sync stayed grey and
-     * the file went nowhere.
+     * **Asked as three questions, not one.** [staged], [unstaged] and [untracked] are git's own
+     * view — files not yet committed — and since 2026-11-10 a save leaves its work in [staged]
+     * rather than committing it: the commit happens at the push. What a person means by "changed"
+     * is still [ahead], work committed here and never pushed. A row built from [ahead] alone read
+     * `changed 0` with the work unsent, so Sync stayed grey and the file went nowhere.
      *
      * **[ahead] counts paths, not commits.** A commit count said "1 to send" for a batch that moved
      * ten files. It was kept in a file of its own because the history is *rebuilt* when it is
@@ -421,7 +420,7 @@ object GitService {
     }
 
     /**
-     * Puts [path] back in the index, so it is committed and sent again.
+     * Puts [path] back in the index, so it is staged now and sent by the next push.
      *
      * **The file on disk is the truth.** Tracking again is a person saying "send this", and what is
      * on the phone is what to send — not whatever version a history walk would find. A path that is
@@ -987,10 +986,6 @@ object GitService {
         }
     }
 
-    /**
-     * The paths that changed in the working tree, as the repository names them.
-     * This is what a commit message is written from: the names, not a count.
-     */
     /**
      * The paths that differ between the last push and now — **files, not commits.**
      *

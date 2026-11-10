@@ -911,8 +911,9 @@ class AgentTools(
                     "`read` cannot give you: reading a 400-line file to find that three lines moved " +
                     "costs 400 lines of context and leaves you to diff in your head. " +
                     "`from` and `to` are revision ids from `search {history}` or the history screen; " +
-                    "**both are required**, because every change here is committed the moment it " +
-                    "happens, so there is no working-tree side to compare against. " +
+                    "**both are required**: a diff here is between two versions, so there is no " +
+                    "working-tree side to compare against. Staged work has no id yet — it becomes a " +
+                    "version at the next `push`. " +
                     "**`path` is a prefix**: \"src/\" answers what changed in that folder, and a file " +
                     "path answers for that file. " +
                     "The answer names each changed file with its added and removed counts; a binary " +
@@ -3800,9 +3801,9 @@ class AgentTools(
         val to = args.optString("to", "").trim()
         if (from.isEmpty() || to.isEmpty()) {
             return refusal(
-                "`diff` needs both `from` and `to`: the two revisions to compare. Every change in " +
-                    "this project is committed the moment it happens, so there is no working-tree " +
-                    "side to leave one out for. `search` with `history: true` names the revisions.",
+                "`diff` needs both `from` and `to`: the two versions to compare. There is no " +
+                    "working-tree side to leave one out for — work that is staged has no id until a " +
+                    "`push` makes it a version. `search` with `history: true` names the revisions.",
             )
         }
         deadline.check("git")

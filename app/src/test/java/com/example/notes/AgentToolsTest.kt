@@ -216,14 +216,17 @@ class AgentToolsTest {
     }
 
     @Test
-    fun `push and pull take no argument, so no agent can name a branch`() {
+    fun `push takes a message and no branch, and pull takes nothing`() {
         // **The portable half of the isolation rule**, and the reason it survives every provider
         // decision (PLAN-portable-2026-11-08 §3): `push` sends `currentBranch(repo)` and there is no
         // argument through which a model could name another ref. A `branch` argument here would turn
         // "an agent can only send the branch it stands in" into a promise, and a promise is what the
         // next refactor removes. This test is the thing that would fail first.
-        assertEquals("push takes no argument", emptySet<String>(), AgentTools.KEYS["push"])
-        assertEquals("and neither does pull", emptySet<String>(), AgentTools.KEYS["pull"])
+        // **`message` is the one argument, and it is not a ref.** A push now makes the version
+        // (2026-11-10: a save only stages), so the tool has to be able to say why — and the reason a
+        // person reads in the history is worth an argument that a branch name never was.
+        assertEquals("push takes a message and nothing else", setOf("message"), AgentTools.KEYS["push"])
+        assertEquals("and pull takes no argument", emptySet<String>(), AgentTools.KEYS["pull"])
     }
 
     @Test

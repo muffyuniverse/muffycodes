@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.eclipse.jgit.api.Git
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -169,20 +170,24 @@ class CopyFeatureTest : FeatureTest() {
 
         // When the file is copied into the project
         scene.viewModel.copy(beside, into)
+        // **Recorded is "staged", since 2026-11-10** — a copy is a save, and a save leaves its work in
+        // the index for the next push to make a version of. Waiting for a commit here would wait
+        // forever, which is how this test found the rule.
         scene.await("the project to record the arrival", 30_000) {
-            scene.repo("groceries").log(null).isNotEmpty() &&
-                scene.trackedFiles("groceries").any { it.endsWith("shopping.txt") }
+            scene.trackedFiles("groceries").any { it.endsWith("shopping.txt") } &&
+                Git.open(scene.workspace!!.repoOf("groceries")).use { git ->
+                    GitService.stagedPaths(git.repository).any { it.endsWith("shopping.txt") }
+                }
         }
 
         // Then the project's own history holds the copy — a file that existed but was never
         // committed is exactly what "no version" means — and the original stayed outside.
         assertTrue("the project holds the copy", File(into, "shopping.txt").isFile)
         assertTrue("and the original is where it was", beside.isFile)
-        // **Committed and still to send, both at once.** The copy is a change like any
-        // other: it is committed to the project's own history the moment it lands, and that
-        // commit is what the row counts as "to send" until a push puts it on GitHub.
-        // Reading the count as "nothing left to send" was the same mistake the row itself
-        // made — a clean worktree is not a synced project.
+        // **Staged and still to send, both at once.** The copy is a change like any other: it is
+        // recorded in the project's index the moment it lands, and a push is what makes the version.
+        // Reading the count as "nothing left to send" was the same mistake the row itself made — a
+        // clean worktree is not a synced project.
         //
         // **The count is not 1, and asserting 1 was asserting the wrong thing.** The number is
         // whatever the project has not pushed, and that now includes the folder markers a new

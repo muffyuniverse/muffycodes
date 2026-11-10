@@ -486,30 +486,39 @@ class Scenario(
      * a burst of changes is one version — so a test that wants three versions has to let each one
      * land first, exactly as a person's pauses would.
      */
+    /**
+     * Waits until the file's work is **recorded** — which since 2026-11-10 means *staged*, not
+     * committed.
+     *
+     * The operator's rule: *"we dont commit on save, we commit on push, on save changes are only
+     * staged."* So the thing a save leaves behind is an index entry, and the thing that proves it is
+     * the file's bytes being in the index — not a new head. Waiting for a head here would wait for a
+     * commit that the next push is going to make, which is the bug this change would otherwise have
+     * seeded into every test that uses `file`.
+     *
+     * **[before] is kept in the signature and no longer used**: it was the head that had to move, and
+     * there is no head to move. Removing it would touch thirty call sites to delete an argument that
+     * documents what the old wait was about.
+     */
     private fun awaitRecordedFor(file: File, before: String?, what: String) {
         val project = projectOf(file) ?: return
-        val history = repo(project)
         // The path inside the project's repository, which is what git stores — not the account's.
         val relative = file.relativeTo(workspace!!.projectDir(project)).invariantSeparatorsPath
-        // **The file's own version, not merely a newer head.** Commits coalesce, so a head that moved
-        // may belong to the previous file's save while this one is still queued — and a caller that
-        // took the new head as "this change is recorded" went on to read a history that was still
-        // growing. Asking the newest version for this file's own text cannot be answered by another
-        // file's commit.
-        // **Every file is its bytes in the tree**, so one comparison covers text and pictures alike.
-        // A picture used to be a pointer — 130 bytes naming its content by SHA-256 — and waiting for
-        // `fileAt` to equal the file's own text would have waited twenty seconds and then reported a
-        // commit that did happen as one that did not. Nothing stands between the tree and the file
-        // any more (see `docs/REMOVED-…-lfs.md`), so there is no special case left to keep.
-        //
-        // **Read inside the wait, not before it.** `createImage` writes through a worker, so the file
-        // may not exist yet when this is called — reading it once up front made the comparison fail
-        // for ever.
-        await("the project's history to record $what", 20_000) {
-            val newest = history.head()
-            if (newest == null || newest == before) return@await false
-            val inTree = history.fileAt(relative, newest) ?: return@await false
-            inTree == String(if (file.isFile) file.readBytes() else return@await false, Charsets.UTF_8)
+        // **The index's own answer, read inside the wait.** `createImage` writes through a worker, so
+        // the file may not exist yet when this is called.
+        await("the project's index to hold $what", 20_000) {
+            if (!file.isFile) return@await false
+            Git.open(workspace!!.repoOf(project)).use { git ->
+                val staged = GitService.stagedPaths(git.repository)
+                // A path is in the index's `added`/`changed` list while it is staged; after a commit
+                // it is not, and the wait would spin — so the other half is that a commit holding it
+                // also counts. Either way the work is recorded, and the caller's next step is free to
+                // read the history or the index.
+                val committed = git.repository.resolve("HEAD")?.let { head ->
+                    GitService.fileAt(git.repository, relative, head.name) != null
+                } == true
+                staged.any { it == relative } || committed
+            }
         }
     }
 
@@ -763,6 +772,16 @@ class Scenario(
         val ws = workspace ?: return null
         val path = ws.relative(file) ?: return null
         val project = ws.projectOf(file) ?: return null
+        // **Nothing is a version until a push makes it** (2026-11-10): a save stages, and the commit
+        // happens when somebody sends the work. So a test that wants "the newest version holds this
+        // text" has to say what a person does — press Sync — and this is where it says so once rather
+        // than in twenty callers.
+        //
+        // **Only when something is staged**, because most callers of this helper are waiting for a
+        // version that already exists (`saveAsVersion` calls it in its own wait loop), and a sync on a
+        // clean tree is a network round trip for an answer that is already "up to date".
+        val staged = Git.open(ws.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+        if (staged.isNotEmpty()) sync(project)
         return try {
             Git.open(ws.repoOf(project)).use { git ->
                 git.repository.resolve("HEAD")?.let { head ->

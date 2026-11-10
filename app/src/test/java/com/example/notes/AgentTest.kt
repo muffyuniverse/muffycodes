@@ -233,7 +233,7 @@ class AgentTest {
     }
 
     @Test
-    fun `a write is committed and counted as unsent, and never pushed`() {
+    fun `a write is staged and counted as unsent, and never pushed`() {
         val door = ScriptedDoor(
             Reply(
                 "",
@@ -247,13 +247,19 @@ class AgentTest {
         agent(door).burst("make it three litres")
 
         assertEquals("the file", "three litres", File(ws.repoOf("shopping"), "milk.txt").readText())
-        // **A version, in the repository, not a number kept beside it.** The row's count is a diff
-        // against the last push now — and this project has no remote, so there is nothing to compare
-        // it with; what the tool promised is that the write was *committed*, and that is what the
-        // history says.
-        val versions = git.versions("shopping", "milk.txt")
-        assertEquals("the newest version holds what the agent wrote", "three litres", versions.first().second)
-        assertEquals("and the one before it is what was there", "two litres", versions[1].second)
+        // **Staged, not committed** (2026-11-10: a save records the work and a push makes the version).
+        // So the assertion moved from the history to the index, and the history assertion that used to
+        // live here became a fact about the push — see `a push makes the version a save staged`.
+        assertEquals(
+            "the work is in the index, which is where a push reads it",
+            listOf("milk.txt"),
+            Git.open(ws.repoOf("shopping")).use { GitService.stagedPaths(it.repository) },
+        )
+        assertEquals(
+            "and no version exists yet, because nothing has been pushed",
+            1,
+            git.versions("shopping", "milk.txt").size,
+        )
     }
 
     @Test
@@ -2592,16 +2598,21 @@ class AgentTest {
     }
 
     @Test
-    fun `a file the agent created has a version, so the edit it just made can be undone`() {
+    fun `a file the agent created is staged, so a push gives it a first version`() {
         // **The second half of the data-loss report, and the half that made it unrecoverable.**
         // "history says 'has no versions yet' for those files, so there's no way to restore them."
         //
         // A file that was never committed has no version to go back to, so the first edit is the
-        // moment a mistake stops being undoable. `create` commits, so the file has a version from the
-        // moment it exists — this test is what says the commit reaches the file rather than only the
-        // folder it is in.
+        // moment a mistake stops being undoable. Since 2026-11-10 the write only stages it, and the
+        // push is what makes the version — so this asserts the *pair*, and the second half is the one
+        // that would silently regress: a staged file that a push forgot is a file with no history at
+        // all, which is exactly the report this test came from.
         val body = tool("write", """{"path":"notes/plan.md","text":"first line"}""")
         assertTrue("created: $body", body.startsWith(AgentLog.SUCCESS))
+        // **The push is what makes the version** (2026-11-10), so the tool that gives a new file a
+        // history is `push` with a message — not the write.
+        val pushed = tool("push", """{"message":"the plan begins"}""")
+        assertTrue("pushed: $pushed", pushed.startsWith(AgentLog.SUCCESS))
 
         val history = tool("search", """{"scope":"plan\\.md$","history":true}""")
 
@@ -2949,18 +2960,27 @@ class AgentTest {
     }
 
     @Test
-    fun `push refuses while there is an uncommitted change`() {
-        // **A push sends commits, not files.** If a write had not committed, pushing would deliver
-        // something the agent never chose — and the agent would believe its change had gone.
+    fun `push refuses staged work with no message, and says which work`() {
+        // **The version's reason is the one thing a person reads later**, so a push that would make a
+        // version without one is refused rather than given a name the app invented.
+        //
+        // The operator's rule (2026-11-10): *"we dont commit on save, we commit on push, on save
+        // changes are only staged. and add a commit message arg to push tool."* A save now leaves the
+        // work in the index, so this is the ordinary case rather than an edge one: an agent that saves
+        // and then pushes has to say what it did.
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "three litres")
+        // **Staged, the way a save leaves it.** `ws.write` is a bare write; the index is what the tool
+        // reads, so the test stages the same way the app does.
+        git.stage("shopping")
+
         val said = call("push")
         assertTrue("it is refused: $said", said.startsWith("1"))
-        assertTrue("and says why: $said", said.contains("uncommitted"))
-        assertTrue(
-            "and points at the fix: $said",
-            said.contains("write"),
-        )
+        assertTrue("and names the file it would have sent: $said", said.contains("milk.txt"))
+        assertTrue("and asks for the message: $said", said.contains("message"))
+
+        val told = call("push", JSONObject().put("message", "three litres instead of two"))
+        assertTrue("with a message it goes: $told", !told.startsWith("1"))
     }
 
     @Test
