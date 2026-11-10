@@ -168,14 +168,14 @@ class HistoryScreenTest {
 
         compose.onNodeWithText(">").performClick()
         waitFor("three litres of milk")
+        // **The arrow that goes towards the oldest is still live here**, because there is one page left.
+        compose.onNodeWithText(">").assertIsEnabled()
         compose.onNodeWithText(">").performClick()
         waitFor("one litre of milk")
-        compose.onNodeWithText(">").assertIsEnabled()
 
-        // **Three pages, because a creation is not a version any more** — so the second save is the
-        // last one, and the arrow has nothing left to do. The count is the app's, not a number the test
-        // decided on: it is read from the screen.
-        compose.onNodeWithText(">").performClick()
+        // **Three pages, because a creation is not a version any more** (2026-11-10) — so the third
+        // page is the last one, and the arrow has nothing left to do. The count is the app's, not a
+        // number the test decided on: it is read from the screen.
         waitFor("3 of 3")
 
         // And the oldest is the last page, so the arrow on that side has nothing to
