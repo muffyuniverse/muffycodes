@@ -3,7 +3,6 @@ package com.example.notes
 import org.eclipse.jgit.api.CreateBranchCommand
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
-import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.Status
 import org.eclipse.jgit.diff.DiffEntry
 import org.eclipse.jgit.diff.DiffFormatter
@@ -632,60 +631,6 @@ object GitService {
         } catch (e: Throwable) {
             emptyList()
         }
-
-    /**
-     * How far this phone is ahead of and behind `origin/<branch>`, in commits.
-     *
-     * **Ahead is not the same question as [unsentPaths].** Unsent counts *paths* that differ from what
-     * was pushed; this counts *commits* the remote has never seen, and the two disagree in the ordinary
-     * case of one commit changing three files. Both are answered because an agent deciding whether to
-     * push needs to know "is there anything" and "how much history", and the second is what tells it
-     * the remote has moved.
-     *
-     * Answers `null` when there is no remote or the tracking ref does not exist — a project that has
-     * never been pushed is not "1 ahead", it is unknown, and inventing a number there would make a
-     * push look necessary when the truth is that the branch has never been sent.
-     */
-    fun aheadBehind(repo: Repository): Pair<Int, Int>? {
-        val branch = repo.branch ?: return null
-        if (repo.config.getString("remote", "origin", "url").isNullOrBlank()) return null
-        val head = repo.resolve("HEAD") ?: return null
-        val remote = repo.resolve(ORIGIN + branch) ?: return null
-        return try {
-            RevWalk(repo).use { walk ->
-                walk.revFilter = org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE
-                walk.markStart(walk.parseCommit(head))
-                walk.markStart(walk.parseCommit(remote))
-                val base = walk.next() ?: return 0 to 0
-                val ahead = countBetween(repo, base, walk.parseCommit(head))
-                val behind = countBetween(repo, base, walk.parseCommit(remote))
-                ahead to behind
-            }
-        } catch (e: Throwable) {
-            null
-        }
-    }
-
-    /** Commits reachable from [tip] and not from [base]. */
-    private fun countBetween(repo: Repository, base: RevCommit, tip: RevCommit): Int =
-        RevWalk(repo).use { walk ->
-            walk.markStart(walk.parseCommit(tip))
-            walk.markUninteresting(walk.parseCommit(base))
-            walk.count()
-        }
-
-    /**
-     * Every path git ignores, as repository-relative paths.
-     *
-     * **One status call for the whole project**, because the row asks about every entry on screen and
-     * a call per row would walk the working tree once per file. The caller maps them onto the files
-     * it is drawing.
-     */
-    fun ignoredPaths(repo: Repository): List<String> = try {
-        Git(repo).use { git -> git.status().call().ignoredNotInIndex.map { it.trimEnd('/') } }
-    } catch (t: Throwable) {
-        emptyList()
-    }
 
     fun isIgnored(repo: Repository, path: String): Boolean = try {
         Git(repo).use { git ->

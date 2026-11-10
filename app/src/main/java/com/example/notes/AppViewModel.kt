@@ -1302,27 +1302,6 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    /**
-     * **Is [file] inside the app's own folder?** — the question `app:` asks, answered without a
-     * workspace.
-     *
-     * Canonical on both sides, like `Workspace.partsOf`: the folder can be reached through a project's
-     * `shared` link, and a link and its target are the same place.
-     */
-    private fun inAppFolder(file: File?): Boolean {
-        if (file == null) return false
-        val app = try {
-            accounts.sharedDir.canonicalFile
-        } catch (e: Exception) {
-            accounts.sharedDir.absoluteFile
-        }
-        val target = try {
-            file.canonicalFile
-        } catch (e: Exception) {
-            file.absoluteFile
-        }
-        return target.path == app.path || target.path.startsWith(app.path + File.separator)
-    }
 
     /**
      * **A link in a chat message.** Same three kinds, one difference that matters: **`app:` never

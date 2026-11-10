@@ -119,14 +119,7 @@ fun GitConnectionDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (problem != null) {
-                    Text(
-                        problem,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
+                ProblemLine(problem)
                 checkSaid?.let {
                     Text(
                         it,

@@ -671,19 +671,6 @@ class Agent(
     // agent's own note. The old pair said the same paragraph twice.
 
     /**
-     * A call's arguments, tolerated rather than thrown.
-     *
-     * A reply whose arguments are not JSON at all is a reply the loop still has to answer — the
-     * conversation refuses an unanswered call — so the parse failure is `{}` here and the command's
-     * own refusals do the complaining.
-     */
-    private fun argsOf(call: Call): org.json.JSONObject = try {
-        org.json.JSONObject(call.args.ifBlank { "{}" })
-    } catch (e: Exception) {
-        org.json.JSONObject()
-    }
-
-    /**
      * The turn was called off, and its calls are answered anyway.
      *
      * **A call with no result is an illegal conversation**, so every call the abandoned reply

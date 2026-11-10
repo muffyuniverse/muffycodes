@@ -1,10 +1,8 @@
 package com.example.notes
 
-import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import java.io.File
@@ -208,13 +206,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun createThenWrite(text: String): Uri? {
         val made = try {
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, NAME)
-                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            Downloads.pending(app, NAME, "text/plain", FOLDER)
         } catch (t: Throwable) {
             // **The message, not just the null.** A SecurityException here is the most likely reason
             // a phone's Downloads refuses, and "null" would have hidden it for another week.
@@ -234,17 +226,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
             }
             return null
         }
-        try {
-            app.contentResolver.update(
-                made,
-                ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                null,
-                null,
-            )
-        } catch (t: Throwable) {
-            // Written but still marked pending: other apps cannot see it yet, which is a
-            // smaller problem than a log that is not being written at all.
-        }
+        Downloads.reveal(app, made)
         return made
     }
 

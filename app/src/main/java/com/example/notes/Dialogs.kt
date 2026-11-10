@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +53,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
+
+/**
+ * **The one line that says what is wrong with what has been typed**, or nothing.
+ *
+ * Two windows had the same six lines twice — the vault's row window and the connection window — and a
+ * refusal that is drawn twice is a refusal that drifts: one gets `bodySmall` and the other
+ * `bodyMedium`, and nobody notices until somebody compares the screenshots. `problem` is `null` when
+ * the draft is fine, which is the state the confirm button is enabled in.
+ */
+@Composable
+fun ProblemLine(problem: String?) {
+    if (problem == null) return
+    Text(
+        problem,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
 
 /** Asks for one line of text. */
 @Composable

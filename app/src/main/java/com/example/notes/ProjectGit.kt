@@ -1,6 +1,5 @@
 package com.example.notes
 
-import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.Repository
 import java.io.File
 

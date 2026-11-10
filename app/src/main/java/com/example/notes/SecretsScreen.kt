@@ -3,7 +3,6 @@ package com.example.notes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -275,14 +274,7 @@ fun AddSecretDialog(
                 ) {
                     Text("Scope: " + scopeLabel(scope) + " (tap to choose)")
                 }
-                if (problem != null) {
-                    Text(
-                        problem,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
+                ProblemLine(problem)
             }
         },
         confirmButton = {

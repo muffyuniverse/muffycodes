@@ -62,7 +62,6 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import java.io.File
 
 /** What the browser asks the app to do, so the screen stays free of state. */
 class BrowserActions(

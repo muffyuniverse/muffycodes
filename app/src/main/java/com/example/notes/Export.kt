@@ -10,6 +10,65 @@ import androidx.annotation.RequiresApi
 import java.io.File
 
 /**
+ * **The one place a row is made in Downloads, and the one place it is made visible.**
+ *
+ * Two features write into Downloads — the trace log, which appends to one file, and an export, which
+ * copies one — and both have to do the same three things: insert a row, write into it, then clear
+ * `IS_PENDING`. The first and last were written twice, with the same comment about the same hazard,
+ * which is how a bug gets fixed in one of them.
+ *
+ * **`IS_PENDING` is what keeps a half-written file out of other apps' sight.** Without it a file
+ * manager can open the row between the insert and the write and find nothing there — and the row
+ * looks like a file, so the person concludes the app made an empty one.
+ *
+ * **`RELATIVE_PATH` needs Android 10**, and the guard is in each caller because each has its own
+ * sentence for an older phone. Lint cannot see through a call, hence the annotation here.
+ */
+object Downloads {
+
+    /**
+     * A row in `Downloads/[folder]/[name]`, marked pending until the bytes are in.
+     *
+     * The name is what was *asked for*; the store may store it under another (`notes.md` with a
+     * `text/plain` type becomes `notes.md.txt`), which is why [DownloadsSink] searches by prefix
+     * rather than by name. That is the store's rule, not this function's, and it is why this function
+     * returns the URI rather than a name.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun pending(context: Context, name: String, mime: String, folder: String): Uri? {
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$folder")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        return context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    }
+
+    /**
+     * Clears the pending flag, so the row becomes a file other apps can open.
+     *
+     * **A failure here is swallowed on purpose.** The bytes are already written; the row is merely
+     * still hidden from other apps. That is a smaller problem than a write that reports failure after
+     * it succeeded, and there is nothing left to do about it either way.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun reveal(context: Context, uri: Uri) {
+        try {
+            context.contentResolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                null,
+                null,
+            )
+        } catch (t: Throwable) {
+            // Written but still pending: other apps cannot see it yet. A smaller problem than losing
+            // the file, and the only one left to have.
+        }
+    }
+}
+
+/**
  * Putting a file from a project where the phone can open it.
  *
  * ## Why this is one function and not two
@@ -88,7 +147,7 @@ object Export {
         return try {
             context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
                 ?: return Result.failure(IllegalStateException("Downloads gave no stream to write to"))
-            finish(context, uri)
+            Downloads.reveal(context, uri)
             Result.success(Done(file.name, bytes.size.toLong(), FOLDER))
         } catch (e: Throwable) {
             // **A half-written row is worse than none**: it appears in Downloads and will not open.
@@ -114,30 +173,8 @@ object Export {
     // unreachable on an older phone — but a checker that only reads one function body cannot know
     // that, and the same annotation is what `DownloadsSink` already uses for the same reason.
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun insert(context: Context, file: File): Uri? {
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, file.name)
-            put(MediaStore.Downloads.MIME_TYPE, mimeOf(file.name))
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
-            put(MediaStore.Downloads.IS_PENDING, 1)
-        }
-        return context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-    }
-
-    @RequiresApi(Build.VERSION_CODES.Q)
-    private fun finish(context: Context, uri: Uri) {
-        try {
-            context.contentResolver.update(
-                uri,
-                ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                null,
-                null,
-            )
-        } catch (t: Throwable) {
-            // Written but still pending: other apps cannot see it yet. A smaller problem than losing
-            // the file, and the only one left to have.
-        }
-    }
+    private fun insert(context: Context, file: File): Uri? =
+        Downloads.pending(context, file.name, mimeOf(file.name), FOLDER)
 
     /**
      * A type from the name, because the store appends an extension for a type that disagrees.

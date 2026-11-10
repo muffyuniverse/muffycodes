@@ -2,8 +2,6 @@ package com.example.notes
 
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
