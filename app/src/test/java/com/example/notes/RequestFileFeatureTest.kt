@@ -147,7 +147,7 @@ class RequestFileFeatureTest : FeatureTest() {
         // **A person sending by hand is not a licence to spend a switch they turned off**, and the
         // refusal names the switch rather than failing at the socket.
         val (scene, _) = phone("GET https://api.example.com/user")
-        scene.settings.setHttpAllowed(false)
+        scene.settings.keepHttp(false)
 
         scene.viewModel.runRequest(scene.viewModel.textOf(scene.viewModel.editingFile!!))
         scene.await("the refusal") { scene.viewModel.message != null }

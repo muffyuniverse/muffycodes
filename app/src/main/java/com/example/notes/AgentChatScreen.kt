@@ -149,6 +149,26 @@ fun AgentChatScreen(
      */
     var opened by remember(generation) { mutableStateOf(0) }
     /**
+     * **The form picker, and the fact that it has already opened once.**
+     *
+     * `remember` keyed on the chat — not on the generation — is what makes "opens by itself when
+     * nothing is chosen" a gate rather than a nag: a person who dismisses it has dismissed it for this
+     * conversation, and the next redraw must not put it back. The operator's rule (§3.11.3): *"once,
+     * not every frame — it is a window the person can dismiss, and dismissing it leaves the chat
+     * read-only rather than opening it again on the next redraw."*
+     */
+    var pickerOpen by remember(project, viewModel.chatBranch) { mutableStateOf(false) }
+    var pickerShown by remember(project, viewModel.chatBranch) { mutableStateOf(false) }
+    val formName = viewModel.chatFormName
+    // **Opened once, when the chat is entered with nothing chosen.** `LaunchedEffect` keyed on the
+    // pair, so it runs on entry and on a change of chat — and `pickerShown` makes it a one-time act.
+    LaunchedEffect(project, viewModel.chatBranch, formName) {
+        if (formName == null && !pickerShown) {
+            pickerShown = true
+            pickerOpen = true
+        }
+    }
+    /**
      * The bubble being read fullscreen, or null.
      *
      * **A page view rather than a bigger bubble.** A long result read in the list is a tall box
@@ -385,6 +405,21 @@ fun AgentChatScreen(
                     // nothing is lost — the session log is the record of what happened — and the
                     // one thing a person needs to know afterwards is said in the sentence under
                     // the screen.
+                    // **The form this chat asks with, and the way to change it.** The operator's
+                    // place for it: *"a button in the chat, and it opens by itself when there is
+                    // nothing chosen"* — the chat is the thing that spends the token, so the chat is
+                    // where the token's shape is chosen. The branch screen's picker went with it
+                    // (§3.11.3), because a template is a property of a conversation, not of a tree.
+                    //
+                    // **A word, not an icon**, because the name *is* the answer: "deepseek-1017" says
+                    // which form is in force, and a glyph would say only that a choice exists.
+                    TextButton(onClick = { pickerOpen = true }) {
+                        Text(
+                            text = formName ?: "Choose a form",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     TextButton(
                         onClick = { viewModel.resetAgent(project, viewModel.chatBranch) },
                         enabled = !viewModel.chatWorking,
@@ -631,6 +666,20 @@ fun AgentChatScreen(
                 keyboardActions = KeyboardActions(onSend = { send() }),
             )
         }
+    }
+
+    // **The form picker, over everything while it is open.** Drawn after the Scaffold so it covers the
+    // list and the composer, and it is the window that teaches where forms and keys live (§3.11.6).
+    if (pickerOpen) {
+        FormPickerDialog(
+            forms = viewModel.chatForms(),
+            chosen = formName,
+            onDismiss = { pickerOpen = false },
+            onPick = { name ->
+                pickerOpen = false
+                viewModel.chooseForm(name)
+            },
+        )
     }
 
     // **The page view, over everything.** Not a new screen: the same pages, one screen at a time,

@@ -46,6 +46,9 @@ VOCABULARY = {
     # **Running a `.http` file** — the editor's act that sends the request on the glass. Its own name
     # because it is not a save: the text goes to a server, not to disk.
     "run request",
+    # **Picking the request form a chat runs** (§3.11.3). Its own name because it is the one act the
+    # chat's template button performs, and a log that called it "save" would not say what was saved.
+    "choose form",
     # the editor's three modes, and the diff's own two acts
     "editor view", "editor edit", "editor diff", "diff", "diff commit",
     # entering a file from the list of what is waiting to be sent

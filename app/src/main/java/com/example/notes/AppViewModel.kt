@@ -4086,6 +4086,67 @@ class AppViewModel @JvmOverloads constructor(
         readChat(follow = true)
     }
 
+    // ---- the chat's request form (N5) ---------------------------------------
+
+    /**
+     * **Which request form this chat runs**, by name, or null when it has not chosen one.
+     *
+     * Read from the pointer rather than from the resolved connection, because the pointer *is* the
+     * choice: the connection is what the choice resolves to, and a chat that inherited the account's
+     * model has not chosen anything.
+     */
+    val chatFormName: String?
+        get() {
+            val ws = workspace ?: return null
+            val project = chatProject ?: return null
+            val path = Schemas.pointer(ws.accountDir, project, chatBranch) ?: return null
+            return path.trim('/').substringAfterLast('/').substringBeforeLast('.')
+        }
+
+    /**
+     * **The forms a chat may pick from**, by name, each with the model it asks.
+     *
+     * The model id is under the name because that is what a person is choosing between: two forms
+     * that differ only in their model read as two identical rows otherwise.
+     *
+     * `ensure` first, because a fresh install has no folder and the picker would be an empty window on
+     * the first day. It fills only when the folder is absent, so a person who deleted the shipped one
+     * keeps it deleted (see [Schemas.ensure]).
+     */
+    fun chatForms(): List<Pair<String, String>> {
+        val ws = workspace ?: return emptyList()
+        Schemas.ensure(ws)
+        return Schemas.names(ws, ShapeKind.CHAT).map { name ->
+            val path = Schemas.unitPath(ShapeKind.CHAT, name)
+            val model = Schemas.read(ws, path, ShapeKind.CHAT).getOrNull()
+                ?.body?.optString("model").orEmpty()
+            name.substringBeforeLast('.') to model
+        }
+    }
+
+    /**
+     * **Points this chat at [name]** — the act the picker exists for.
+     *
+     * Writes the pointer and then re-measures, so the button's label and the runner's next turn agree
+     * the moment the window closes. A name that is not there is refused in words rather than writing a
+     * pointer to nothing: a chat pointed at a missing form would refuse every turn with a sentence
+     * about a file.
+     */
+    fun chooseForm(name: String) {
+        val ws = workspaceFor("chosen") ?: return
+        val project = chatProject ?: return
+        val path = Schemas.unitPath(ShapeKind.CHAT, name)
+        if (Schemas.read(ws, path, ShapeKind.CHAT).isFailure) {
+            message = "There is no request form called \"$name\" in ${Schemas.REQUESTS}/" +
+                "${ShapeKind.CHAT.folder}/."
+            return
+        }
+        Trace.tap("choose form", name)
+        Schemas.setPointer(ws.accountDir, project, chatBranch, path)
+        message = "This chat asks with $name."
+        refresh()
+    }
+
     fun closeChat() {
         Trace.tap("close chat", chatProject.orEmpty())
         chatProject = null

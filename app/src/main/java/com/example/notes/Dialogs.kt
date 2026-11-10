@@ -1776,6 +1776,104 @@ fun HistoryButton(onClick: () -> Unit) {
 }
 
 /**
+ * **This chat needs a request form** — the popup that opens by itself when a chat has not chosen one.
+ *
+ * The operator's shape (2026-11-09): *"he encounters a popup that asks him to select a request form and
+ * tells where templates and request forms are stored and how a key can be added (via secrets management
+ * menu in general settings menu)."* So it is not merely a picker: it is the one place a person learns
+ * the shape of the whole model layer at the moment they need it.
+ *
+ * **Three answers in one window** — what this is, where it lives, and what to do if it is not there
+ * yet — and the last one is a link-shaped sentence rather than a link, because a settings screen behind
+ * a dialog is a navigation a person cannot come back from.
+ *
+ * **A window a person can dismiss.** Dismissing leaves the chat read-only rather than opening again on
+ * the next redraw: the caller holds "has been opened once" for the session, which is the difference
+ * between a gate and a nag.
+ */
+@Composable
+fun FormPickerDialog(
+    /** The forms, by name, each with the model it asks — empty is a real state and says so. */
+    forms: List<Pair<String, String>>,
+    /** The name this chat already runs, or null. */
+    chosen: String?,
+    onDismiss: () -> Unit,
+    onPick: (String) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (chosen == null) "This chat needs a request form." else "The request form") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text(
+                    "A request form is a file that says which model to ask, how, and which secret to " +
+                        "send. Forms for chat live in ${Schemas.REQUESTS}/${ShapeKind.CHAT.folder}/.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (forms.isEmpty()) {
+                    // **The empty list is the case that needs a sentence most.** A window with no
+                    // rows and no explanation reads as a broken feature.
+                    Text(
+                        "There are no forms there yet. A form is one file — the format is explained " +
+                            "in ${Schemas.DIR}/${ShapeKind.CHAT.folder}/${Schemas.REFERENCE} — and it " +
+                            "needs a key: keys are minted or added in Settings → Secrets.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                } else {
+                    Text(
+                        "Pick one below. It needs a key, and keys are minted or added in " +
+                            "Settings → Secrets.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                for ((name, model) in forms) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(name) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                // **The one this chat already runs is marked**, so a person changing
+                                // their mind can see what they are changing from.
+                                color = if (name == chosen) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                            if (model.isNotEmpty()) {
+                                Text(
+                                    text = model,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (name == chosen) {
+                            Text("in use", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (forms.isEmpty()) "Close" else "Not now") }
+        },
+    )
+}
+
+/**
  * **Run**, for a `.http` file: a triangle, drawn rather than imported.
  *
  * `Icons.Filled.PlayArrow` is in material-icons-extended, which this app does not carry — the whole

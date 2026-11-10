@@ -146,7 +146,17 @@ object AgentWiring {
             // **Resolved per worktree, and per poll.** A branch may have a model of its own
             // (`PLAN-credentials` §2.2), and a person who changes one while the service runs expects
             // the next poll of *that* worktree to use it.
-            wired = { project, branch -> wiredFor(ws, credentials, project, branch, settings) },
+            // **The chat's own form first, then the account's chain.** A form is what a chat chooses
+            // (§3.11.3) and it is a whole request — address, key, model, body, the numbers — so a chat
+            // that has chosen one runs exactly it. A chat that has not chosen keeps inheriting, which
+            // is the state every existing conversation is in and the one the picker exists to end.
+            wired = { project, branch ->
+                if (Schemas.pointer(ws.accountDir, project, branch) != null) {
+                    Wired.ofForm(ws, credentials, project, branch)
+                } else {
+                    wiredFor(ws, credentials, project, branch, settings)
+                }
+            },
             door = door,
             notify = notify,
             changed = changed,

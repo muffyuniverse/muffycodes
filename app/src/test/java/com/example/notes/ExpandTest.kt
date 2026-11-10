@@ -33,7 +33,9 @@ class ExpandTest {
     private val seen = mutableMapOf<String, String>()
 
     /** A [Expand.Names] whose answers the test writes, so a substitution can be read on its own. */
-    private fun names() = Expand.Names { one -> seen[one.whole] }
+    private fun names() = object : Expand.Names {
+        override fun read(mention: Expand.Mention): String? = seen[mention.whole]
+    }
 
     private fun expand(text: String, host: String = "example.com") =
         Expand.of(text, host, names())
