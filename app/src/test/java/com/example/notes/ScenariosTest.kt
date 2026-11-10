@@ -1023,12 +1023,11 @@ class ScenariosTest {
         scenario(
             compose, "19-a-window-adding-a-project",
             "A window adding a project, before anything is signed in.",
-            "an address field that works on any host, and making one here.",
+            "one address field that works on any host, and a name.",
             screen = {
                 window {
                     AddProjectDialog(
                         onDismiss = {},
-                        onNewProject = {},
                         onAddUrl = { _, _ -> },
                     )
                 }
@@ -1039,8 +1038,8 @@ class ScenariosTest {
             after()
             result(
                 "An address is checked with ls-remote before anything is cloned, so it works on " +
-                    "any host that speaks git - and a project on this phone is offered beside it, " +
-                    "because a repository is no longer what makes something a project.",
+                    "any host that speaks git. Leaving it empty makes a project here that cannot " +
+                    "send anything - which its own screen says, rather than a second window saying it.",
             )
         }
     }

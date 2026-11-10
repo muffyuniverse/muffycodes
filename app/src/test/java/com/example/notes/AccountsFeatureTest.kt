@@ -159,7 +159,9 @@ class AccountsFeatureTest : FeatureTest() {
             // no such action left, which is the stronger fact. A project is made here, with the git
             // protocol, and the account's host never comes into it.
             var made: Boolean? = null
-            phone.viewModel.createProject("anything") { made = it }
+            // **Named, not trailing.** `createProject` grew an `address` parameter in the middle
+            // (2026-11-10), so a trailing lambda would bind to it and the call would not compile.
+            phone.viewModel.createProject("anything", onDone = { made = it })
             phone.await("the project to be made") { made != null }
             assertEquals("a project on this phone needs no host", true, made)
             assertTrue(
