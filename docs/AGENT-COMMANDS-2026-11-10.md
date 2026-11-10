@@ -11,11 +11,12 @@ stale — the same rule the plan tables are held to.
 
 ## 1. The set
 
-**Eighteen commands.** The list is part of every request's cache prefix, so it is kept short deliberately: a
+**Nineteen commands.** The list is part of every request's cache prefix, so it is kept short deliberately: a
 command is added only when nothing else can answer the question.
 
 | command | one line | arguments |
 |---|---|---|
+| `help` | what the other commands are, and how to use one | `of` |
 | `search` | find files by where they are, what they say, and whether it is a saved version | `scope`, `query`, `mode`, `history`, `depth`, `paths`, `word`, `count` |
 | `read` | read a file, or one of its versions | `path`, `from`, `to`, `grep`, `revision`, `multi`, `word`, `numbers` |
 | `write` | make a file or change it — **one command for both** | `path`, `grep`, `from`, `to`, `text`, `multi`, `word` |
@@ -38,8 +39,26 @@ command is added only when nothing else can answer the question.
 **Two commands have ops.** `git` is the only one with a sub-selector, and it has exactly two ops. Every other
 command is one act.
 
-**No command names a host.** Not one of the eighteen mentions GitHub, GitLab, or any provider. That is the
+**No command names a host.** Not one of them mentions GitHub, GitLab, or any provider. That is the
 portability rule enforced where it is visible — in the list a model reads.
+
+### `help` — the one command about the others
+
+`{"tool":"help"}` answers every command with one short line; `{"tool":"help","of":"search"}` answers that
+one in full — its keys, what each means, and its shape.
+
+**It exists so that refusals can stop explaining themselves.** Until 2026-11-10 a wrong key got a
+hand-written sentence about that key: `lines` was told it had been renamed, `mode` was told `semantic` was
+gone, and each of those sentences was a second description of a command, able to drift from the spec that
+described the same thing. Now every shape mistake gets the same answer — *this command does not take that;
+it takes these; ask `help <command>`* — and the explanation is **the same text the model was already
+sent**, because both are built from `specs()`.
+
+**The line it draws**, from the operator: *"it is used when the shape of arguments is wrong, not when they
+themselves error out."* So `help` answers unknown keys, removed keys and impossible combinations. It does
+**not** answer a wrong value — a range past the end of a file, a revision that does not exist, a regex that
+will not compile. The test is **could `help` have prevented it?** A refusal that pointed at `help` for a
+missing line 400 would send a model to a page that cannot help it.
 
 ---
 

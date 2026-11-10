@@ -2160,14 +2160,64 @@ class AgentTest {
         assertFalse("the folder is gone", folder.exists())
     }
 
+    // ---- help ----------------------------------------------------------------
+
+    @Test
+    fun `help lists every command it could explain`() {
+        // **The list and the pages come from one table**, so a command that can be explained is
+        // exactly a command that is offered. If these two could disagree, the failure would be a
+        // model told to ask about a command that does not exist — the worst kind of answer, because
+        // it looks authoritative.
+        val said = AgentTools(ws, "shopping", git, log).run(Call("h", "help", "{}"))
+        assertTrue("answered: $said", said.startsWith("0\n"))
+        for (spec in specs) {
+            assertTrue(
+                "the list names `${spec.name}`: $said",
+                said.contains("`${spec.name}`"),
+            )
+        }
+    }
+
+    @Test
+    fun `help with a name explains that one, and its keys are the keys it takes`() {
+        // **The page cannot describe a command that no longer exists**, because it is assembled from
+        // the same spec the model was sent. What this asserts is the part that could still drift:
+        // that the keys on the page are the keys the runner will accept.
+        val said = AgentTools(ws, "shopping", git, log).run(Call("h", "help", """{"of":"read"}"""))
+        assertTrue("answered: $said", said.startsWith("0\n"))
+        for (key in AgentTools.KEYS.getValue("read")) {
+            assertTrue("the page names `$key`: $said", said.contains("`$key`"))
+        }
+        assertTrue(
+            "and it is read's own description, not another command's: $said",
+            said.contains("Read a text file"),
+        )
+    }
+
+    @Test
+    fun `help with a name that is not a command says so, and points at the list`() {
+        // **A refusal that names the way out.** "There is no command called x" alone would leave a
+        // model guessing at the spelling; the list is one call away and the sentence says which.
+        val said = AgentTools(ws, "shopping", git, log).run(Call("h", "help", """{"of":"create"}"""))
+        assertTrue("refused: $said", said.startsWith("1\n"))
+        assertTrue("naming it: $said", said.contains("`create`"))
+        assertTrue("and pointing at the list: $said", said.contains("no argument"))
+    }
+
     // ---- a key the command does not take --------------------------------------
 
     @Test
-    fun `a key a command does not take is refused, and the refusal teaches the command`() {
+    fun `a key a command does not take is refused, and the refusal points at help`() {
         // **`lines` is the one that matters.** It was a real argument in a shipped description, so a
         // model will keep sending it — and it used to be ignored, which turned "forty lines from
-        // here" into "everything from here". A refusal that names the key, the keys that work and
-        // the command's own example is the only answer that repairs the model's idea of it.
+        // here" into "everything from here".
+        //
+        // **The sentence is now the same for every command** (operator, 2026-11-10): the key that
+        // was wrong, the keys that work, and a pointer to `help`. The bespoke "it was renamed"
+        // explanation is gone on purpose — it was one of a hundred such sentences, each able to go
+        // stale against the spec that describes the same command. What must not go is the key list:
+        // sending a model to `help` to learn that `read` takes `from` would cost a request for one
+        // word.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), (1..40).joinToString("\n") { "line $it" })
 
         val body = tool("read", """{"path":"milk.txt","from":10,"lines":5}""")
@@ -2175,11 +2225,7 @@ class AgentTest {
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("naming the key: $body", body.contains("`lines`"))
         assertTrue("and the ones that work: $body", body.contains("`from`"))
-        assertTrue("and that it was renamed: $body", body.contains("not a key any more"))
-        assertTrue(
-            "and its own example, so the answer shows the shape: $body",
-            body.contains("relative to the project"),
-        )
+        assertTrue("and pointing at help: $body", body.contains("`help`"))
         assertFalse("nothing of the file came through", body.contains("line 40"))
     }
 

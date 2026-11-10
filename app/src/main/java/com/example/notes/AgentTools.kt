@@ -436,6 +436,15 @@ class AgentTools(
         const val RESULTS_DIR = AgentLog.DIR
 
         /**
+         * How much of a command's description fits on one line of the `help` list.
+         *
+         * **A number rather than a shape**, because the alternative is a per-command short name —
+         * a second description of every command, which is exactly the duplication `help` exists to
+         * remove.
+         */
+        const val SUMMARY_CHARS = 70
+
+        /**
          * The commands that can leave the project folder different from how they found it.
          *
          * **`read`-only tools are absent on purpose**, and so are the ones that only reach the
@@ -570,6 +579,10 @@ class AgentTools(
             "git" to setOf("op", "path", "from", "to"),
             "pull" to setOf(),
             "push" to setOf("message"),
+            // **`help` is the one command that describes the others**, so it is also the one
+            // argument a wrong call is pointed at. It takes `of` and nothing else: the name of the
+            // command to explain, or absent for the list.
+            "help" to setOf("of"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -586,18 +599,28 @@ class AgentTools(
          */
         fun refuseKeys(tool: String, unknown: List<String>): String = "1\n" + keysSaid(tool, unknown)
 
-        /** [refuseKeys] without the status line, for a caller that is a `Result` rather than a result. */
+        /**
+         * The answer a wrong key gets: **what it took, and where to read the rest.**
+         *
+         * **The sentence is deliberately the same for every command**, which is the operator's
+         * decision (2026-11-10): *"why targeted refusals? just if a nonexistent argument is called
+         * or value is wrong we respond with error and ask to use help command."*
+         *
+         * A bespoke refusal has to be written per mistake and is read by a model that is already
+         * wrong; `lines is not a key any more` was true and helpful, and it was also one of a
+         * hundred such sentences, each of which could go stale against the spec. `help <command>`
+         * is one sentence that is always right, and the explanation it points at is the **same
+         * text the model was already sent** — so the two cannot disagree.
+         *
+         * **What stays here is the one fact a model cannot look up in a hurry:** which keys work.
+         * Sending it to `help` to learn that `read` takes `from` would cost a whole request for one
+         * word, and the key list is already in `KEYS`.
+         */
         fun keysSaid(tool: String, unknown: List<String>): String {
             val took = KEYS[tool] ?: return "There is no tool called $tool"
             val keys = if (took.isEmpty()) "no arguments" else "only " + took.sorted().joinToString(", ") { "`$it`" }
-            val shape = specs().firstOrNull { it.name == tool }?.parameters?.toString() ?: "{}"
-            val renamed = if ("lines" in unknown) {
-                " `lines` is not a key any more: `from` and `to` are line numbers, both included."
-            } else {
-                ""
-            }
             return "`$tool` does not take " + unknown.joinToString(", ") { "`$it`" } +
-                ". It takes $keys.$renamed\nIts shape: $shape"
+                ". It takes $keys. Call `help` with `{\"of\":\"$tool\"}` for how to use it."
         }
 
         /**
@@ -611,6 +634,19 @@ class AgentTools(
         fun specs(
             httpAllowed: Boolean = true,
         ): List<ToolSpec> = listOf(
+            spec(
+                "help",
+                "**What the other commands are, and how to use one.** With no argument it answers " +
+                    "every command's name and its first sentence — which is what you want when you " +
+                    "know the act but not the command. With `of` it answers that one command in " +
+                    "full: every key it takes, what each one means, and its shape. " +
+                    "**Ask it whenever a call was refused for its arguments**, and whenever you are " +
+                    "about to use a command you have not used in this conversation: the answer is " +
+                    "the same description the tool list carries, so it cannot disagree with what " +
+                    "actually runs. It costs one call and saves a wrong one.",
+                "{\"of\":\"the command to explain, or leave it out for the list\"}",
+                required = emptyList(),
+            ),
             spec(
                 "search",
                 "**One question, six filters.** Find files by where they are (`scope`), what they " +
@@ -1099,6 +1135,7 @@ class AgentTools(
             "git" -> gitTool(args, deadline)
             "pull" -> pull()
             "push" -> push(args)
+            "help" -> help(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
         if (call.tool in CHANGES_DISK) onDiskChanged()
@@ -4012,6 +4049,81 @@ class AgentTools(
                 "If the remote refused because it has commits this phone does not, that is a conflict " +
                 "and not an error: call `pull`, resolve anything it names, then `push` again.",
         )
+    }
+
+    // ---- help ---------------------------------------------------------------
+
+    /**
+     * **What the other commands are, and how to use one.**
+     *
+     * The operator's decision (2026-11-10): *"we need help command that shows a list of available
+     * commands and can take a command name as an optional arg to explain how to use it"* — and it
+     * exists because the per-mistake refusals it replaced could each go stale against the spec.
+     *
+     * **Both answers are built from [specs], which is what the model was already sent.** A help page
+     * assembled from a second table would be a second description of the same command, and the two
+     * would drift: the spec is what the endpoint is told, so it is the only thing that can be
+     * trusted to say what will actually run. That also makes this the cheapest possible command —
+     * it reads nothing, touches nothing, and cannot fail except by naming a command that is not
+     * there.
+     */
+    private fun help(args: JSONObject): String {
+        val of = args.optString("of").trim()
+        val all = AgentTools.specs()
+        if (of.isEmpty()) {
+            // **One short line per command**, because the list is for finding a name, not for
+            // reading. The summary is the description's first sentence, **capped** — a few
+            // descriptions are a single long sentence with an em-dash in the middle, and a 140-column
+            // line in a list is not a list line. The cap cuts at a word boundary and says so with an
+            // ellipsis, so a truncated line is visibly truncated rather than reading as the whole
+            // thing; the whole thing is one call away as `help {of}`.
+            val lines = all.joinToString("\n") { spec ->
+                "`${spec.name}` — " + summaryOf(spec.description)
+            }
+            return success(
+                "${all.size} commands. Ask `{\"of\":\"<command>\"}` for how to use one.\n\n" +
+                    lines,
+            )
+        }
+        val spec = all.firstOrNull { it.name == of }
+            ?: return refusal(
+                "There is no command called `$of`. Ask `help` with no argument for the list.",
+            )
+        val keys = AgentTools.KEYS[of].orEmpty()
+        val keyList = if (keys.isEmpty()) {
+            "**No arguments.**"
+        } else {
+            "**Takes:** " + keys.sorted().joinToString(", ") { "`$it`" } + "."
+        }
+        val shape = spec.parameters.optJSONObject("properties")?.let { properties ->
+            properties.keys().asSequence().sorted().joinToString("\n") { key ->
+                "  `$key` — ${properties.optJSONObject(key)?.optString("description").orEmpty()}"
+            }
+        }.orEmpty()
+        return success(
+            spec.description.trim() + "\n\n" + keyList +
+                (if (shape.isEmpty()) "" else "\n\n**Shape:**\n$shape"),
+        )
+    }
+
+    /**
+     * The first sentence of a command's description, cut to fit a list line.
+     *
+     * **A summary assembled from prose is a heuristic, so it is written to fail visibly.** The first
+     * sentence is where every description in this file states its purpose, and [SUMMARY_CHARS] is
+     * enough for the ones that do it briefly. A description that states its purpose in one long
+     * sentence comes back cut, with an ellipsis — which a reader can see, unlike a summary that
+     * quietly became a fragment.
+     */
+    private fun summaryOf(description: String): String {
+        val plain = description.replace("**", "").trim()
+        val stop = listOf(plain.indexOf(". "), plain.indexOf(".\n"))
+            .filter { it >= 0 }
+            .minOrNull() ?: plain.length
+        val first = plain.substring(0, stop).trim().trimEnd('.')
+        if (first.length <= SUMMARY_CHARS) return first
+        val cut = first.lastIndexOf(' ', SUMMARY_CHARS)
+        return (if (cut > 0) first.substring(0, cut) else first.substring(0, SUMMARY_CHARS)) + "…"
     }
 
     // ---- the promises -------------------------------------------------------
