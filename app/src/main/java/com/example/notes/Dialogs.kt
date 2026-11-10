@@ -1776,6 +1776,39 @@ fun HistoryButton(onClick: () -> Unit) {
 }
 
 /**
+ * **Run**, for a `.http` file: a triangle, drawn rather than imported.
+ *
+ * `Icons.Filled.PlayArrow` is in material-icons-extended, which this app does not carry — the whole
+ * set ships in the APK, and one glyph is not worth that. A triangle pointing right is the same drawing
+ * at every size and answers to the theme like any other icon.
+ *
+ * **A triangle rather than a word**, because it sits beside History and the report glyph and a word
+ * there would push the file's own name out of the title — the same reason History moved up here.
+ */
+@Composable
+fun RunRequestButton(onClick: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    IconButton(onClick = onClick) {
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                // On the drawing, because that is what a screen reader announces for the button.
+                .semantics { contentDescription = "Send this request" },
+        ) {
+            val w = size.width
+            val h = size.height
+            val path = Path().apply {
+                moveTo(w * 0.28f, h * 0.16f)
+                lineTo(w * 0.84f, h * 0.50f)
+                lineTo(w * 0.28f, h * 0.84f)
+                close()
+            }
+            drawPath(path, ink)
+        }
+    }
+}
+
+/**
  * The agent's door into a project: a speech bubble, drawn rather than imported.
  *
  * `Icons.Filled.Chat` is in material-icons-extended, which this app does not carry — the whole set

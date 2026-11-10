@@ -2896,7 +2896,16 @@ class AgentTools(
         val parsed = HttpRequest.parse(text).getOrElse { return refusal(it.message.orEmpty()) }
         Addresses.problem(parsed.url, privateAllowed())?.let { return refusal(it) }
         val host = Secrets.hostOf(parsed.url)
-        val names = Expand.names(projectDir, host, credentials, project, branch)
+        val names = Expand.names(projectDir, host, credentials, project, branch) { one ->
+            // **The vault's own sentence**, which names where the value really is and what the store
+            // holds — a default that says only "there is no such secret" leaves a person to work out
+            // which of three things went wrong.
+            if (one.kind == Expand.Mention.Kind.SECRET && credentials != null) {
+                secretRefusal(credentials, one.name, host)
+            } else {
+                null
+            }
+        }
         val request = parsed.expand(host, names).getOrElse { return refusal(it.message.orEmpty()) }
         deadline.check("http")
 

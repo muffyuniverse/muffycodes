@@ -43,6 +43,9 @@ VOCABULARY = {
     "open file", "open folder", "close editor", "close history", "close changes", "settings",
     # editing
     "save", "history", "restore version",
+    # **Running a `.http` file** — the editor's act that sends the request on the glass. Its own name
+    # because it is not a save: the text goes to a server, not to disk.
+    "run request",
     # the editor's three modes, and the diff's own two acts
     "editor view", "editor edit", "editor diff", "diff", "diff commit",
     # entering a file from the list of what is waiting to be sent

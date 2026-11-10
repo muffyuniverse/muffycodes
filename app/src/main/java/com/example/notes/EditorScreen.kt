@@ -141,6 +141,15 @@ fun EditorScreen(
     file: File,
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
+    /**
+     * **Sends the request on the glass**, for a `.http` file.
+     *
+     * A parameter rather than the screen reaching into the view model, for the same reason every other
+     * act here is one: the screen says what was pressed and the app decides what that means. The
+     * default does nothing, so every caller that is not the app — a screenshot test, a preview — needs
+     * no change.
+     */
+    onRunRequest: () -> Unit = {},
     onReport: () -> Unit = {},
 ) {
     /**
@@ -491,6 +500,20 @@ fun EditorScreen(
                     //
                     // Everything else in the project keeps it, including files the person has not
                     // saved yet.
+                    // **A `.http` file gets a Run**, because that is what it is for: a request kept
+                    // in the project, sent with the vault's values filled in and filed in
+                    // `agent/http/` beside the agent's own answers. It is drawn only for that suffix
+                    // — a Run on a note would be a button that does nothing, and the operator's rule
+                    // is that a control which cannot work is not shown.
+                    if (HttpRequest.looksLikeRequest(file) && !readOnly) {
+                        RunRequestButton {
+                            focus.clearFocus()
+                            // **The text on the glass, not the file on disk.** A person who edited a
+                            // header and pressed Run means the header they can see; saving first
+                            // would be two presses for one intention, and the second is forgettable.
+                            viewModel.runRequest(text)
+                        }
+                    }
                     if (!readOnly) {
                         HistoryButton {
                             // The name is committed first: a version list is a list of this

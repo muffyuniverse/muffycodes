@@ -3190,6 +3190,100 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * **Runs a `.http` file as a request.**
+     *
+     * The agent reaches the same document through `http`, and this is the person's door to it: a file
+     * they wrote, kept in the project, sent with the same expansion and filed in the same
+     * `agent/http/` — so "what did this project send" is one folder rather than two.
+     *
+     * **The text is the one on the glass, not the one on disk.** A person who edited a header and
+     * pressed Run means the header they can see; saving first and then sending is two presses for one
+     * intention, and the second one is easy to forget.
+     *
+     * **Everything the vault does still applies.** The host is read from the document's own address, so
+     * a secret is supplied only for the host it was stored for — which is why this cannot be a shortcut
+     * around `Expand`.
+     */
+    fun runRequest(text: String) {
+        val ws = workspaceFor("sent") ?: return
+        val file = editingFile ?: return
+        val project = ws.projectOf(file) ?: return
+        val tap = Trace.tap("run request", file.name)
+        // **The document is read and expanded on the worker**, because expansion reads files and the
+        // vault and neither belongs on the thread drawing the screen.
+        onWorker {
+            val parsed = HttpRequest.parse(text).getOrElse {
+                val said = it.message.orEmpty()
+                Trace.failed(tap, said, "run request")
+                main.post { message = said }
+                return@onWorker
+            }
+            // **The network switch is the same one the agent obeys.** A person sending a request by
+            // hand is not a licence to spend a switch they turned off — and the refusal names the
+            // switch rather than failing at the socket.
+            if (!settings.httpAllowed) {
+                val said = "Reaching the network is switched off in this account's settings, so " +
+                    "nothing was sent."
+                Trace.failed(tap, said, "run request")
+                main.post { message = said }
+                return@onWorker
+            }
+            Addresses.problem(parsed.url, settings.browsePrivate)?.let {
+                Trace.failed(tap, it, "run request")
+                main.post { message = it }
+                return@onWorker
+            }
+            val host = Secrets.hostOf(parsed.url)
+            val names = Expand.names(ws.projectDir(project), host, credentials, project, ws.branchOf(file)) { one ->
+                if (one.kind == Expand.Mention.Kind.SECRET) secretSaid(one.name, host) else null
+            }
+            val request = parsed.expand(host, names).getOrElse {
+                val said = it.message.orEmpty()
+                Trace.failed(tap, said, "run request")
+                main.post { message = said }
+                return@onWorker
+            }
+            val fetcher = Fetcher.http(privateAllowed = { settings.browsePrivate })
+            HttpRun.send(request, ws.projectDir(project), fetcher, settings.fetchBytes)
+                .fold(
+                    onSuccess = { outcome ->
+                        Trace.answered(tap, "${request.method} ${request.url} → ${outcome.status}")
+                        main.post {
+                            refresh()
+                            message = outcome.said
+                        }
+                    },
+                    onFailure = { failure ->
+                        val said = failure.message ?: "The request could not be sent"
+                        Trace.failed(tap, said, "run request")
+                        main.post { message = said }
+                    },
+                )
+        }
+    }
+
+    /**
+     * Why a `{{secret:…}}` in a request answered nothing, in the vault's own words.
+     *
+     * **The same sentence the agent gets**, because a person running a request and an agent sending
+     * one are asking the same question of the same store — and a person is the one who can act on
+     * "it is stored for another host".
+     */
+    private fun secretSaid(name: String, host: String): String {
+        val rows = credentials.secretRows().filter { it.name == name }
+        if (rows.isNotEmpty()) {
+            val where = rows.joinToString("; ") { row ->
+                row.host.ifEmpty { "this phone only" } + " (" + scopeLabel(row.scope) + ")"
+            }
+            return "The secret \"$name\" is not for $host. It is stored for $where, and the app " +
+                "will not send it anywhere else."
+        }
+        return "There is no secret called \"$name\" on this phone, in this project, or for every " +
+            "project. The names it knows are: " +
+            credentials.secretNames().joinToString(", ") { "\"$it\"" }.ifEmpty { "none" } + "."
+    }
+
+    /**
      * Saves a picture that was drawn on: the bytes go to the file, and the file is committed.
      *
      * **Its own function rather than an overload of [saveEditor], and the reason is the guard at the

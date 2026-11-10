@@ -53,9 +53,22 @@ object Expand {
      * other. Answering `null` means "not found", and the sentence is the expander's to write because
      * it is the one that knows the name it was given.
      */
-    fun interface Names {
+    interface Names {
         /** The text [mention] stands for, or null when it names nothing. */
         fun read(mention: Mention): String?
+
+        /**
+         * **Why [mention] answers nothing**, when the caller can say it better than a default.
+         *
+         * The default sentence is the right shape but a poor answer: "there is no secret called X for
+         * this host" leaves a person to work out whether they spelled it wrong, whether it is stored
+         * for another host, or whether the thing they want is one of the app's own two connections. A
+         * caller that holds the vault can say all three, and it is the caller — not this object —
+         * that knows what the vault holds.
+         *
+         * Null means "say the default", so a resolver built in a test needs only [read].
+         */
+        fun why(mention: Mention): String? = null
     }
 
     /**
@@ -177,7 +190,7 @@ object Expand {
             val value = names.read(one)
                 ?: return Result.failure(
                     IllegalArgumentException(
-                        if (one.kind == Mention.Kind.FILE) {
+                        names.why(one) ?: if (one.kind == Mention.Kind.FILE) {
                             "There is no file called \"${one.name}\" in this project, so " +
                                 "${one.whole} cannot be expanded."
                         } else {
@@ -225,8 +238,10 @@ object Expand {
         credentials: Credentials?,
         project: String?,
         branch: String?,
-    ): Names = Names { one ->
-        when (one.kind) {
+        /** A better sentence than the default when a name answers nothing. See [Names.why]. */
+        explain: ((Mention) -> String?)? = null,
+    ): Names = object : Names {
+        override fun read(one: Mention): String? = when (one.kind) {
             Mention.Kind.FILE -> readInside(root, one.name)
             // **A person's own secret first, then the two the app itself uses.** `git` and `llm` name
             // the account's connection rows, and they are answered only when the row carries the
@@ -236,6 +251,8 @@ object Expand {
                 ?: credentials?.spendable(one.name, host, project, branch)
             Mention.Kind.NONE -> null
         }
+
+        override fun why(one: Mention): String? = explain?.invoke(one)
     }
 
     /**
