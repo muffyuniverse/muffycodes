@@ -49,10 +49,20 @@ narrower than it is.
 `lines` and the rest go — they are replaced by the pointer, and their content moves into the spec
 where it belongs.
 
-**Not deleted: refusals that are about a *value*, not a key.** "That range is past the end of the
-file", "this project has no repository yet", "the page could not be read" are facts about the world,
-and `help` cannot answer them. The rule is narrow: **a refusal about the shape of a call points at
-`help`; a refusal about the state of the world says what happened.**
+**Confirmed by the operator:** *"it is used when the shape of arguments is wrong, not when they
+themselves error out."*
+
+So the line is exact:
+
+| the refusal is about | the answer |
+|---|---|
+| **the shape of the call** — an unknown key, a key that is gone, a key that is not allowed to be present without another, a mode that no longer exists | **`ask help <command>`** |
+| **a value that is wrong** — a range past the end of the file, a path that escapes the project, a revision that does not exist, a regex that will not compile | **what happened**, in its own words |
+| **the state of the world** — no repository yet, the page could not be read, the time ran out | **what happened**, in its own words |
+
+The test for which side a refusal is on: **could `help` have prevented it?** `help` describes keys and
+their meanings, so it prevents shape mistakes. It cannot know that line 400 does not exist, and a
+refusal that said "ask `help read`" about that would send the model to a page that cannot help it.
 
 ---
 
@@ -149,25 +159,60 @@ the next session reads.
 
 ---
 
-## 5. Brace expansion for paths — `{a,b}` and ranges
+## 5. `Args` — one expander for every argument value
 
-**What is there now:** nothing. `pattern()` turns a string into a `Regex`; paths are literal.
+**The operator's ruling, and it is the biggest item of the night:** *"polymorphic args with a brace
+expansion is what I want to be done — because making it a general capability of expanding arg values
+is not much more difficult than handling it individually but it gives a general uniform and useful
+feature."*
 
-**The shape:** `write {"path":"notes/{milk,bread}.txt"}` writes two files;
-`search {"path":"v{1..3}/"}` searches three folders. Bash semantics: comma lists, numeric ranges
-`{1..9}`, and **nested braces**.
+**What is there now:** nothing general. `write`'s `text` alone may be a tool call
+(`AgentTools.kt:2521`), `http`'s `request` and `mcp`'s `args` go through `Expand.kt` for
+`{{file:…}}`/`{{secret:…}}`, and every other value is a literal.
 
-**Where it belongs:** one function, `Braces.expand(text): List<String>`, called by **the path
-resolver** — so every command gets it from one place rather than each tool implementing it. That is
-the same rule `Expand.kt` follows for `{{file:…}}`, and the two must not be confused: **braces are
-path syntax, `{{}}` is template syntax**, and a path holding both is expanded braces-first.
+**The capability, in two halves that compose:**
 
-**Refusals that matter:** a brace group that expands to more than a cap (say 1000) is refused rather
-than run; an unbalanced brace is refused rather than treated literally; and **a command that takes
-one path must refuse a path that expands to many** rather than silently acting on the first.
+**A. A value may be a source rather than a literal.** One JSON object with exactly one key:
 
-**Work:** `Braces.kt` + tests, then wire into `resolveFile` and the search walk. This is the largest
-single piece of new code in the night.
+| value | means |
+|---|---|
+| `"milk.txt"` | itself |
+| `{"row": 17}` | that session row's body — the answer, not the call |
+| `{"file": "notes.md"}` | that file's contents |
+| `{"tool": "read", "args": {…}}` | that call's result, run and not shown to the conversation |
+
+The `{"tool":…}` arm already exists for `write`'s `text`; this makes it the general form and moves it
+into one place.
+
+**B. Braces multiply a path.** `notes/{milk,bread}.txt` is two paths; `v{1..3}/` is three folders;
+nested braces work; bash semantics.
+
+**Why they are one feature:** both answer "this argument is not one literal", and both have to be
+resolved **before** the command sees it — so the resolution belongs in one place, not in each tool.
+Braces produce *many* values; sources produce *one text*. A value that is both
+(`{"file":"notes/{a,b}.md"}`) expands the braces first, then reads each.
+
+**Where it lives:** `Args.kt`, called once from `run()` after `unknownIn()` and before dispatch, so
+**every command gets it and none can forget it**. The output is a `JSONObject` whose values are
+already text, plus a list of expanded paths for the keys that take a path.
+
+**The rules that keep it safe:**
+
+- **A row that is gone is refused, never empty.** `forget` and `trimSession` delete rows; a `{"row":7}`
+  naming a deleted row must say so and name the range that survives.
+- **A source is resolved at call time**, so the text is copied before the command runs — a later trim
+  cannot empty a write that was already decided.
+- **A command that takes one path refuses an expansion to many**, and says how many it got. Acting on
+  the first would be a silent partial act.
+- **A cap** on expansions (say 1000) and on total resolved size, refused rather than run.
+- **No recursion through `{{}}`**: `{{secret:…}}` stays data (the existing rule), and a row's body is
+  text, never a template.
+- **`path`-shaped keys only for braces.** Expanding braces inside `text` would turn a document with
+  `{a,b}` in it into a different document.
+
+**Work:** `Args.kt` + tests, then remove `write`'s private tool-call branch and the per-tool
+special-casing. This is the largest single piece of new code in the night and it touches every
+command, so it lands **on its own**, with the whole suite green, before anything else is built on it.
 
 ---
 
@@ -234,8 +279,9 @@ That collapses the shape count rather than growing it:
 at (arithmetic over line numbers). Both stay: `grep` finds many, `original` finds one and **refuses
 when it matches zero or more than one** — which is the safety `grep` deliberately does not have.
 
-**Still open, and I am not building it:** "any argument may be a row id / a path / a call". That makes
-every key polymorphic and changes what the schema can say and what `unknownIn()` can check.
+**And the polymorphic half is now item 5** — the operator ruled it in: one expander for every
+argument value, so `{"path":{"file":"x.txt"}}` and `{"text":{"row":17}}` are the same mechanism rather
+than two special cases.
 
 ---
 
@@ -256,7 +302,6 @@ and the request rather than the screen.
 | | why |
 |---|---|
 | **`ssh` (P4)** | still blocked on the passphrase question. Not guessable. |
-| **Polymorphic arguments on every key** | changes the schema's whole meaning; needs a ruling. |
 | **Deleting `mode`'s refusal sentences** | a model repeating an old call must still be told what changed. |
 | **Anything that rewrites `main`** | 887 commits behind and cannot build a signed release. |
 
@@ -273,8 +318,9 @@ and the request rather than the screen.
 4. **`git log`, `diff` split, `tag`→`push`, `query` folder, `browse` dump** — four small, independent
    changes, each with its own commit and its own doc update.
 5. **`restore` whole-tree** — needs the uncommitted-work refusal first.
-6. **Brace expansion** — the biggest new code; goes after the small ones so the branch is never far
-   from green.
+6. **`Args` — the expander** (sources + braces). **The largest item, and it lands alone.** It touches
+   every command through `run()`, so it goes after the small ones (the branch is never far from
+   green) and before `write`, because `write` is then a consumer rather than a special case.
 7. **`write {original}`** — last, because it touches the command every other one depends on.
 8. **Chat-mechanics tests** — with whatever time is left, because they protect everything above.
 
@@ -289,6 +335,8 @@ and nothing else starts.
 |---|---|
 | pathless `restore` and uncommitted work | **`keep` flag; the stage is discarded by default.** The refusal over a working tree with no version stays. |
 | `write`'s `original` | **expands as `grep` does** — the same selector matched literally, not a new shape |
+| polymorphic arguments | **in scope**: one general expander for every argument value, not per-tool handling |
+| `help`'s trigger | **the shape of the arguments is wrong**, not a value that errors out |
 | `search` renames and aliases | **no targeted refusals at all**: a wrong key gets "ask `help <command>`" |
 | `help` | **a command**, listing every command, taking an optional name to explain one |
 
