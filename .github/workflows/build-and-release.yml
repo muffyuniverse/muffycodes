@@ -59,6 +59,9 @@ on:
         required: false
         type: boolean
         default: false
+      # **A dispatch still publishes if it names a version**, so a debug run from `development`
+      # should leave `version_name` empty unless publishing is what is wanted. Said here rather than
+      # discovered: the two switches are independent, and ticking one does not turn the other off.
 
 # A second push makes the first run pointless, so the first one is stopped
 # immediately, on a branch and on main alike: a run that nobody will read is the
@@ -517,10 +520,16 @@ jobs:
       # anywhere and the runner's key never has to be known in advance — the connection string is
       # printed in the job's summary and in the Checks tab.
       #
-      # **`limit-access-to-actor` is not optional here.** Without it anyone holding the session id
-      # gets a shell as the runner's user, and a session id is printed in a log that is public on a
-      # public repository. With it, only the public SSH keys on the GitHub account that dispatched
-      # this run are authorised — so the door opens for exactly one person.
+      # **An allowlist is not optional here.** Without one anyone holding the session id gets a shell
+      # as the runner's user, and a session id is printed in a log that is public on a public
+      # repository.
+      #
+      # **`limit-access-to-users`, not `limit-access-to-actor`.** The actor is whoever *dispatched*
+      # the run, and the person who reads the failure is not always the account that owns the token
+      # that pushed — this repository is pushed by `muffyuniverse` while the human's SSH key lives on
+      # `Zhukov-Alexander`. `limit-access-to-actor` would have authorised the token's account, whose
+      # keys nobody holds, and refused the one person the door is for. Naming the person instead of
+      # the actor is the version that works regardless of who pressed the button.
       #
       # **`full-access` is what makes it useful**: `allow-exec` lets `ssh SESSION CMD` run, and
       # `allow-forwarding: loopback` lets a debugger reach a port on the runner. Neither needs an
@@ -533,7 +542,10 @@ jobs:
         if: failure() && inputs.ssh_debug
         uses: owenthereal/action-upterm@6c2d60e09009f59cb4c45c88767c78701f14d121 # v2.8.1
         with:
-          limit-access-to-actor: true
+          # **Both accounts, because either may be the one with the key on it.** A name that has no
+          # SSH keys registered is skipped by the action rather than failing the step, so listing the
+          # owner as well costs nothing and covers a run dispatched from either.
+          limit-access-to-users: muffyuniverse,Zhukov-Alexander
           full-access: true
           # **Ten minutes, not the job's twenty.** The session holds the runner until it ends, and
           # a job that is waiting for a person is a job that has stopped reporting.

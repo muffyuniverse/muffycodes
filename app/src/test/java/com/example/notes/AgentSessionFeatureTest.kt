@@ -778,6 +778,8 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.chooseForm("tight")
         scene.viewModel.startAgent("groceries")
 
+        // How many lines the ring already holds, so the trace assertion below is about this turn.
+        val before = Trace.report().lines.size
         scene.viewModel.sendChat("do it")
         scene.await("the turn") { door.asked.isNotEmpty() }
 
@@ -785,9 +787,12 @@ class AgentSessionFeatureTest : FeatureTest() {
             "a trigger of one token is over any context: ${door.asked.first().system.takeLast(160)}",
             door.asked.first().system.contains("Clear up your context"),
         )
+        // **Only the lines this turn wrote.** `Trace` is one ring for the whole process, and it is
+        // not cleared between tests, so `lines.any` here would pass on a previous test's note and
+        // mean nothing. The count before the turn is what makes this a measurement.
         assertTrue(
             "the request says so on the trace",
-            Trace.report().lines.any { it.contains("agent-clear-up") },
+            Trace.report().lines.take(before).any { it.contains("agent-clear-up") },
         )
     }
 
@@ -802,6 +807,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
 
+        val before = Trace.report().lines.size
         scene.viewModel.sendChat("do it")
         scene.await("the turn") { door.asked.isNotEmpty() }
 
@@ -810,8 +816,8 @@ class AgentSessionFeatureTest : FeatureTest() {
             door.asked.first().system.contains("Clear up your context"),
         )
         assertFalse(
-            "and nothing on the trace",
-            Trace.report().lines.any { it.contains("agent-clear-up") },
+            "and nothing on the trace from this turn",
+            Trace.report().lines.take(before).any { it.contains("agent-clear-up") },
         )
     }
 
