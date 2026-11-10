@@ -141,7 +141,7 @@ VOCABULARY = {
     "reorder provider",
     # the agent's model: the three lists, the two ways to change the list of models, and the
     # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
-    "reset model config", "set model key", "save key",
+    "set model key", "save key",
     # **The vault.** One name for opening it, because the screen is one place: adding a secret and
     # removing one are edits inside it, and a log that called each of them "secrets" could not tell
     # a person who looked from a person who changed something.

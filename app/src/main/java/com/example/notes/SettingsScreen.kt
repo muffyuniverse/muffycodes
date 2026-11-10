@@ -240,15 +240,14 @@ fun SettingsScreen(
             // somebody who can see the block, and the two heavier rules above and below already say
             // where it begins and ends. The word is the label; the rules are the extent.
 
-            // **First, because nothing below works without it.** The key was at the bottom of the
-            // model rows, so the screen asked a person to choose a model and a provider before
-            // telling them the list they were choosing from could not be read at all.
-            KeyRow(viewModel = viewModel, onSetKey = onSetKey)
+            // **The minted key and the vault, together** — the operator's shape (§3.11.4): *"openrouter
+            // oauth key minting should be an option in general settings in the same block with vault
+            // secrets management button"*. They are the same kind of thing (a value the app uses
+            // without ever writing it down), and minting is the vault's own verb with one step of
+            // automation in front of it — so one block, two rows, no second mechanism.
+            MintedKeyRow(viewModel = viewModel, onSetKey = onSetKey)
             RowDivider()
 
-            // **Under the key, because they are the same kind of thing** — a value the app uses
-            // without ever writing it down — and because the agent needs both before its tools can
-            // reach anything: one key talks to the model, the other talks to everything else.
             SecretRow(viewModel = viewModel, onOpenSecrets = onOpenSecrets)
             RowDivider()
 

@@ -90,7 +90,7 @@ class SchemasTest {
 
         // **A literal, not `{{model}}`.** The model is what this file *is*: two forms are two models,
         // and the app has no other place to keep one.
-        assertEquals(ModelConfigFile.DEFAULT_MODEL, unit.body.getString("model"))
+        assertEquals(Schemas.DEFAULT_MODEL, unit.body.getString("model"))
         // And the placeholders that remain are the ones only the app can fill.
         assertEquals("{{messages}}", unit.body.getString("messages"))
         assertEquals("{{tools}}", unit.body.getString("tools"))

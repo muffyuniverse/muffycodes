@@ -194,25 +194,6 @@ class AppViewModel @JvmOverloads constructor(
     var selected: Set<String> by mutableStateOf(emptySet())
         private set
 
-    /**
-     * The agent's model choice, read from `model_conf.json` in the account's folder.
-     *
-     * **The file is the only store.** The settings rows and the picker are editors of it, so
-     * there is no second copy of the same three values to disagree with the first.
-     */
-    var modelConfig: ModelConfig by mutableStateOf(ModelConfigFile.default())
-        private set
-
-    /**
-     * Why the config could not be read, or null when it did.
-     *
-     * Kept beside the config rather than thrown away, because the two together are the honest
-     * state: "this is the choice in force, and this is why it is not the one in your file".
-     * A config that will not parse is never replaced by the defaults on disk.
-     */
-    var modelConfigProblem: String? by mutableStateOf(null)
-        private set
-
     /** The search text, which searches inside the current project (§7). */
     var query: String by mutableStateOf("")
 
@@ -577,9 +558,10 @@ class AppViewModel @JvmOverloads constructor(
      * **GitHub is [signedIn]**, which is now the same question as "is there an account at all" — with
      * no account shipped (§3.11) there is no workspace belonging to nobody.
      *
-     * **The model key is [hasModelKey]**, which is `READABLE` — a key that is stored but locked
-     * behind the phone's own lock is not a key the app can use, and closing onboarding on it would
-     * leave a person on a chat screen that cannot answer.
+     * **The model key is [hasModelKey]**, which asks whether the vault holds a readable
+     * `@openrouter` row — a key that is stored but locked behind the phone's own lock is not a key
+     * the app can use, and closing onboarding on it would leave a person on a chat screen that
+     * cannot answer.
      */
     val onboardingConnected: Boolean get() = signedIn && hasModelKey
 
@@ -634,7 +616,7 @@ class AppViewModel @JvmOverloads constructor(
         // an ordinary file with no reason to be on screen and no obvious way off it.
         //
         // **Closed here rather than in the caller**, because there are two callers (`signIn` and
-        // `saveModelKey`) and a copy of this in each is a copy that can drift. This is the one
+        // `finishOpenRouterSignIn`) and a copy of this in each is a copy that can drift. This is the one
         // moment onboarding ends, so it is the one place that has to tidy up after it.
         // **Only the page it was actually on**, not any file: a person who opened an ordinary file
         // during onboarding is not owed a closed editor when the connections land.
@@ -744,7 +726,6 @@ class AppViewModel @JvmOverloads constructor(
         // The first refresh of a new process is where a session that survived a reboot gets its
         // clock back: the answer is read here, but nothing else in a refresh would start it.
         applyService(agentSessions)
-        readModelConfig(ws)
         // A selection is a set of paths, and a path that is no longer there cannot
         // be selected: an item moved or deleted out from under the selection would
         // otherwise be acted on again by the next press.
@@ -922,164 +903,55 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
-    // ---- the agent's model -------------------------------------------------
-
     /**
-     * Reads `model_conf.json`, keeping the last good choice when the file will not parse.
+     * **Whether a minted model key is on this phone and readable.**
      *
-     * A damaged file leaves [modelConfig] as it was and puts the reason in
-     * [modelConfigProblem]: the screen can then say which line is wrong while still being able
-     * to show what the agent would use. Replacing it with the defaults would be the app deciding
-     * for the person that their file did not matter.
-     */
-    private fun readModelConfig(ws: Workspace) {
-        ModelConfigFile.load(ws.accountDir).fold(
-            onSuccess = { loaded ->
-                modelConfig = loaded
-                modelConfigProblem = null
-            },
-            onFailure = { problem -> modelConfigProblem = problem.message },
-        )
-    }
-
-    /** Writes the config and records it as a version, like any other change to the account. */
-    private fun writeModelConfig(next: ModelConfig, what: String) {
-        val ws = workspaceFor("written") ?: return
-        ModelConfigFile.write(ws.accountDir, next)
-        modelConfig = next
-        modelConfigProblem = null
-        Trace.changed("model ${next.summary()}")
-        refresh()
-    }
-
-    /**
-     * **A model is a word the person types, not a row they pick.**
+     * One question, one row: the vault's `@openrouter` secret for OpenRouter's own host. It used to
+     * ask `model_key_<login>`, a second record of the same key kept beside the vault — which is the
+     * duplication that made `ConnKind.LLM` exist at all (§3.11.4). Minting writes the vault row now,
+     * so this is where the app reads it.
      *
-     * This used to be `chooseModel(model, provider, effort, supported)`, where `supported` was the
-     * endpoint's effort ladder read from OpenRouter's catalogue and `provider` was a tag that pinned
-     * the request to one of its downstreams. Both are gone: the catalogue's own paths
-     * (`/models/{id}/endpoints`, `/embeddings/models`) exist on no other server, so a picker built on
-     * them was a picker for exactly one vendor — and the app is meant to talk to whatever answers
-     * `/chat/completions`. A model id that the server does not have is a refusal in the server's own
-     * words, which is the same answer every number in this app now gets.
+     * **The host matters.** A secret is stored bound to the host it was made for, so this asks for
+     * OpenRouter's specifically: a row of the same name for another server is not this key.
      */
-    fun setModel(model: String) {
-        val clean = model.trim()
-        if (clean.isEmpty()) return
-        writeModelConfig(
-            modelConfig.copy(active = modelConfig.active.copy(model = clean)),
-            "Chose $clean",
-        )
-    }
-
-    /** The effort, as typed. Blank is a statement: the shape sends no `reasoning_effort` at all. */
-    fun setEffort(effort: String) {
-        writeModelConfig(
-            modelConfig.copy(active = modelConfig.active.copy(effort = effort.trim())),
-            "Effort: ${effort.trim().ifEmpty { "none" }}",
-        )
-    }
-
-    /**
-     * **The templates in the folder**, read fresh, for the three rows and the dialogs behind them.
-     *
-     * Read on every call rather than cached: a person writes a template in the editor, comes back, and
-     * the list must hold it. The count on the settings row is keyed on a revision so Compose re-runs it
-     * after this screen writes a file.
-     */
-    /**
-     * **The request forms a chat may pick from** — the units in `shared/requests/chat/`.
-     *
-     * `ensure` first, because a fresh install has no folder and the picker would be an empty window on
-     * the first day. It fills only when the folder is absent, so a person who deleted the shipped one
-     * keeps it deleted (see [Schemas.ensure]).
-     */
-    fun templateNames(): List<String> {
-        val ws = workspace ?: return emptyList()
-        Schemas.ensure(ws)
-        return Schemas.names(ws, ShapeKind.CHAT)
-    }
-
-    /**
-     * Puts back the config the app shipped.
-     *
-     * From the build's own copy, not from the account's history: the two are different acts. A
-     * history step would put back whatever was there a version ago, which may be the broken
-     * edit; this is "the one the app ships", which is what a person asking to reset means.
-     */
-    fun resetModelConfig() {
-        val fresh = ModelConfigFile.default()
-        Trace.tap("reset model config")
-        writeModelConfig(fresh, "Reset the model config")
-        Trace.said("Back to the model the app ships")
-    }
-
-    /**
-     * What the phone can say about the active account's OpenRouter key.
-     *
-     * `LOCKED` is not "no key": the bytes are there and the store's own key is only usable while the
-     * phone is unlocked. Saying "no key yet" for that would send a person to type a key they already
-     * have, on the one screen they cannot use while locked.
-     */
-    val modelKeyState: KeyState
-        get() = activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE
-
-    /** The OpenRouter key of the active account, when there is one that can be read now. */
     val hasModelKey: Boolean
-        get() = modelKeyState == KeyState.READABLE
+        get() = credentials.secret(
+            project = null,
+            branch = null,
+            name = Schemas.MINTED_KEY_NAME,
+            host = Secrets.hostOf(OPENROUTER_BASE),
+        ) != null
 
     /**
-     * Keeps the OpenRouter key of the active account — **and reads it back before saying so**.
+     * **Keeps a model key as the vault's `@openrouter` row, and reads it back before saying so.**
      *
-     * "Kept" is a claim about this phone, and the only way to know it is true is to open the door it
-     * was put behind. The old version said it on the strength of the write alone, so a keystore that
-     * refused the key (a locked phone is enough) was reported as success, and the person was left
-     * with a key that saved twice and never worked — reported, correctly, as *the key isn't passing
-     * through*.
+     * The paste path and the mint path end here, deliberately: a key that arrived by PKCE and a key
+     * that was typed are the same key, and two save paths would be two chances for one of them to
+     * forget the read-back that makes a kept key trustworthy.
+     *
+     * **One row, one name, one scope.** The scope is the account's, which is the narrowest that does
+     * not name a project; a person who wants it wider or narrower moves it on the vault screen, which
+     * is where every other secret's scope is chosen. Nothing is granted to an agent by minting — the
+     * form names it, and a form is a file a person wrote.
      *
      * @return null when the key is kept, or the sentence to show when it is not.
      */
-    fun saveModelKey(key: String): String? {
+    fun saveMintedKey(key: String): String? {
         val login = activeLogin
             ?: return "There is no account signed in on this phone, so there is nobody to keep a key for."
         val trimmed = key.trim()
         if (trimmed.isEmpty()) return "The key is empty, so nothing was kept."
-        credentials.setModelKey(login, trimmed)
-        modelKeySaved++
-        return when (credentials.modelKeyState(login)) {
-            KeyState.READABLE -> {
-                Trace.note("key-kept", "the OpenRouter key reads back")
-                Trace.said("The OpenRouter key is kept on this phone")
-                // **The second half of the way out.** If GitHub was already connected, this is the
-                // connection that finishes onboarding — and the person is on a page offering the
-                // sign-in, so they should not have to swipe anywhere to be let out.
-                closeOnboardingIfConnected()
-                null
-            }
-
-            KeyState.LOCKED -> {
-                // Stored, and it will work the moment the phone is unlocked. Saying "kept" without
-                // saying this is what made a working key look like a broken one.
-                Trace.note("key-kept", "stored, and this phone has to be unlocked to read it")
-                Trace.said("The key is kept. This phone has to be unlocked before the agent can read it.")
-                null
-            }
-
-            // The same refusal as NONE, because the write did not produce a readable key either
-            // way - but reached through the unrecognised branch, which keeps the bytes.
-            KeyState.UNREADABLE, KeyState.NONE -> {
-                Trace.note("key-not-kept", "saved, and it could not be read back")
-                Trace.said("The key was stored and could not be read back, so it will not work.")
-                "The key was stored, and this phone could not read it back, so nothing here can " +
-                    "use it. The bytes have been left in place: try Keep it again. If it keeps " +
-                    "happening, the key belongs to a different account than the one signed in."
-            }
-        }
+        val host = Secrets.hostOf(OPENROUTER_BASE)
+        val problem = saveSecret(SecretScope.Account, Schemas.MINTED_KEY_NAME, trimmed, host)
+        if (problem != null) return problem
+        Trace.note("key-kept", "the OpenRouter key reads back from the vault")
+        Trace.said("The OpenRouter key is kept on this phone as the secret @${Schemas.MINTED_KEY_NAME}")
+        // **The second half of the way out.** If GitHub was already connected, this is the connection
+        // that finishes onboarding — and the person is on a page offering the sign-in, so they should
+        // not have to swipe anywhere to be let out.
+        closeOnboardingIfConnected()
+        return null
     }
-
-    /** Bumped when a key is saved, so a screen showing "no key" can notice. */
-    var modelKeySaved: Int by mutableStateOf(0)
-        private set
 
     // ---- named secrets ------------------------------------------------------
 
@@ -1217,10 +1089,9 @@ class AppViewModel @JvmOverloads constructor(
      * **What a window on [scope] opens showing**: the values in force for this worktree, or the
      * scope's own when it has one.
      *
-     * Read through [AgentWiring.wiredFor], the same resolution a turn uses, so a window cannot show
-     * one address and send to another — the class of bug that makes a person distrust a settings
-     * screen. For git the account is the only source, because the account *is* the credential for the
-     * host it was made against.
+     * The account's own record answers for the account scope, because the account *is* the credential
+     * for the host it was made against; a narrower scope's row is shown when it wrote one, so a window
+     * cannot show one host and save a token for another.
      */
     fun connectionShown(
         scope: SecretScope,
@@ -1228,38 +1099,15 @@ class AppViewModel @JvmOverloads constructor(
         project: String?,
         branch: String?,
     ): ConnectionDraft {
-        val ws = workspace
         val own = credentials.connection(scope, kind)
-        if (kind == ConnKind.GIT) {
-            return ConnectionDraft(
-                kind = ConnKind.GIT,
-                // **The account scope has no project to ask**, and its own host is the honest answer:
-                // it is the host the sign-in token was made against.
-                address = own?.address
-                    ?: project?.let { host(it, branch.orEmpty()) }
-                    ?: activeLogin?.let { accounts.account(it)?.host }.orEmpty(),
-                user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
-                nameable = own?.nameable == true,
-            )
-        }
-        val asked = ws?.let { AgentWiring.wiredFor(it, credentials, project, branch, settings) }
-        // **The values in force, not this scope's own.** A window that showed only what the scope wrote
-        // would make a person reconstruct the rest to change one field; showing what *would* happen is
-        // also what makes "leave it alone" mean something — see [ConnectionDraft.changesAgainst].
-        return ConnectionDraft.opening(
-            kind = ConnKind.LLM,
-            at = own?.address?.takeIf { it.isNotBlank() } ?: asked?.active?.baseUrl.orEmpty(),
-            // **The scope's own word when it wrote one, else the one in force** — and the resolver is
-            // asked rather than re-walked, because a second walk here would be a second answer to the
-            // question "what would this scope send".
-            model = credentials.choice(scope, ConnKind.LLM)?.model?.takeIf { it.isNotBlank() }
-                ?: asked?.active?.model.orEmpty(),
-            effort = credentials.choice(scope, ConnKind.LLM)?.effort?.takeIf { it.isNotBlank() }
-                ?: asked?.active?.effort.orEmpty(),
-            limits = asked?.limits ?: ContextBudget.Limits.of(trigger = 0, hard = 0),
-            // **The shape in force**, so the editor opens on the document that would be sent.
-            shape = asked?.shape,
-            // **Off unless this scope ticked it**, because a grant is a statement about a row.
+        return ConnectionDraft(
+            kind = kind,
+            // **The account scope has no project to ask**, and its own host is the honest answer:
+            // it is the host the sign-in token was made against.
+            address = own?.address
+                ?: project?.let { host(it, branch.orEmpty()) }
+                ?: activeLogin?.let { accounts.account(it)?.host }.orEmpty(),
+            user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
             nameable = own?.nameable == true,
         )
     }
@@ -1307,7 +1155,6 @@ class AppViewModel @JvmOverloads constructor(
         // **An empty row removes the row**, which is what "inherit" means; the explicit act of removal
         // is still "Forget", and the two arrive at the same place on purpose.
         credentials.setConnection(scope, draft.kind, changed.connection() ?: Connection())
-        credentials.setChoice(scope, draft.kind, changed.choice() ?: Choice())
         Trace.note("connection-saved", "${draft.kind.name.lowercase()} at ${scopeLabel(scope)}")
         connectionSaved++
         onDone(true)
@@ -1344,74 +1191,45 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val key = draft.secret.ifBlank {
-            when (draft.kind) {
-                ConnKind.LLM -> credentials.connection(scope, ConnKind.LLM)?.secret
-                    ?: activeLogin?.let { credentials.modelKey(it) }
-                ConnKind.GIT -> credentials.connection(scope, ConnKind.GIT)?.secret
-                    ?: activeLogin?.let { credentials.token(it) }
+            credentials.connection(scope, ConnKind.GIT)?.secret
+                ?: activeLogin?.let { credentials.token(it) }
+        }
+        // **A git connection is measured by the protocol's own question**: `ls-remote` says whether
+        // the address is real and whether this token may read it, and there is no second way to
+        // ask.
+        //
+        // **Against the project's own address, not the host.** A host is not a repository — asking
+        // `gitlab.com` whether it exists says nothing about whether this token may read *this*
+        // project — so the check uses `remote.origin.url`, which is where the address lives.
+        val ws = workspace
+        // **No project, no address to check against** — and the account's git credential is the
+        // sign-in token, whose window already exists, so this says so rather than pretending.
+        val remote = if (project == null) {
+            null
+        } else {
+            ws?.let {
+                try {
+                    projectGit(it).onBranch(branch.orEmpty()).remoteUrl(project)
+                } catch (e: Throwable) {
+                    null
+                }
             }
         }
-        val address = draft.address.trim()
-        if (draft.kind == ConnKind.GIT) {
-            // **A git connection is measured by the protocol's own question**: `ls-remote` says whether
-            // the address is real and whether this token may read it, and there is no second way to
-            // ask.
-            //
-            // **Against the project's own address, not the host.** A host is not a repository — asking
-            // `gitlab.com` whether it exists says nothing about whether this token may read *this*
-            // project — so the check uses `remote.origin.url`, which is where the address lives.
-            val ws = workspace
-            // **No project, no address to check against** — and the account's git credential is the
-            // sign-in token, whose window already exists, so this says so rather than pretending.
-            val remote = if (project == null) {
-                null
-            } else {
-                ws?.let {
-                    try {
-                        projectGit(it).onBranch(branch.orEmpty()).remoteUrl(project)
-                    } catch (e: Throwable) {
-                        null
-                    }
-                }
-            }
-            if (remote.isNullOrBlank()) {
-                then(
-                    "This check asks the project's own address, and this project has none yet. " +
-                        "Set the address first, then check the token against it.",
-                )
-                return
-            }
-            val user = draft.user
-            onWorker {
-                val said = when (val answer = GitService.lsRemote(remote, key, user)) {
-                    is GitService.RemoteAnswer.Branches ->
-                        "The host answered and accepted the token. It has " +
-                            "${answer.names.size} branches this token can see."
-                    is GitService.RemoteAnswer.Refused -> "The host refused: ${answer.why}"
-                }
-                main.post { then(said) }
-            }
+        if (remote.isNullOrBlank()) {
+            then(
+                "This check asks the project's own address, and this project has none yet. " +
+                    "Set the address first, then check the token against it.",
+            )
             return
         }
-        val shape = draft.connection()?.shapeFor(ShapeKind.CHAT) ?: Shape.CHAT
+        val user = draft.user
         onWorker {
-            val door = OpenRouterDoor(
-                key = { key },
-                // **A blank key on a stored connection is a server that wants none**, and the check must
-                // measure exactly what a turn would send (see `Wired.keyless`).
-                keyless = key == null && credentials.connection(scope, ConnKind.LLM) != null,
-                model = draft.model.trim(),
-                provider = providerOf(address),
-                effort = draft.effort.trim(),
-                baseUrl = address,
-                shape = shape,
-                timeoutMs = settings.responseMs,
-                responseMs = settings.responseMs,
-            )
-            val said = Probe.check(
-                door,
-                Probe.request(draft.model.trim(), providerOf(address), draft.effort.trim()),
-            )
+            val said = when (val answer = GitService.lsRemote(remote, key, user)) {
+                is GitService.RemoteAnswer.Branches ->
+                    "The host answered and accepted the token. It has " +
+                        "${answer.names.size} branches this token can see."
+                is GitService.RemoteAnswer.Refused -> "The host refused: ${answer.why}"
+            }
             main.post { then(said) }
         }
     }
@@ -1652,11 +1470,16 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Exchanges the code the person pasted for a key, and keeps it.
+     * Exchanges the code the person pasted for a key, and **keeps it as a vault secret.**
      *
-     * **The same [saveModelKey] as the paste path**, deliberately: a key that arrived by PKCE and a
-     * key that was typed are the same key, and two save paths would be two chances for one of them
-     * to forget the read-back that makes a kept key trustworthy.
+     * **The operator's shape (2026-11-10):** *"openrouter oauth key minting should be an option in
+     * general settings in the same block with vault secrets management button - because it should be
+     * used to basically mint an openrouter key as a secret that then could be given an access scope."*
+     *
+     * So this writes a row a template can name (`"key": "@openrouter"`) and an `http` call can use
+     * (`"auth": "@openrouter"`) — **one record, one reader set**, rather than a model key the chat read
+     * directly and a vault row it also needed. The scope is not chosen here: the key arrives without
+     * one, and [saveSecret]'s account default is where a person grants it afterwards.
      *
      * @return null when the key is kept, or the sentence to show when it is not.
      */
@@ -1689,7 +1512,10 @@ class AppViewModel @JvmOverloads constructor(
                     onDone(result.exceptionOrNull()?.message ?: "That code did not work.")
                 } else {
                     Trace.note("openrouter-pkce", "key minted")
-                    onDone(saveModelKey(key))
+                    // **The minted key is a secret with a name**, and the name is the app's word for
+                    // it: `openrouter`. A template that says `"key": "@openrouter"` finds it without
+                    // anybody retyping a 70-character token into a form.
+                    onDone(saveMintedKey(key))
                 }
             }
         }
@@ -4350,14 +4176,15 @@ class AppViewModel @JvmOverloads constructor(
         }
         // **The same resolution the runner uses, for this worktree.** A person's turn and the agent's
         // own wake must be asked with the same model at the same address, or the conversation changes
-        // voice depending on who started it.
+        // voice depending on who started it — so this asks the chat's form, which is the only answer
+        // there is (2026-11-10). A chat with no form gets `missing` and the turn refuses in words.
         val asked = workspace?.let {
-            AgentWiring.wiredFor(it, credentials, project, branch, settings)
-        } ?: Wired.of(modelConfig.active)
+            Wired.ofForm(it, credentials, project, branch)
+        } ?: Wired.of(ActiveModel("", ""))
         val model = asked.active
         val door = doorFor(asked, project)
         // **The numbers the worktree carries**, resolved with the model by the same function the
-        // service uses — see [wiredFor] — so the screen's turn and a poll cannot be held to two
+        // service uses — the chat's form — so the screen's turn and a poll cannot be held to two
         // different sizes. Read once per turn, because neither changes mid-turn.
         val limits = asked.limits
         // **The tick must not wake this session while the person's turn is running.** One request on

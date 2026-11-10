@@ -5,6 +5,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -17,15 +18,23 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 /**
- * The key the agent spends, and the two ways a store can fail to hand it over.
+ * **The minted model key, and whether the app can honestly say it has one.**
  *
- * Both are states the real store reaches and the in-memory one never does: a phone whose screen is
- * locked — the ordinary case, because the agent polls with the screen off and the store's own key is
- * only usable while the phone is unlocked — and a write that cannot be read back. Both used to look
- * exactly like "this account has no key", which sent a person to type one they already had.
+ * Two things are asserted here, and they are different questions:
  *
- * Its own class rather than three more tests in [ModelSectionTest], because a screen test costs
- * memory and that class already draws every shape on the screen.
+ * - **A write that cannot be read back is refused, not accepted.** The save is a write *and* a read
+ *   back; a keystore that took the key and will not give it back must not be reported as kept, because
+ *   the person would then wait for an agent that can never talk.
+ * - **A refused save keeps its window open.** It used to close on the press, so the refusal arrived at
+ *   a screen that was already gone.
+ *
+ * **What changed on 2026-11-10 (§3.11.4).** The key is no longer `model_key_<login>` — a record of its
+ * own beside the vault. Minting writes the vault's `@openrouter` secret, so the read-back is the
+ * vault's, and the question "is there a key" is `hasModelKey`, which asks the vault for that name at
+ * OpenRouter's own host. There is one record now, which is why `ConnKind.LLM` had nothing left to do.
+ *
+ * Its own class rather than more tests in [ModelSectionTest], because a screen test costs memory and
+ * that class already draws every shape on the screen.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
@@ -38,36 +47,70 @@ class ModelKeyTest {
         Scenario(RuntimeEnvironment.getApplication(), signIn = true, store = store)
 
     @Test
-    fun `a key that is stored and cannot be read now does not read as no key at all`() {
-        val locked = scenario(LockedStore())
+    fun `a key that cannot be read back is refused, not accepted`() {
+        val forgetful = scenario(ForgetfulStore())
         try {
-            compose.setContent {
-                MaterialTheme {
-                    Surface { KeyRow(viewModel = locked.viewModel, onSetKey = {}) }
-                }
-            }
+            val why = forgetful.viewModel.saveMintedKey("sk-or-v1-test-key-not-a-real-one")
 
-            compose.onNodeWithText("A key is kept for this account", substring = true).assertIsDisplayed()
-            compose.onNodeWithText("No model key yet", substring = true).assertDoesNotExist()
+            assertNotNull("it is refused", why)
+            assertTrue("in words about reading it back: $why", "read it back" in why!!)
+            assertNull(
+                "and nothing claims it was kept",
+                forgetful.credentials.secret(
+                    project = null,
+                    branch = null,
+                    name = Schemas.MINTED_KEY_NAME,
+                    host = Secrets.hostOf(OPENROUTER_BASE),
+                ),
+            )
         } finally {
-            locked.close()
+            forgetful.close()
         }
     }
 
     @Test
-    fun `a key that cannot be read back is refused, not accepted`() {
-        // The save is a write **and a read back**. This store takes the key and cannot give it back,
-        // which is what a keystore that refused the write looks like — and it must not be reported as
-        // kept, because the person would then wait for an agent that can never talk.
-        val forgetful = scenario(ForgetfulStore())
+    fun `a minted key is kept as the vault row a form names`() {
+        // **The shape the operator asked for**: *"it should be used to basically mint an openrouter key
+        // as a secret that then could be given an access scope."* So the row is a normal vault secret
+        // with the name the shipped form already says (`"key": "@openrouter"`), and nothing else is
+        // written — no second record for the chat to read.
+        val scene = scenario(MemoryCredentials())
         try {
-            val why = forgetful.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one")
+            assertNull("nothing to begin with", scene.viewModel.saveMintedKey("sk-or-v1-a-key"))
 
-            assertNotNull("it is refused", why)
-            assertTrue("in words about reading it back: $why", "read it back" in why!!)
-            assertNull("and nothing claims it was kept", forgetful.credentials.modelKey(forgetful.login))
+            assertTrue("and the app now says it has a model key", scene.viewModel.hasModelKey)
+            assertEquals(
+                "kept under the name the form names",
+                "sk-or-v1-a-key",
+                scene.credentials.secret(
+                    project = null,
+                    branch = null,
+                    name = Schemas.MINTED_KEY_NAME,
+                    host = Secrets.hostOf(OPENROUTER_BASE),
+                ),
+            )
         } finally {
-            forgetful.close()
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `the row says which name it wrote, so a form can be matched to it`() {
+        // The commonest confusion is a form that names a secret nobody wrote. Saying the name on the
+        // settings row is what makes that answerable without opening the vault and guessing.
+        val scene = scenario(MemoryCredentials())
+        try {
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
+            compose.setContent {
+                MaterialTheme {
+                    Surface { MintedKeyRow(viewModel = scene.viewModel, onSetKey = {}) }
+                }
+            }
+
+            compose.onNodeWithText("@${Schemas.MINTED_KEY_NAME}", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("No model key yet", substring = true).assertDoesNotExist()
+        } finally {
+            scene.close()
         }
     }
 
@@ -93,16 +136,8 @@ class ModelKeyTest {
     }
 }
 
-/** A store that takes a key and cannot give it back: a keystore that refused the write. */
+/** A store that takes a secret and cannot give it back: a keystore that refused the write. */
 private class ForgetfulStore : MemoryCredentials() {
-    override fun setModelKey(login: String, key: String) = Unit
-    override fun modelKey(login: String): String? = null
-    override fun modelKeyState(login: String): KeyState = KeyState.NONE
-}
-
-/** A store that has the key and will not open it until the phone is unlocked. */
-private class LockedStore : MemoryCredentials() {
-    override fun setModelKey(login: String, key: String) = Unit
-    override fun modelKey(login: String): String? = null
-    override fun modelKeyState(login: String): KeyState = KeyState.LOCKED
+    override fun setSecret(name: String, value: String, host: String) = Unit
+    override fun secret(name: String, host: String): String? = null
 }

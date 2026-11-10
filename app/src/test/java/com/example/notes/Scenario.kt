@@ -41,15 +41,6 @@ open class MemoryCredentials : Credentials {
 
     override fun hasToken(login: String): Boolean = tokens.containsKey(login)
 
-    /** The OpenRouter keys, kept the same way: in memory, because a test has no keystore. */
-    private val modelKeys = LinkedHashMap<String, String>()
-
-    override fun modelKey(login: String): String? = modelKeys[login]
-
-    override fun setModelKey(login: String, key: String) {
-        modelKeys[login] = key
-    }
-
     /**
      * The named secrets, kept the same way.
      *
@@ -184,7 +175,6 @@ open class MemoryCredentials : Credentials {
      * phone reads nothing.
      */
     private val connections = LinkedHashMap<String, Connection>()
-    private val choices = LinkedHashMap<String, Choice>()
 
     /**
      * **Every scope keys a row, the account included** — a row there is a person saying "not the
@@ -224,20 +214,7 @@ open class MemoryCredentials : Credentials {
     }
 
     override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
-        connKey(scope, kind)?.let {
-            connections.remove(it)
-            choices.remove(it)
-        }
-    }
-
-    override fun choice(scope: SecretScope, kind: ConnKind): Choice? =
-        connKey(scope, kind)?.let { choices[it] }
-
-    override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
-        val key = connKey(scope, kind) ?: return
-        // **Any field keeps the row**, including one that writes no model at all: a branch that changes
-        // only the trim writes a choice with three fields, two of them absent.
-        if (choice.wroteNothing()) choices.remove(key) else choices[key] = choice
+        connKey(scope, kind)?.let { connections.remove(it) }
     }
 
     override fun generalSecret(name: String, host: String): String? {

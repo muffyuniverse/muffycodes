@@ -138,12 +138,11 @@ fun BranchesScreen(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     /**
-     * **A branch's own credentials** — what makes a token the host limits to one branch expressible.
+     * **A branch's own git credential** — what makes a token the host limits to one branch
+     * expressible.
      *
-     * Two callbacks rather than one with a kind, because the two windows ask for different fields and
-     * the plane they arrive on is the row's ⋮, the same door every other verb in this app uses.
+     * It arrives on the row's ⋮, the same door every other verb in this app uses.
      */
-    onModel: (String) -> Unit = {},
     onGit: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
@@ -205,19 +204,13 @@ fun BranchesScreen(
                     // **The row's own menu**, because a branch is a place a credential can live
                     // (a host may limit a token to one branch) *and* the place removal is offered —
                     // and **main cannot be removed**, being the branch a project is made of, so its
-                    // menu has the two credentials and nothing else.
+                    // menu has the git credential and nothing else. The model half went with
+                    // `ConnKind.LLM` (2026-11-10): a chat's model belongs to the form it picks.
                     Box {
                         IconButton(onClick = { menu = branch }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
                         DropdownMenu(expanded = menu == branch, onDismissRequest = { menu = null }) {
-                            DropdownMenuItem(
-                                text = { Text("Model connection…") },
-                                onClick = {
-                                    menu = null
-                                    onModel(branch)
-                                },
-                            )
                             DropdownMenuItem(
                                 text = { Text("Git credential…") },
                                 onClick = {
@@ -284,15 +277,6 @@ fun AccountsScreen(
     onAdd: () -> Unit,
     onRemove: (String) -> Unit,
     onSettings: () -> Unit,
-    /**
-     * **The account's own model connection** — the widest place a chat model may live, and the one a
-     * project inherits when it has none.
-     *
-     * Only the model, not git: an account's git credential is the token it signed in with, which has
-     * its own door (the add-account window), and a git row here would be a second way to write the
-     * same secret.
-     */
-    onConnection: () -> Unit = {},
 ) {
     val accounts = viewModel.accountsWithProjects
     // **Which row's menu is open**, one at a time — a menu per row would be a menu per row's state.
@@ -374,13 +358,6 @@ fun AccountsScreen(
                                 expanded = menu == account.login,
                                 onDismissRequest = { menu = null },
                             ) {
-                                DropdownMenuItem(
-                                    text = { Text("Model connection…") },
-                                    onClick = {
-                                        menu = null
-                                        onConnection()
-                                    },
-                                )
                                 // **Every account can go, because every account is a real one.**
                                 // There used to be a `~local` account that could not be removed, and
                                 // this menu item was hidden for it; with no account shipped (§3.11)
@@ -420,8 +397,10 @@ fun BrowserScreen(
      * The branch is passed so `main`'s row sets the *project*, and a branch row sets that branch. The
      * row that opens the window decides the scope, which is the only way "where does this go" can be
      * answered without a second scope picker inside the window.
+     *
+     * **The model half is gone** (2026-11-10): a chat's model, address and effort belong to the request
+     * form it picks, so there is nothing per project to open.
      */
-    onRowModel: (String) -> Unit = {},
     onRowGit: (String) -> Unit = {},
     /** Exports the project's newest artifact, or the project's own files when it has none. */
     /**
@@ -700,7 +679,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowModel, onRowGit, onRowTransfer,
+                        onRowGit, onRowTransfer,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -970,8 +949,7 @@ private fun ProjectList(
     onChat: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
-    /** A project's own credentials, from its row's menu — see [BrowserScreen]'s parameters. */
-    onModel: (String) -> Unit,
+    /** A project's own git credential, from its row's menu — see [BrowserScreen]'s parameters. */
     onGit: (String) -> Unit,
     /** A project going to another account — see [BrowserScreen]'s parameter. */
     onTransfer: (String, Boolean) -> Unit,
@@ -1090,17 +1068,9 @@ private fun ProjectList(
                                     onRename(name)
                                 },
                             )
-                            // **The two credentials this project may hold** (§2.2 of the credentials
-                            // plan). Two entries rather than one window with a switch, because the
-                            // two kinds are independent: a person may want the agent to ask the model
-                            // server what models exist without letting it push as them.
-                            DropdownMenuItem(
-                                text = { Text("Model connection…") },
-                                onClick = {
-                                    menu = false
-                                    onModel(name)
-                                },
-                            )
+                            // **The credential this project may hold** (§2.2 of the credentials plan).
+                            // The model entry that sat above it is gone with `ConnKind.LLM`
+                            // (2026-11-10): a chat's model is the form it picks, not a project fact.
                             DropdownMenuItem(
                                 text = { Text("Git credential…") },
                                 onClick = {

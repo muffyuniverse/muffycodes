@@ -52,6 +52,25 @@ object Schemas {
     const val REFERENCE = "openrouter.jsonc"
 
     /**
+     * **The vault row the minted OpenRouter key is kept under**, and the name the shipped form names.
+     *
+     * One constant, because these two are the same fact: the form's `"key": "@openrouter"` is only
+     * "work out of the box" if minting wrote exactly this name. Two literals would be a template that
+     * names a row nobody writes, which is the failure mode a person reads as "the app cannot talk".
+     */
+    const val MINTED_KEY_NAME = "openrouter"
+
+    /**
+     * **The model the app ships set up**, measured against OpenRouter on 2026-10-25.
+     *
+     * A literal in the shipped forms, named here so a test can say "the form asks for the model this
+     * build ships" without repeating the string. It used to be `ModelConfigFile.DEFAULT_MODEL`, which
+     * lived in a config file that no longer exists (2026-11-10): a model is a word in a form, and a
+     * second record of it was the duplication `ConnKind.LLM` was built on.
+     */
+    const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017"
+
+    /**
      * **The two suffixes a schema may have**, and a file with neither is not offered, so a note can
      * live beside one.
      *

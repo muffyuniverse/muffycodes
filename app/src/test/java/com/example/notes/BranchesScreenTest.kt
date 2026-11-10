@@ -67,7 +67,6 @@ class BranchesScreenTest {
         var entered: String? = null
         var added = 0
         var removed: String? = null
-        var model: String? = null
         var git: String? = null
         var backed = 0
     }
@@ -86,7 +85,6 @@ class BranchesScreenTest {
                     onEnter = { taps.entered = it },
                     onAdd = { taps.added++ },
                     onRemove = { taps.removed = it },
-                    onModel = { taps.model = it },
                     onGit = { taps.git = it },
                     onBack = { taps.backed++ },
                 )
@@ -111,12 +109,12 @@ class BranchesScreenTest {
         val t = Taps()
         branches(taps = t)
 
-        // **main's menu has the two credentials and nothing else.**
+        // **main's menu has the git credential and nothing else.** The model entry went with
+        // `ConnKind.LLM` (2026-11-10): a chat's model is the form it picks, not a branch fact.
         compose.onAllNodesWithContentDescription("More")[0].performClick()
-        compose.onNodeWithText("Model connection…").assertIsDisplayed()
+        compose.onNodeWithText("Git credential…").assertIsDisplayed()
         compose.onNodeWithText("Remove…").assertDoesNotExist()
-        compose.onNodeWithText("Model connection…").performClick()
-        assertEquals("the row that was opened is main", "main", t.model)
+        compose.onNodeWithText("Model connection…").assertDoesNotExist()
 
         // And the other row's menu offers Remove, naming the branch it would remove.
         compose.onAllNodesWithContentDescription("More")[1].performClick()

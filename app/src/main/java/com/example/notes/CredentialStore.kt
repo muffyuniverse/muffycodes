@@ -142,31 +142,6 @@ interface Credentials {
     fun hasToken(login: String): Boolean
 
     /**
-     * The OpenRouter key of [login], or null when this phone has none.
-     *
-     * **Per account, like the GitHub token**, and for the same reason: it is the identity the
-     * app acts as. A second secret in the same store and behind the same door — typed on a
-     * screen that refuses screenshots, encrypted with the same keystore key, scrubbed out of
-     * every message, and kept out of backups by the same rules.
-     */
-    fun modelKey(login: String): String?
-
-    /**
-     * What the phone can say about the key of [login], without printing it.
-     *
-     * **Three answers, and the difference between the last two is the whole point.** A key that is
-     * *there* but cannot be read right now — because the phone is locked, and the store's own key is
-     * only usable while it is unlocked — is not the same thing as a key that is not there. Collapsing
-     * them made the app delete a good key on the first locked poll and then say, for ever after, that
-     * there had never been one.
-     */
-    fun modelKeyState(login: String): KeyState =
-        if (modelKey(login) != null) KeyState.READABLE else KeyState.NONE
-
-    /** Keeps [key] for [login]. */
-    fun setModelKey(login: String, key: String)
-
-    /**
      * A **named** secret of the active account, or null when the phone has none.
      *
      * The operator's design has an MCP article naming its token rather than holding it —
@@ -267,9 +242,11 @@ interface Credentials {
     /**
      * **The connection a narrower scope puts in front of the account's** — the pair, or null.
      *
+     * **One kind is left** — the git credential, and `ConnKind.LLM` went with the model config
+     * (2026-11-10): a model key is a named vault secret (`@openrouter`), not a connection.
+     *
      * The account is not answered here, and that is the point rather than an omission: the account's
-     * own pair already lives in one record each (`token_<login>` with [Account.host] and [Account.gitUser]
-     * for git, `model_key_<login>` with the address in `model_conf.json` for llm). A vault that kept a
+     * own token lives in `token_<login>` with [Account.host] and [Account.gitUser]. A vault that kept a
      * second copy would be two records of one secret, which is the drift this whole design avoids —
      * so the caller supplies the account's, and this store answers only the scopes *below* it.
      */
@@ -304,18 +281,6 @@ interface Credentials {
             ?.secret
             ?.takeIf { it.isNotBlank() }
     }
-
-    /**
-     * The model and effort [scope] asks for, or null when it asks for nothing and inherits.
-     *
-     * **Separate from [connection] because it inherits separately** (see `Connections.kt`): the pair is
-     * atomic, the choice is not. Written per field so "inherit the key, choose my own model" is one
-     * record rather than a copy of a secret.
-     */
-    fun choice(scope: SecretScope, kind: ConnKind): Choice? = null
-
-    /** Keeps a scope's choice. A blank model means "inherit", so the row is removed. */
-    fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {}
 
     /**
      * Keeps [value] for one branch of [project].
@@ -542,53 +507,10 @@ class CredentialStore(context: Context) : Credentials {
         }
         prefs.edit()
             .remove(tokenKey(login))
-            .remove(modelKeyKey(login))
             .also { edit -> mine.forEach { edit.remove(it) } }
             .putString(KEY_LOGINS, logins().filter { it != login }.joinToString("\n"))
             .apply()
         if (activeLogin == login) activeLogin = null
-    }
-
-    override fun modelKey(login: String): String? = opened(login).text
-
-    override fun modelKeyState(login: String): KeyState = opened(login).state
-
-    /**
-     * Reads the stored key, and **decides what a failure means before it decides what to do**.
-     *
-     * The old version had one `catch (e: Exception)` that deleted the key and returned null, which
-     * made three unrelated things look the same: the phone being locked (ordinary — the agent polls
-     * with the screen off), the key being dead (real, and only then should the bytes go), and a
-     * failure nobody understands (not evidence of anything). It also meant the app *destroyed* a key
-     * on the strength of the locked case, which is the worst of the three.
-     */
-    private fun opened(login: String): Opened {
-        val stored = prefs.getString(modelKeyKey(login), null) ?: return Opened(null, KeyState.NONE)
-        return try {
-            Opened(decrypt(stored), KeyState.READABLE)
-        } catch (e: Exception) {
-            if (KeyVerdict.isDead(e)) {
-                // It cannot come back, so it is dropped — the same rule as the GitHub token.
-                prefs.edit().remove(modelKeyKey(login)).apply()
-                Opened(null, KeyState.NONE)
-            } else if (KeyVerdict.isLocked(e)) {
-                // Kept. It opens as soon as the phone does.
-                Opened(null, KeyState.LOCKED)
-            } else {
-                // Kept as well: an unrecognised failure is not proof the key is gone, and a person
-                // who types it again overwrites the bytes anyway.
-                //
-                // **And it says so**, rather than answering `NONE`. The bytes are still there, so
-                // "no key yet" is false, and it was the sentence the operator saw twice.
-                Opened(null, KeyState.UNREADABLE)
-            }
-        }
-    }
-
-    private data class Opened(val text: String?, val state: KeyState)
-
-    override fun setModelKey(login: String, key: String) {
-        prefs.edit().putString(modelKeyKey(login), encrypt(key)).apply()
     }
 
     /**
@@ -721,26 +643,19 @@ class CredentialStore(context: Context) : Credentials {
         val json = try {
             JSONObject(decrypt(stored.substring(at + HOST_SEPARATOR.length)))
         } catch (t: Throwable) {
-            // **A key that cannot be read is not a connection that can be used.** The states -
-            // locked, dead, unreadable - are already told apart for the model key by
-            // [modelKeyState]; a scoped row answers null and its absence is what the caller reports.
+            // **A token that cannot be read is not a connection that can be used.** A scoped row
+            // answers null, and its absence is what the caller reports.
             return null
         }
-        // **A blank key is a whole credential for a model server on this phone**, and half of one for
-        // git — where a push with no token is a push as nobody. The store keeps the row as written and
-        // each reader decides: the git lookup skips a blank secret, and a chat connection with none is
-        // [Wired.keyless]. Refusing it here made a keyless server impossible to store at all.
+        // **A blank token is half a credential for git** — a push with no token is a push as nobody —
+        // so the git lookup skips one. The store keeps the row as written and the reader decides.
         return Connection(
             address = address,
             secret = json.optString("secret"),
             user = json.optString("user"),
-            shapes = shapesOf(json.optJSONObject("shapes")),
             // **Off unless it was written**, which is the only safe default for a permission: a row
             // stored before the checkmark existed is a row on which it was never given.
             nameable = json.optBoolean("nameable", false),
-            // **Absent is "this row says nothing about it"**, which is not the same as "no": a blank
-            // key means inherit, so a server that wants none has to be a statement somebody made.
-            keyless = if (json.has("keyless")) json.optBoolean("keyless") else null,
         )
     }
 
@@ -758,114 +673,9 @@ class CredentialStore(context: Context) : Credentials {
             // the row say "nothing here" for a field it never meant to speak about.
             if (connection.secret.isNotEmpty()) put("secret", connection.secret)
             if (connection.user.isNotBlank()) put("user", connection.user)
-            if (connection.shapes.isNotEmpty()) put("shapes", shapesJson(connection.shapes))
             if (connection.nameable) put("nameable", true)
-            connection.keyless?.let { put("keyless", it) }
         }
-        // **The address as written**, not lowercased: it is a base URL, and lowercasing a path is
-        // how a connection starts 404ing on a server that is case-sensitive.
         prefs.edit().putString(key, connection.address.trim() + HOST_SEPARATOR + encrypt(json.toString())).apply()
-    }
-
-    /**
-     * **A connection's shapes, one per kind, as a document.**
-     *
-     * Keyed by the kind's name rather than by an index, because the set can gain a kind and an index
-     * would silently move what a stored row means. A shape whose body will not parse is dropped rather
-     * than failing the whole row: the address and the key are still a credential, and a lost shape
-     * falls back to the preset, which is the same request the app sent before it could store one.
-     */
-    private fun shapesJson(shapes: Map<ShapeKind, Shape>): JSONObject = JSONObject().apply {
-        shapes.forEach { (kind, shape) ->
-            put(kind.name, JSONObject().apply {
-                put("url", shape.url)
-                put("body", shape.body.toString())
-            })
-        }
-    }
-
-    private fun shapesOf(json: JSONObject?): Map<ShapeKind, Shape> {
-        if (json == null) return emptyMap()
-        val answer = LinkedHashMap<ShapeKind, Shape>()
-        for (kind in ShapeKind.entries) {
-            val one = json.optJSONObject(kind.name) ?: continue
-            val url = one.optString("url")
-            val body = try {
-                JSONObject(one.optString("body"))
-            } catch (t: Throwable) {
-                continue
-            }
-            if (url.isNotBlank()) answer[kind] = Shape(url, body, kind)
-        }
-        return answer
-    }
-
-    /**
-     * **The git connection that may be offered to [host]**, or null when this question has none.
-     *
-     * Narrowest first, and **a nearer scope bound to another host falls through** rather than answering
-     * "nothing": a branch with a key for `gitlab.com` must not stop the project's key for `github.com`
-     * from being used — the same rule the named secrets already follow, because it is the same
-     * question ("is there a credential for *this* host") asked of a different store.
-     */
-    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
-        val at = connectionScope(project, branch) { scope ->
-            connection(scope, ConnKind.GIT)?.let { hostCovers(hostOfAddress(it.address), host) } == true
-        } ?: return null
-        return connection(at, ConnKind.GIT)
-    }
-
-    override fun forgetConnection(scope: SecretScope, kind: ConnKind) {
-        val key = connKey(activeLogin, scope, kind) ?: return
-        // **The choice goes even when the pair is already gone.** A row can be left half-filled by an
-        // earlier version of the window, or by a pair that could not be read back — and a "forget"
-        // that left a model id behind would apply it to whatever the scope inherits next.
-        val choice = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
-        prefs.edit().remove(key).remove(choice).apply()
-    }
-
-    override fun choice(scope: SecretScope, kind: ConnKind): Choice? {
-        val key = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return null
-        val stored = prefs.getString(key, null) ?: return null
-        return try {
-            val json = JSONObject(stored)
-            val choice = Choice(
-                model = json.optString("model"),
-                effort = json.optString("effort"),
-                // **A number of zero is a number**, not "unset": it is how a person turns one hand off
-                // at this scope while keeping the other two. Absence is the only "inherit".
-                target = if (json.has("target")) json.optLong("target") else null,
-                forget = if (json.has("forget")) json.optLong("forget") else null,
-                trim = if (json.has("trim")) json.optLong("trim") else null,
-                // `provider` is not among the fields read: the address is the upstream now, and a
-                // sentence that wants the word asks `providerOf`. A row carrying one still loads.
-            )
-            // **A row with nothing in it is not a row.** Reading it as a choice would let a blank row
-            // shadow the parent's model, and a person would see "nothing chosen" above a model they did
-            // choose.
-            if (choice.wroteNothing()) null else choice
-        } catch (t: Throwable) {
-            null
-        }
-    }
-
-    override fun setChoice(scope: SecretScope, kind: ConnKind, choice: Choice) {
-        val key = connKey(activeLogin, scope, kind, CHOICE_SUFFIX) ?: return
-        // **A row that says nothing removes the row**, which is what "inherit" means: the absence of a
-        // local value is the inheritance, so there is no switch to keep in step with the text. And any
-        // field is enough to keep it — a branch that changes only the trim writes no model at all.
-        if (choice.wroteNothing()) {
-            prefs.edit().remove(key).apply()
-            return
-        }
-        val json = JSONObject().apply {
-            if (choice.model.isNotBlank()) put("model", choice.model)
-            if (choice.effort.isNotBlank()) put("effort", choice.effort)
-            choice.target?.let { put("target", it) }
-            choice.forget?.let { put("forget", it) }
-            choice.trim?.let { put("trim", it) }
-        }
-        prefs.edit().putString(key, json.toString()).apply()
     }
 
     /**
@@ -1066,7 +876,6 @@ class CredentialStore(context: Context) : Credentials {
     private fun tokenKey(login: String): String = "token_$login"
 
     /** A different prefs key, because the two secrets must not overwrite each other. */
-    private fun modelKeyKey(login: String): String = "model_key_$login"
 
     /**
      * A prefs key per (account, name).
@@ -1129,13 +938,13 @@ class CredentialStore(context: Context) : Credentials {
      * key. The kind is the last part rather than a prefix, so every row of one project is under one
      * prefix and the sweeps in [forgetProjectSecrets] stay a scan rather than a guess.
      *
-     * **The account answers null.** Its pair is `token_<login>`/`model_key_<login>` with the address
-     * in the account's own records — one record each, which is the point of the vault.
+     * **The account answers null.** Its pair is `token_<login>` with the account's own host and git
+     * user — one record each, which is the point of the vault.
      */
     private fun connPrefix(login: String?, scope: SecretScope): String? = when (scope) {
         // **The account may hold one, and what that means is worth saying.** Its *floor* is the
-        // account's own records — the sign-in token or the model key, and the address in
-        // `model_conf.json` — so a row here is a person saying "not those". Storing it is the same act
+        // account's own record — the sign-in token — so a row here is a person saying "not that".
+        // Storing it is the same act
         // as at any other scope, which is why this is not a special case in the reader either: the
         // chain asks for a row at each scope in turn and the account's records are what answers when
         // this scope has none.
@@ -1261,7 +1070,6 @@ class CredentialStore(context: Context) : Credentials {
         const val HOST_SEPARATOR = "\n"
 
         /** The field a scope's choice is stored under, beside its connection. */
-        private const val CHOICE_SUFFIX = "_choice"
 
         /**
          * The prefix of a general secret's key: `secret_general_<name>`.

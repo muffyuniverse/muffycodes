@@ -79,7 +79,7 @@ class EditorScreenTest {
         // **Connecting is the only way out**, so this connects rather than reading to the end: the
         // gate is the settled rule, and a test harness that found a side door would be testing an
         // app that does not exist.
-        made.viewModel.saveModelKey("sk-or-v1-a-key")
+        made.viewModel.saveMintedKey("sk-or-v1-a-key")
         made.await("onboarding to close") { !made.viewModel.onboarding }
         made
     }

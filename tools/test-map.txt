@@ -40,7 +40,6 @@ DrawingTest app/src/main/java/com/example/notes/Drawing.kt app/src/main/java/com
 PhotoTest app/src/main/java/com/example/notes/Photo.kt app/src/main/java/com/example/notes/Markdown.kt
 WorkspaceTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Onboarding.kt
 RequestStatsTest app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
-ModelConfigTest app/src/main/java/com/example/notes/ModelConfig.kt
 SchemasTest app/src/main/java/com/example/notes/Schema.kt app/src/main/java/com/example/notes/Schemas.kt app/src/main/java/com/example/notes/Shape.kt app/src/main/java/com/example/notes/Jsonc.kt
 JsoncTest app/src/main/java/com/example/notes/Jsonc.kt
 OpenRouterAuthTest app/src/main/java/com/example/notes/OpenRouterAuth.kt

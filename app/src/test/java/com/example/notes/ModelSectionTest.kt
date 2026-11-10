@@ -51,7 +51,7 @@ class ModelSectionTest {
         MaterialTheme {
             Surface {
                 Column {
-                    KeyRow(viewModel = scene.viewModel, onSetKey = {})
+                    MintedKeyRow(viewModel = scene.viewModel, onSetKey = {})
                     ModelSection(viewModel = scene.viewModel, onOpenTemplates = onOpenTemplates)
                 }
             }
@@ -120,45 +120,22 @@ class ModelSectionTest {
         }
     }
 
-    // ---- the file, and the key ------------------------------------------------
+    // ---- the key ---------------------------------------------------------------
 
     @Test
-    fun `a config the app cannot read is said on the screen, and the file is not replaced`() {
-        // A damaged file does not quietly become the defaults. Both facts are true at once, and a person
-        // needs both: the file is broken, and here is what the agent would use meanwhile.
-        val file = ModelConfigFile.file(account)
-        file.writeText("""{ "version": 1, "active": {} }""")
-        scene.viewModel.refresh()
-
+    fun `the key row says plainly when there is no key, and names the secret a form uses`() {
         compose.setContent { Section() }
 
-        compose.onNodeWithText("will not read", substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun `reset puts back the config the app ships`() {
-        // From the build's own copy, not from the account's history: "reset" means the one that cannot
-        // itself be broken by the edit being undone.
-        scene.viewModel.setEffort("low")
-        assertEquals("low", scene.viewModel.modelConfig.active.effort)
-
-        scene.viewModel.resetModelConfig()
-
-        assertEquals("high", scene.viewModel.modelConfig.active.effort)
-    }
-
-    @Test
-    fun `the key row says plainly when there is no key`() {
-        compose.setContent { Section() }
-
-        // The sentence a fresh install gets. It matters more than it used to: a shipped template names no
-        // key, so this is the only place a person is told why nothing can be sent.
+        // The sentence a fresh install gets. It matters more than it used to: a shipped form names
+        // `@openrouter`, so this is the only place a person is told why nothing can be sent — and the
+        // name is there because "which secret" is the question that follows.
         compose.onNodeWithText("No model key yet", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("@${Schemas.MINTED_KEY_NAME}", substring = true).assertIsDisplayed()
     }
 
     @Test
     fun `the key itself is never on the screen`() {
-        scene.viewModel.saveModelKey("sk-or-v1-secret-value")
+        scene.viewModel.saveMintedKey("sk-or-v1-secret-value")
         compose.setContent { Section() }
 
         compose.onNodeWithText("sk-or-v1-secret-value").assertDoesNotExist()

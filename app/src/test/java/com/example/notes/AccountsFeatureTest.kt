@@ -522,7 +522,7 @@ class AccountsFeatureTest : FeatureTest() {
 
             // **The second connection is what ends it**, so this makes the first one's answer stand
             // and then connects the model.
-            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
             scene.await("onboarding to close") { !scene.viewModel.onboarding }
 
             assertNull(
@@ -547,7 +547,7 @@ class AccountsFeatureTest : FeatureTest() {
             assertEquals("nothing read yet", 0, scene.settings.onboardingAt)
             assertFalse("and not connected to a model yet", scene.viewModel.hasModelKey)
 
-            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
             scene.await("the key to be kept") { scene.viewModel.hasModelKey }
 
             assertFalse("**closed by connecting**, from page one", scene.viewModel.onboarding)
@@ -569,7 +569,7 @@ class AccountsFeatureTest : FeatureTest() {
 
             // A model key with no account. It is kept — the vault does not need an identity — and it
             // is not a connection to GitHub, which is why onboarding stays open.
-            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
 
             assertTrue(
                 "**onboarding stays open** — half of what it is for is done, and the other half is " +
@@ -600,7 +600,7 @@ class AccountsFeatureTest : FeatureTest() {
             assertTrue("one of the two is made", scene.viewModel.signedIn)
             assertFalse("and one is not", scene.viewModel.hasModelKey)
 
-            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
 
             assertTrue("**and now both**, which is the pair the marks draw", scene.viewModel.hasModelKey)
         } finally {
@@ -615,7 +615,7 @@ class AccountsFeatureTest : FeatureTest() {
             scene.await("onboarding to open") { scene.viewModel.onboarding }
             // **The one way out is connecting**, so this connects: the test is about what a second
             // launch shows, and it needs onboarding to have actually ended.
-            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveMintedKey("sk-or-v1-a-key")
             scene.await("onboarding to close") { !scene.viewModel.onboarding }
             scene.close()
 

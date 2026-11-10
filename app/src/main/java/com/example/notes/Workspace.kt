@@ -484,7 +484,7 @@ class Workspace(
     fun list(dir: File): List<Entry> {
         val children = dir.listFiles() ?: return emptyList()
         return children
-            .filter { !isHidden(it.name) && !isAppOwned(it) }
+            .filter { !isHidden(it.name) }
             .map { child ->
                 // **One `stat` per file, and none per folder.** `length()` is a cheap attribute on a
                 // path the listing already stat'ed to learn whether it is a directory; a folder's
@@ -504,20 +504,6 @@ class Workspace(
             // The rule is stated as "a link is not content", so it holds for a link a person makes too.
             .sortedWith(compareBy({ isLink(it.file) }, { !it.isFolder }, { it.name.lowercase() }))
     }
-
-    /**
-     * True for a file the app keeps in a place a person browses: the model's config.
-     *
-     * §3's rule is that everything the app made is invisible, and a hidden name is how that is
-     * usually said. `model_conf.json` breaks that rule by living in the account's root, where the
-     * projects list is drawn — so it is named here and left out of the list, rather than being
-     * renamed to a dot and made unreachable to anyone who wants to read what their agent is set to.
-     *
-     * **It lives at the root because it is the account's, not a project's:** the model is one
-     * conversation's setting for the whole phone, and a project does not bring its own.
-     */
-    fun isAppOwned(file: File): Boolean =
-        file.parentFile?.canonicalFile == accountDir.canonicalFile && file.name in APP_FILES
 
     /**
      * How a file is handled, from the part of its name after the last dot.
@@ -1566,7 +1552,6 @@ class Workspace(
     private fun coreProblem(file: File): String? = when {
         !file.exists() -> "That is no longer there"
         isHidden(file.name) -> "That belongs to the app"
-        isAppOwned(file) -> "That belongs to the app"
         isStructural(file) -> "That folder belongs to the app"
         isAppFlag(file) -> "That is one of the app's own files, and it is not the person's to change"
         // The record is not the person's to move, rename or delete — the same rule that stops them
@@ -2277,9 +2262,6 @@ class Workspace(
          * hidden by the same rule that hides everything else the app owns.
          */
         const val KEEPER = ".gitkeep"
-        /** The app's own files that live where a person browses, so they are not shown. */
-        val APP_FILES = setOf(ModelConfigFile.NAME)
-
         const val PINS_FILE = "pins.json"
         const val LOCKED_FILE = "locked.json"
 

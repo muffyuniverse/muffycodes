@@ -146,17 +146,14 @@ object AgentWiring {
             // **Resolved per worktree, and per poll.** A branch may have a model of its own
             // (`PLAN-credentials` §2.2), and a person who changes one while the service runs expects
             // the next poll of *that* worktree to use it.
-            // **The chat's own form first, then the account's chain.** A form is what a chat chooses
-            // (§3.11.3) and it is a whole request — address, key, model, body, the numbers — so a chat
-            // that has chosen one runs exactly it. A chat that has not chosen keeps inheriting, which
-            // is the state every existing conversation is in and the one the picker exists to end.
-            wired = { project, branch ->
-                if (Schemas.pointer(ws.accountDir, project, branch) != null) {
-                    Wired.ofForm(ws, credentials, project, branch)
-                } else {
-                    wiredFor(ws, credentials, project, branch, settings)
-                }
-            },
+            // **The chat's own form, and nothing else.** A form is what a chat chooses (§3.11.3) and
+            // it is a whole request — address, key name, model, body, the numbers — so a chat runs
+            // exactly it. **There is no fallback any more** (2026-11-10): `wiredFor` and `ConnKind.LLM`
+            // were deleted, so a chat with no form refuses in words and the picker is the door. A
+            // fallback would have spent a key on a model nobody chose for this chat, and it would have
+            // been the second answer to "what is this chat asked with" — which is the drift §3.11.3
+            // removed.
+            wired = { project, branch -> Wired.ofForm(ws, credentials, project, branch) },
             door = door,
             notify = notify,
             changed = changed,
@@ -180,48 +177,4 @@ object AgentWiring {
         )
     }
 
-    /**
-     * The model a runner asks when the config cannot be read.
-     *
-     * The app's own default, not a guess: a config that will not parse is a person's file being
-     * edited, and the right answer is the model the app ships with rather than no request at all.
-     */
-    val DEFAULT_MODEL = ActiveModel(ModelConfigFile.DEFAULT_MODEL, "high")
-
-    /**
-     * **What a turn on [project] at [branch] is asked with**, from what is on this phone.
-     *
-     * The one place the account's own records and the scoped vault are put together: the account
-     * supplies the model and address it has chosen (or the shipped default when its file will not
-     * parse), the vault supplies whatever a branch or project wrote, and [wiredFor] inherits the rest
-     * field by field — with the general settings as the root for the three numbers.
-     *
-     * **The account's key is a function, not a read**, so a poll with nothing due decrypts nothing.
-     */
-    fun wiredFor(
-        ws: Workspace,
-        credentials: Credentials,
-        project: String?,
-        branch: String?,
-        settings: SettingsStore,
-    ): Wired {
-        val login = credentials.activeLogin
-        // **The general settings are the root of the chain**, and the numbers below them are the
-        // person's own: a branch writes what it wants to change and inherits the rest.
-        val general = ContextBudget.Limits.of(
-            trigger = settings.triggerTokens.toLong(),
-            hard = settings.hardTokens.toLong(),
-            target = settings.targetTokens.toLong(),
-        )
-        return wiredFor(
-            project = project,
-            branch = branch,
-            account = ModelConfigFile.load(ws.accountDir).getOrNull()?.active ?: DEFAULT_MODEL,
-            general = general,
-            connectionAt = { scope -> credentials.connection(scope, ConnKind.LLM) },
-            choiceAt = { scope -> credentials.choice(scope, ConnKind.LLM) },
-            accountKey = { login?.let { credentials.modelKey(it) } },
-            accountKeyState = { login?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
-        )
-    }
 }

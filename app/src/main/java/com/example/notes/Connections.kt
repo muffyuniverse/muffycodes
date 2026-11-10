@@ -1,126 +1,64 @@
 package com.example.notes
 
 /**
- * **Which meaning of "scope" is in play, and how a connection is found.**
+ * **The git credential a scope holds, and how it is found.**
  *
- * The operator's correction settled the shape of this: *the chat model is selected at
- * account/project/branch level, in the window that adds the thing and in that row's ⋮ afterwards; the
- * account is the widest place it can live, because chat is per identity; Settings keeps only what is
- * the app's own.* This file is the rule that makes that work without a second copy of any secret.
+ * A connection is a **pair** — an address and the key for it — because a key is bound to one host: a
+ * project with its own address and an *inherited* key would send that key to a host it was never
+ * stored for. That is the hole the vault exists to close, one scope up, and it is why the pair is
+ * atomic even though every other number in this app inherits field by field.
  *
- * ### Two records, and they inherit differently
+ * ### There used to be two kinds, and the model half is gone (2026-11-10)
  *
- * A connection is a **pair** — an address and the key for it — and a **choice** — the model to ask for
- * and how hard it should think. They are deliberately not one thing:
+ * `ConnKind.LLM` stored an address, a key, a model, an effort and a request shape **per scope**, and a
+ * chat resolved all five by walking branch → project → account. It was deleted because the chat's
+ * request form already holds every one of them: the form's `address` is where the bytes go, its `key`
+ * is the *name* of a vault row, its `body` carries the model and the effort, and its `shape` is the
+ * document's own. Two answers to "what is this chat asked with" was the drift §3.11.3 removed —
+ * [Wired.ofForm] is now the only resolver, and a chat with no form refuses rather than inheriting a
+ * model nobody chose for it.
  *
- * - **The pair is atomic.** A key is bound to one host, so a project with its own address and an
- *   *inherited* key would send that key to a host it was never stored for. That is the hole the vault
- *   exists to close, one scope up.
- * - **The choice inherits field by field**, so changing only the model does not mean re-typing the
- *   key — which would put a second copy of a secret on the phone.
- *
- * ### Inheritance is one field at a time, and an empty field is the inheritance
- *
- * The operator's rule (2026-11-09): *"keep a rule that empty value means that it is inherited from the
- * parent, while if lower settings scope defines it, then it overwrites - this way user will be able to
- * change only what he needs and keep the rest of the fields inherited."*
- *
- * So **every field is resolved on its own**: the address, the key, the user, each kind's shape, the
- * model, the effort, and the three compaction numbers. A branch that writes only a model gets the
- * project's address and key; a project that writes only a shape keeps the account's model. There is no
- * switch, because a switch is a second thing to keep in step with the text.
- *
- * **What this replaces, and why it is a removal rather than a preference.** The old rule made the pair
- * atomic and *capped* the choice at the scope that supplied the address, on the reasoning that a model
- * id is a name the server assigns. That cap needed a second concept — a "half-made row", which was a row
- * whose address had no model and which was therefore silently not in force — and the app twice used
- * such a row's address after refusing its model. Two rules for one question became one: **what is
- * written is used, and what is not is inherited.** A model that the new server does not serve is a
- * request that server refuses in its own words, which is the same feedback every other number now
- * gets.
- *
- * ### The one guard left, and why it is the only one
- *
- * **A key follows its host.** A key is written for the server that issued it, and a scope that names a
- * different host while inheriting an older key would send that key to a machine nobody issued it for.
- * Every other mistake here is recoverable — a server refuses a wrong model, a typo'd number produces a
- * refusal — but a key sent to the wrong host cannot be un-sent. So this is not a guard on the person's
- * numbers; it is the vault's own boundary, which is why it is the only one that survived.
- *
- * ### Why the general scope is last
- *
- * **Nothing this build does needs it.** It existed for the embedding and rerank calls, which were
- * app-wide rather than somebody's — one vector space per app — and they went with the index
- * (2026-11-09). Chat is never general: a chat request is made *as* somebody and the log says who spent
- * the tokens. The rung is left in place with no consumer, which is a question for the minting step
- * (§3.11 N6) rather than something to remove quietly here.
+ * **What survived is the half with a safety property**: a git key follows its host, and a scope that
+ * names a different host while inheriting an older token would send that token to a machine nobody
+ * issued it for. A model server refuses a wrong model; a key sent to the wrong host cannot be un-sent.
  */
 enum class ConnKind {
     /** The token a repository is pushed, pulled and `ls-remote`d with. */
     GIT,
-
-    /** The key a model server is asked with, and the address it is asked at. */
-    LLM,
 }
 
 /**
- * One scope's connection: **an address and the key for it**, which travel together or not at all.
+ * One scope's git connection: **an address and the token for it**, which travel together or not at
+ * all.
  *
- * For [ConnKind.GIT], [address] is the host the token is for (`github.com`) and [user] is the name a
- * commit is made as — git's own two facts, since basic auth is `user:token` at an address. For
- * [ConnKind.LLM], [address] is the base URL (`https://openrouter.ai/api/v1`) and [user] is empty,
- * because an HTTP bearer token has no username.
+ * [address] is the host the token is for (`github.com`) and [user] is the name a commit is made as —
+ * git's own two facts, since basic auth is `user:token` at an address.
  *
- * **The shape travels with the pair** ([Shape]), because it is a fact about the same server: a
- * different address means a different shape, and half of one is a request that cannot be sent.
- *
- * **[shapes] is a map, and it holds one kind now: the chat completion.** It was a map because one
- * server answered three kinds of request — a chat completion, an embedding, a rerank — each with its
- * own path and body; the last two went with the index (2026-11-09). The map stays because it is the
- * vault's stored shape and not the app's: a connection written by another build still reads, and a
- * kind that is missing falls back to the app's preset for it.
+ * **The request shape is gone with the model half (2026-11-10).** A shape — a path, a body, a
+ * dialect — is a *request form's* job (`Schema`), and a connection is not a request.
  */
 data class Connection(
     /**
      * **Blank means "inherit"**, for this field like every other one.
      *
      * It reads oddly for an address, which is a credential's other half — but a scope that writes only
-     * a shape, or only a key, is a real thing to write, and an address written at every row would be a
-     * copy of the parent's that stops following it.
+     * a token is a real thing to write, and an address written at every row would be a copy of the
+     * parent's that stops following it.
      */
     val address: String = "",
     /** Blank means inherit — except at the widest scope, where there is nothing to inherit. */
     val secret: String = "",
     val user: String = "",
-    val shapes: Map<ShapeKind, Shape> = emptyMap(),
     /**
-     * **"The agent may spend this on its own requests to this host"** — one checkmark per kind,
-     * independent, **off unless somebody ticks it**.
+     * **"The agent may spend this on its own requests to this host"** — off unless somebody ticks it.
      *
      * Off, the entry is exactly as invisible to `auth:` as the account's own token is. On, `auth: git`
-     * (or `auth: llm`) resolves to it **only for the host it is bound to**, which is the rule that
-     * keeps a named secret from being a token-exfiltration primitive: the agent names the value, and
-     * the vault decides where it may go ([namedConnection]).
-     *
-     * **Per kind rather than per entry**, because the two have different blast radii: a git token can
-     * push, a model key can spend money, and a person may want the agent to ask the model server what
-     * models exist without letting it push as them.
+     * resolves to it **only for the host it is bound to**, which is the rule that keeps a named secret
+     * from being a token-exfiltration primitive: the agent names the value, and the vault decides where
+     * it may go ([namedConnection]).
      */
     val nameable: Boolean = false,
-    /**
-     * **True when the server wants no key at all** — a model server on this phone or on the local
-     * network — and null when this row says nothing about it.
-     *
-     * **Nullable, because false and unset are different facts.** A blank key used to mean "keyless"
-     * outright, which cannot work once a blank field means "inherit": a project that writes only a
-     * model must keep the account's key, not declare the server keyless. So "wants no key" is a
-     * statement somebody makes, and an unticked box is a statement nobody made.
-     */
-    val keyless: Boolean? = null,
 ) {
-    /** The request shape for [kind]: this row's own when it wrote one, the app's preset otherwise. */
-    fun shapeFor(kind: ShapeKind): Shape = shapes[kind] ?: Shape.preset(kind)
-
     /**
      * True when this row says nothing at all — which is what "inherit" looks like once it is stored.
      *
@@ -129,37 +67,7 @@ data class Connection(
      * and pressing Save would copy the parent's whole credential down and freeze it.
      */
     fun wroteNothing(): Boolean =
-        address.isBlank() && secret.isEmpty() && user.isBlank() && shapes.isEmpty() &&
-            !nameable && keyless == null
-}
-
-/**
- * One scope's choice: **the model, how hard it should think, and how big its context may get.**
- *
- * Every field is written-or-inherited on its own, like [Connection]'s. A scope that writes only the
- * trim number keeps the parent's model; one that writes only a model keeps the parent's three numbers.
- *
- * **[target], [forget] and [trim] are the operator's numbers**, and they live here rather than in the
- * general settings because they belong to a model: a 32k model and a million-token model want different
- * sizes, and the same person may use both in one account. Null means "not written", so the value in
- * force comes from the nearest scope that wrote one — down to the general settings, which are the root.
- *
- * **Nothing here is clamped and nothing is derived.** See `ContextBudget`: the app used to hold these
- * to a ceiling read from the model's window, and a number a person typed is a number they meant.
- */
-data class Choice(
-    val model: String = "",
-    val effort: String = "",
-    /** Where both hands aim: the size the context should end up at. */
-    val target: Long? = null,
-    /** Where the agent is asked to clear its context up. */
-    val forget: Long? = null,
-    /** Where the app trims the context itself. */
-    val trim: Long? = null,
-) {
-    /** True when this row says nothing, which is the inheritance — see [Connection.wroteNothing]. */
-    fun wroteNothing(): Boolean =
-        model.isBlank() && effort.isBlank() && target == null && forget == null && trim == null
+        address.isBlank() && secret.isEmpty() && user.isBlank() && !nameable
 }
 
 /**
@@ -232,12 +140,12 @@ fun namedConnection(
 /**
  * **Which kind a name is**, or null when it is not one this vault answers to.
  *
- * The two names are the two kinds' own: an article says `auth: git` or `auth: llm`, and there is no
- * third, because a per-entry name would be a namespace to keep in step with the vault's.
+ * **One name now.** `auth: llm` went with `ConnKind.LLM` (2026-11-10): a model key is a named vault
+ * secret like any other (`auth: @openrouter`), not a connection the app has a kind for. What is left
+ * is the one credential git itself needs, and a name that is not it is not this vault's.
  */
 fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
     "git" -> ConnKind.GIT
-    "llm" -> ConnKind.LLM
     else -> null
 }
 
@@ -248,8 +156,8 @@ fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
  * project scope is `main`, because "this project" in this app means its main worktree: the other
  * branches are the rows *below* it, which is what makes a branch's own row the narrower one.
  *
- * The account is `null to null`, which is how [wiredFor] is told "there is no worktree in this
- * question" — its chain then starts at the account and invents no branch.
+ * The account is `null to null`, which is how a caller is told "there is no worktree in this
+ * question" — so it invents no branch.
  */
 fun placeOf(scope: SecretScope): Pair<String?, String?> = when (scope) {
     is SecretScope.Branch -> scope.project to scope.branch
@@ -454,120 +362,4 @@ data class Wired(
             )
         }
     }
-}
-
-/**
- * **Resolves what a turn on [project] at [branch] is asked with**, one field at a time, narrowest first.
- *
- * The rule is the operator's: an empty field is inherited, a written one overwrites it. So this walks
- * branch → project → account and takes, for each field independently, the first scope that wrote it;
- * anything nobody wrote falls through to [account] (the account's own records: `model_key_` and
- * `model_conf.json`) and, for the three numbers, to [general] — the general settings, which are the root.
- *
- * **[project] may be null for a turn that belongs to no worktree.** The chain then starts at the
- * account, which is the honest answer rather than an invented branch scope.
- *
- * **The chat chain stops at the account.** A chat request is made *as* somebody, so nothing wider may
- * choose its model or answer its key.
- *
- * ### What is deliberately not here
- *
- * Any check that a written address is accompanied by a written model, or that a model belongs to the
- * server it is sent to. Both were rules once, and both are the server's to refuse: it knows which names
- * it serves and says so in its own words. The only composition this still refuses is a key and a host,
- * because — see this file's header — that is the one mistake that cannot be undone by a refusal.
- */
-fun wiredFor(
-    project: String?,
-    branch: String?,
-    account: ActiveModel,
-    general: ContextBudget.Limits = ContextBudget.Limits.of(trigger = 0, hard = 0),
-    connectionAt: (SecretScope) -> Connection? = { null },
-    choiceAt: (SecretScope) -> Choice? = { null },
-    accountKey: () -> String? = { null },
-    accountKeyState: () -> KeyState = { KeyState.NONE },
-): Wired {
-    // **Read each scope once**, so a field-wise walk cannot see two versions of the same row.
-    val scopes = connectionScopes(project, branch).filter { it != SecretScope.General }
-    val rows = scopes.map { Triple(it, connectionAt(it), choiceAt(it)) }
-
-    fun <T : Any> first(what: (Connection?, Choice?) -> T?): T? =
-        rows.firstNotNullOfOrNull { what(it.second, it.third) }
-
-    fun addressFrom(from: Int): String =
-        rows.drop(from).firstNotNullOfOrNull {
-            it.second?.address?.trim()?.takeIf(String::isNotEmpty)
-        } ?: account.baseUrl
-
-    // The address's own scope is remembered rather than the answer's name: the screen says which scope
-    // supplied the server, and a value that fell through to the account must not be reported as local.
-    val addressAt = rows.indexOfFirst { it.second?.address?.trim()?.isNotEmpty() == true }
-    val address = addressFrom(0)
-
-    /**
-     * **The key, and its host.** The narrowest row that wrote one wins — and it is used only while the
-     * address *that row would send to* (resolved from that scope upward, not the turn's own chain, so a
-     * narrower address cannot make an older key look wrong) names the same host.
-     *
-     * **The account's own key is held to the same rule.** It is not a row in the vault — it is
-     * `model_key_`, and the address it was made for is `model_conf.json`'s — so the chain's last step is
-     * that pair rather than nothing. Without this, a project that pointed at another server and wrote
-     * no key would have sent the account's key to that server, which is the leak the whole rule is for.
-     */
-    val keyVertex = rows.indexOfFirst {
-        it.second?.let { row -> !row.secret.isNullOrEmpty() || row.keyless == true } == true
-    }
-    val keyRow = if (keyVertex < 0) null else rows[keyVertex].second
-    val keyless = keyRow?.keyless == true
-    val asksHost = hostOfAddress(address)
-    // **The host the key in force belongs to**: the key row's own address, or the account's pair when
-    // no row wrote a key at all.
-    val keyHost = when {
-        keyRow == null -> hostOfAddress(account.baseUrl)
-        else -> hostOfAddress(addressFrom(keyVertex))
-    }
-    val keyHostProblem: String? = when {
-        keyless -> null
-        keyHost == asksHost -> null
-        else ->
-            // **Two hosts are named**, because the fix depends on which one is wrong: the address may be
-            // a typo, or the key may be from another server, or this scope may want its own.
-            "A key is stored for $keyHost, and this address is $asksHost. A key follows the host it " +
-                "was made for, so write this server's key here — or tick \"no key\" if it wants none."
-    }
-
-    val model = first { _, choice -> choice?.model?.takeIf(String::isNotEmpty) } ?: account.model
-    val effort = first { _, choice -> choice?.effort?.takeIf(String::isNotEmpty) } ?: account.effort
-
-    return Wired(
-        at = if (addressAt < 0) SecretScope.Account else scopes[addressAt],
-        active = ActiveModel(model = model, effort = effort, baseUrl = address),
-        key = when {
-            keyless -> ({ null })
-            // **A key for another host is not offered at all**, rather than sent and refused: the
-            // refusal would be the server's to make, but the leak would already have happened.
-            keyHostProblem != null -> ({ null })
-            keyRow != null -> ({ keyRow.secret.takeIf(String::isNotEmpty) })
-            else -> accountKey
-        },
-        keyState = if (keyRow == null) {
-            accountKeyState
-        } else {
-            // **A secret the store already decrypted is readable by definition**, and a blank one is
-            // nothing to read rather than a phone that would not unlock.
-            ({ if (keyRow.secret.isEmpty()) KeyState.NONE else KeyState.READABLE })
-        },
-        keyless = keyless,
-        // **The server's own shape, when it recorded one.** A connection that did not is the
-        // compatible default, and the preset is field-for-field what the app sent before a shape
-        // could be stored — so nothing about an ordinary connection changes here.
-        shape = first { row, _ -> row?.shapes?.get(ShapeKind.CHAT) } ?: Shape.CHAT,
-        // **Each number on its own**, which is what lets a branch change the trim and keep the rest.
-        limits = ContextBudget.Limits.of(
-            trigger = first { _, choice -> choice?.forget } ?: general.triggerAt,
-            hard = first { _, choice -> choice?.trim } ?: general.hardAt,
-            target = first { _, choice -> choice?.target } ?: general.targetAt,
-        ),
-        keyProblem = keyHostProblem,
-    )
 }

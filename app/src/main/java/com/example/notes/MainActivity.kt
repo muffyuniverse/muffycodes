@@ -127,12 +127,6 @@ private sealed interface Pending {
      * renamed after it.
      */
     data class SetAddress(val project: String) : Pending
-    /**
-     * **A project's or a branch's model connection** — the window `PLAN-credentials` §2.2 puts behind a
-     * row's ⋮. A branch is a place a credential can live, and `main` is the project, so the row that
-     * opens it decides the scope.
-     */
-    data class ModelConnection(val project: String?, val branch: String?) : Pending
     data class GitConnection(val project: String, val branch: String) : Pending
     data class DeleteProject(val project: String) : Pending
     data class Release(val project: String) : Pending
@@ -562,12 +556,6 @@ private fun AppRoot(viewModel: AppViewModel) {
             // from Settings were never two mechanisms.
             onAdd = { tap("add account"); pending = Pending.ChooseAccountDoor },
             onRemove = { login -> tap("remove account", login); pending = Pending.RemoveAccount(login) },
-            // **The account's own model connection**, whose scope is the account — the widest place a
-            // chat model may live, because a chat request is made *as* somebody.
-            onConnection = {
-                tap("model connection", "this account")
-                pending = Pending.ModelConnection(null, null)
-            },
             onSettings = { tap("settings"); showSettings = true },
         )
 
@@ -585,13 +573,8 @@ private fun AppRoot(viewModel: AppViewModel) {
             onEnter = { branch -> viewModel.enterBranch(branch) },
             onAdd = { tap("add branch"); pending = Pending.NewBranch },
             onRemove = { branch -> tap("remove branch", branch); pending = Pending.RemoveBranch(branch) },
-            // **A branch's own credentials**, and the row that opens them decides the scope — `main`
+            // **A branch's own git credential**, and the row that opens it decides the scope — `main`
             // is the project, so its menu writes at project scope and every other branch writes its own.
-            onModel = { branch ->
-                val project = viewModel.choosingBranchFor.orEmpty()
-                tap("model connection", "$project · $branch")
-                pending = Pending.ModelConnection(project, branch)
-            },
             onGit = { branch ->
                 val project = viewModel.choosingBranchFor.orEmpty()
                 tap("git connection", "$project · $branch")
@@ -617,12 +600,8 @@ private fun AppRoot(viewModel: AppViewModel) {
                     tap(if (copy) "copy project" else "move project", project)
                     pending = Pending.TransferProject(project, copy)
                 },
-                // **A project's row sets the project's credentials**, which is `main`'s scope — the
+                // **A project's row sets the project's git credential**, which is `main`'s scope — the
                 // branch a project is made of, and whose folder is the project's own tree.
-                onRowModel = { project ->
-                    tap("model connection", project)
-                    pending = Pending.ModelConnection(project, AgentSession.MAIN)
-                },
                 onRowGit = { project ->
                     tap("git connection", project)
                     pending = Pending.GitConnection(project, AgentSession.MAIN)
@@ -746,7 +725,7 @@ private fun Dialogs(
                 onSave = { key ->
                     // The key is never the detail: a trace is a file a person shares.
                     tap("save key", viewModel.account?.login.orEmpty())
-                    refused = keySaveVerdict(viewModel.saveModelKey(key)) { dismiss() }
+                    refused = keySaveVerdict(viewModel.saveMintedKey(key)) { dismiss() }
                 },
                 // **A real browser, not this app's WebView.** RFC 8252 is explicit that a sign-in
                 // belongs in an external user agent, and the reason is visible to the person: the
@@ -934,36 +913,6 @@ private fun Dialogs(
             onRelease = { version, note ->
                 Trace.tap("confirm publish release", version)
                 viewModel.tagRelease(version, note)
-            },
-        )
-
-        is Pending.ModelConnection -> LlmConnectionDialog(
-            // **What the row would use if nothing is typed** — the same resolution a turn uses, so a
-            // window cannot show one address and send to another.
-            inForce = viewModel.connectionShown(
-                scope = scopeOf(pending.project, pending.branch),
-                kind = ConnKind.LLM,
-                project = pending.project,
-                branch = pending.branch,
-            ),
-            where = whereOf(pending.project, pending.branch),
-            onDismiss = dismiss,
-            onSave = { draft ->
-                Trace.tap("confirm model connection", whereOf(pending.project, pending.branch))
-                viewModel.saveConnection(
-                    scope = scopeOf(pending.project, pending.branch),
-                    draft = draft,
-                )
-            },
-            onCheck = { draft, then ->
-                Trace.tap("check model connection", whereOf(pending.project, pending.branch))
-                viewModel.checkConnection(
-                    scope = scopeOf(pending.project, pending.branch),
-                    draft = draft,
-                    project = pending.project,
-                    branch = pending.branch,
-                    then = then,
-                )
             },
         )
 

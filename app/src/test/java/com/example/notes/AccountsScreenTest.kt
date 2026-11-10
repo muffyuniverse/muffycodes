@@ -69,7 +69,6 @@ class AccountsScreenTest {
         var entered: String? = null
         var added = 0
         var removed: String? = null
-        var connections = 0
         var settings = 0
     }
 
@@ -81,7 +80,6 @@ class AccountsScreenTest {
                     onEnter = { taps.entered = it },
                     onAdd = { taps.added++ },
                     onRemove = { taps.removed = it },
-                    onConnection = { taps.connections++ },
                     onSettings = { taps.settings++ },
                 )
             }
@@ -169,19 +167,6 @@ class AccountsScreenTest {
         // and this one has three, and the assertion that matters is one menu per row.
         compose.onAllNodesWithContentDescription("More")
             .assertCountEquals(scene.viewModel.accountsWithProjects.size)
-    }
-
-    @Test
-    fun `an account row offers its own model connection`() {
-        // **The widest place a chat model may live.** A project inherits it, a branch may override it,
-        // and it is asked of the account because a chat request is made *as* somebody.
-        val taps = Taps()
-        accounts(taps)
-
-        compose.onAllNodesWithContentDescription("More")[0].performClick()
-        compose.onNodeWithText("Model connection…").assertIsDisplayed().performClick()
-
-        assertEquals("the row asked for its own window", 1, taps.connections)
     }
 
     @Test

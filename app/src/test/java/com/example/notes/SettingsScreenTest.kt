@@ -374,7 +374,7 @@ class SettingsScreenTest {
         compose.onNodeWithText("No model key yet", substring = true).assertExists()
 
         // The key is written the way the dialog writes it, and the row must notice.
-        scene.viewModel.saveModelKey("sk-or-v1-a-key-that-reads-back")
+        scene.viewModel.saveMintedKey("sk-or-v1-a-key-that-reads-back")
         compose.waitForIdle()
 
         compose.onNodeWithText("No model key yet", substring = true).assertDoesNotExist()

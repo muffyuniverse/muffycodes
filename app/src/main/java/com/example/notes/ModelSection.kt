@@ -92,42 +92,37 @@ internal fun SettingRow(label: String, value: String, onTap: () -> Unit) {
 }
 
 /**
- * The OpenRouter key: **the first field of the agent block**, because nothing else in it works
- * without one.
+ * **The minted OpenRouter key, as a vault row** — and the button that mints another.
  *
- * It is here rather than inside [ModelSection] because of an order a person found confusing: the
- * model rows were on the settings screen, and the key — the thing that makes them usable — was at the
- * bottom of them. Reported from the live log: "move agent block up, right below signed in as block.
- * and make openrouter key the first field of agent block".
+ * The operator's shape (§3.11.4, 2026-11-10): *"openrouter oauth key minting should be an option in
+ * general settings in the same block with vault secrets management button - because it should be used
+ * to basically mint an openrouter key as a secret that then could be given an access scope."*
  *
- * The state is read through a revision ([AppViewModel.modelKeySaved]) rather than the getter: a
- * plain property gives Compose no reason to re-run this block when a dialog writes a key, and the
- * row went on saying "No key yet" after the key had been kept, which looks exactly like a key that
- * did not take.
+ * So this sits **beside** [SecretRow] rather than above it as a separate mechanism: minting writes an
+ * ordinary secret named `@openrouter`, the same kind the person could paste in by hand, and its scope
+ * is chosen on the vault screen like any other row's. There used to be a `model_key_<login>` record
+ * here as well — a second copy of the same key — which is exactly the duplication that made
+ * `ConnKind.LLM` exist.
+ *
+ * **It says which name it wrote**, because the answer to "why does my chat still say it has no key"
+ * is usually that the form names a different secret.
  */
 @Composable
-fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
-    val saved = viewModel.modelKeySaved
-    val keyState = remember(saved) { viewModel.modelKeyState }
-    val hasKey = keyState == KeyState.READABLE
+fun MintedKeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
+    // **Read through a revision**, not the getter: a plain property gives Compose no reason to re-run
+    // this block when the dialog writes the row, and it went on saying "no key" after a key had been
+    // minted — which looks exactly like a key that did not take.
+    val saved = viewModel.secretSaved
+    val hasKey = remember(saved) { viewModel.hasModelKey }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = when (keyState) {
-                    KeyState.READABLE -> "A model key is kept on this phone for this account."
-                    KeyState.LOCKED ->
-                        "A key is kept for this account. This phone has to be unlocked before the " +
-                            "model list or the agent can read it."
-                    KeyState.NONE ->
-                        "No model key yet, so the model list cannot be read and the agent " +
-                            "cannot talk."
-                    // **The sentence that was missing.** This row said "no key yet" about a key that
-                    // was stored and unreadable for an unrecognised reason, which is what the
-                    // operator saw after setting it - twice, the second time after it had been
-                    // marked fixed.
-                    KeyState.UNREADABLE ->
-                        "A key is stored for this account and this phone could not read it. Set it " +
-                            "again to replace it."
+                text = if (hasKey) {
+                    "A model key is kept as the secret \"@${Schemas.MINTED_KEY_NAME}\", which a " +
+                        "request form names to use it."
+                } else {
+                    "No model key yet, so a form that names \"@${Schemas.MINTED_KEY_NAME}\" has " +
+                        "nothing to spend and the agent cannot talk."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (hasKey) {
@@ -137,9 +132,7 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
                 },
             )
         }
-        TextButton(onClick = onSetKey) {
-            Text(if (keyState == KeyState.NONE) "Set key" else "Change key")
-        }
+        TextButton(onClick = onSetKey) { Text(if (hasKey) "Mint another" else "Mint a key") }
     }
 }
 

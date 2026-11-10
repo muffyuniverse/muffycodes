@@ -123,7 +123,7 @@ object Jsonc {
     /**
      * Where a syntax error is, in a line.
      *
-     * The same conversion `Schema` and `ModelConfigFile` do, kept here because every JSONC document is
+     * The same conversion `Schema` does, kept here because every JSONC document is
      * read through this object — a person editing a file needs a line, not a character offset.
      */
     fun whereIn(text: String, error: JSONException): String {
