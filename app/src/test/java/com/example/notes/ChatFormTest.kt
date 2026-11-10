@@ -13,6 +13,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
@@ -31,6 +33,7 @@ import org.robolectric.annotation.Config
  * - **the choice is a pointer, not a copy** — choosing writes `Schemas.setPointer`, which is the same
  *   fact the runner reads, so the button's label and the next turn's request cannot disagree.
  */
+@RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ChatFormTest {
 

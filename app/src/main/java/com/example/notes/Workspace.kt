@@ -2370,6 +2370,10 @@ class Workspace(
             // Configuration and data
             "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
             "xml", "csv", "tsv", "env", "gitignore", "license",
+            // **A request document**, which is text like any other: `.http` is what the editor's Run
+            // button looks for, and a file the app could not open as text would be a request nobody
+            // could read, let alone send.
+            "http", "rest",
             // Code
             "kt", "kts", "java", "py", "rb", "js", "mjs", "cjs", "ts", "tsx",
             "jsx", "c", "h", "cpp", "hpp", "cc", "cs", "go", "rs", "swift",

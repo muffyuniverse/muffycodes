@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.io.File
 
@@ -19,6 +21,7 @@ import java.io.File
  * directly, which is the only way to prove that expansion happened *before* sending rather than being
  * something the server would have noticed.
  */
+@RunWith(RobolectricTestRunner::class)
 class RequestFileFeatureTest : FeatureTest() {
 
     /** What the fake was asked, and what it answers. */
