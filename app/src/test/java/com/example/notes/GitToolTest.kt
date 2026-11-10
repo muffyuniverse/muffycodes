@@ -145,7 +145,10 @@ class GitToolTest {
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("naming both ends: $body", body.contains("both `from` and `to`"))
-        assertTrue("and why: $body", body.contains("committed"))
+        // **"a version", not "committed"** — the refusal's wording follows the rule (2026-11-10): work
+        // that is staged has no id until a push makes it a version, which is why one end cannot be left
+        // out. The assertion names the reason rather than a word the sentence used to contain.
+        assertTrue("and why: $body", body.contains("staged"))
     }
 
     @Test

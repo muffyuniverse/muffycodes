@@ -56,6 +56,11 @@ class RequestFileFeatureTest : FeatureTest() {
         scene.project("shopping")
         scene.open("shopping")
         val file = scene.file("call.http", text)
+        // **The message is cleared after the fixture is built.** `file()` ends by pressing Sync, which
+        // sets "Pushed" — and every test here asserts on the message the *request* produced, so a
+        // leftover from the fixture would be read as the request's answer. This is the same class of
+        // mistake as reading a state variable before the act that changes it.
+        scene.viewModel.message = null
         scene.viewModel.openEditor(file)
         return scene to file
     }
