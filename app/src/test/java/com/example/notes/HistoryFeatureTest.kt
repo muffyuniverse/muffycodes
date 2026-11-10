@@ -611,22 +611,13 @@ class HistoryFeatureTest : FeatureTest() {
             scene.versionsOf(file).size == 3
         }
         assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
-        // And the restore is a change waiting to leave: committed to the project at once
-        // (so the history holds it) and not yet pushed, which is what the row counts.
-        //
-        // Asserted on the repository rather than on the row, because the row's number arrives
-        // through a recount posted to the UI thread and this test has no frame to run it in. The
-        // row is checked where it can be: CopyFeatureTest and ProjectsFeatureTest both assert it
-        // after a change lands, and ProjectGitTest pins commit-and-push.
+        // **And nothing is waiting**, because `restoreAndSend` sent it — the version above is the
+        // proof it was recorded, and a send that leaves work staged would be a second, different
+        // bug. This assertion used to say the opposite ("committed at once and not yet pushed"),
+        // which was the rule before a save staged and a push committed.
         val unsentNow =
             ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") }).changes("shopping").total
-        // **One file, however many times it was written.** The restore is a third commit on the
-        // same path, so a commit count would say three and a file count says one — which is the
-        // number a person is looking at when the row says "1 to send".
-        assertTrue(
-            "the restore is waiting to be sent: $unsentNow after $before",
-            unsentNow >= 1,
-        )
+        assertEquals("and the send left nothing waiting: $unsentNow after $before", 0, unsentNow)
     }
 
     @Test

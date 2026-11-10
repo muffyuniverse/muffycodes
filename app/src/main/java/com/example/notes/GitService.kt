@@ -1102,6 +1102,36 @@ object GitService {
      * them differently — an absent path is a file that was added or deleted, and both are `""` to a
      * diff. What must not happen is reading a large object to find out that it is large.
      */
+    /**
+     * **A path's text as the index holds it** — the staged version, which is what a push would send.
+     *
+     * `blobText(repo, "HEAD", …)` answers the *last version*, and a save only stages (2026-11-10) — so
+     * a preview built from `HEAD` was empty for every unsent change, which is the only kind of change
+     * the window lists. The index's entry names the blob directly, so there is nothing to resolve.
+     */
+    fun stagedText(repo: Repository, path: String, limit: Int = 512 * 1024): String? = try {
+        val entry = repo.readDirCache().getEntry(path)
+        if (entry == null) {
+            null
+        } else {
+            val obj = repo.open(entry.objectId)
+            if (obj.type != org.eclipse.jgit.lib.Constants.OBJ_BLOB || obj.size > limit) {
+                null
+            } else {
+                String(obj.bytes, Charsets.UTF_8)
+            }
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    /** The staged size of [path], or null when it is not in the index. */
+    fun stagedSize(repo: Repository, path: String): Long? = try {
+        repo.readDirCache().getEntry(path)?.let { repo.open(it.objectId).size }
+    } catch (e: Throwable) {
+        null
+    }
+
     fun blobText(repo: Repository, revision: String, path: String, limit: Int = 512 * 1024): String? = try {
         val id = repo.resolve("$revision:$path")
         if (id == null) {

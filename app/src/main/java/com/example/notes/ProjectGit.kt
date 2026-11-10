@@ -638,13 +638,18 @@ class ProjectGit(
                 // **Said before it is read**, because reading it is the thing to avoid: a preview of a
                 // 40 MB file would be a page of text the person cannot use and a second of a stalled
                 // screen.
-                if ((GitService.blobSize(it, "HEAD", path) ?: 0) > PREVIEW_LIMIT ||
+                if ((GitService.stagedSize(it, path) ?: 0) > PREVIEW_LIMIT ||
                     (GitService.blobSize(it, sent, path) ?: 0) > PREVIEW_LIMIT
                 ) {
                     return Result.failure(IllegalStateException("too big to preview"))
                 }
+                // **The index, not `HEAD`.** A save stages and a push commits (2026-11-10), so the
+                // work this window lists is in the index and nowhere else — a preview built from
+                // `HEAD` compared the last push with itself and drew nothing, for every change.
                 val before = GitService.blobText(it, sent, path).orEmpty()
-                val after = GitService.blobText(it, "HEAD", path).orEmpty()
+                val after = GitService.stagedText(it, path).orEmpty()
+                // **The same two sides the lines come from.** Asking `HEAD` here would have judged a
+                // different version than the one being previewed.
                 if (GitService.looksBinary(before) || GitService.looksBinary(after)) {
                     return Result.failure(IllegalStateException("not text, so there is no preview"))
                 }
