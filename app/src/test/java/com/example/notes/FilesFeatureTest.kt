@@ -47,9 +47,11 @@ class FilesFeatureTest : FeatureTest() {
         scene.open(project)
         val file = scene.file("milk.txt", "two litres")
 
-        scene.viewModel.openEditor(file)
-        scene.viewModel.saveEditor("three litres")
-        scene.await("the save to settle") { !scene.viewModel.busy }
+        scene.openEditor(file)
+        // **`scene.saveEditor`, not `viewModel.saveEditor`** — the app's is asynchronous, and its two
+        // facts (the write, then the stage) land at different moments. The helper waits for both, which
+        // is the only way an assertion about the index is about the save rather than about the clock.
+        scene.saveEditor("three litres")
 
         val versions = scene.repo(project).log(null).map { it.message.trim() }
         assertFalse(

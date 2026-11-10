@@ -567,13 +567,21 @@ class Scenario(
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
         awaitRecordedFor(file, before, "\"$made\" being made")
-        // **A creation no longer makes a version** (2026-11-10), so a caller that goes on to read a
-        // history — `HistoryScreenTest` is one — has to be able to find one. Pressing Sync here rather
-        // than in each of those tests keeps "the app recorded this" one act, and the act a person
-        // performs is the same one.
+        if (text.isNotEmpty()) {
+            val textBefore = headOf(file)
+            viewModel.openEditor(file)
+            viewModel.saveEditor(text)
+            await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
+            awaitRecordedFor(file, textBefore, "\"$made\" being written")
+            viewModel.closeEditor()
+        }
+        // **Sync last, and only once.** A creation no longer makes a version (2026-11-10), so a caller
+        // that goes on to read a history — `HistoryScreenTest` is one — needs one to exist. Pressing it
+        // *after* the text is written matters: pressing it after the creation would record the empty
+        // file as a version of its own, which is the version this rule removed.
         //
-        // Only for a project with a remote and something staged: a file beside a project has no
-        // history at all, and a project with no address has nothing to send.
+        // Only for a project with something staged: a file beside a project has no history at all, and
+        // a project with no address has nothing to send.
         val project = projectOf(file)
         if (project != null) {
             val staged = try {
@@ -582,14 +590,6 @@ class Scenario(
                 emptyList()
             }
             if (staged.isNotEmpty()) sync(project)
-        }
-        if (text.isNotEmpty()) {
-            val textBefore = headOf(file)
-            viewModel.openEditor(file)
-            viewModel.saveEditor(text)
-            await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
-            awaitRecordedFor(file, textBefore, "\"$made\" being written")
-            viewModel.closeEditor()
         }
         return file
     }
