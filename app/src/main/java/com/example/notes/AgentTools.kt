@@ -2847,6 +2847,65 @@ class AgentTools(
     // ---- the web ------------------------------------------------------------
 
     /**
+     * **One request to anywhere, written as the request itself.**
+     *
+     * The operator's design (2026-11-09): *"an http command is just a tool http with header and body
+     * arguments or even better if as one complete argument, that can be written directly or take a
+     * path to a file, and all {{}} paths and secrets inside that argument get expanded, recursively."*
+     *
+     * So `request` is a document — the method and the address, the headers, a blank line, the body —
+     * and [HttpRequest] reads it. `@path` reads the document from the project instead, which is how a
+     * `.http` file runs. `{{file:…}}` and `{{secret:…}}` are expanded where they are written, by
+     * [Expand], for this request's own host.
+     *
+     * **The address rule runs before the expansion**, because expansion is what puts a secret into the
+     * document: a private address must be refused before a token is anywhere near it.
+     *
+     * **The sending and the filing are [HttpRun]'s**, because a person can run the same document from
+     * a screen and both halves must file their answers in the same place with the same sentence.
+     */
+    private fun http(args: JSONObject, deadline: Deadline): String {
+        // **Not trimmed**, because a body's trailing newline is data: a script being POSTed ends with
+        // one, and a document that was trimmed would arrive different from the file it was cut from.
+        val document = args.optString("request", "")
+        if (document.isBlank()) {
+            return refusal(
+                "`http` needs a `request`: the whole request as one document, or `@path` to a file " +
+                    "that holds it. It begins with the method and the address:\n\n" +
+                    "GET https://api.github.com/user\n" +
+                    "Authorization: Bearer {{secret:github}}\n\n" +
+                    "…or send `@agent/http/user.http` to send a file you wrote.",
+            )
+        }
+        // **`@path` reads the document from the project**, which is how a request can be kept,
+        // reviewed and edited like anything else — and how a `.http` file runs.
+        val text = if (document.startsWith("@")) {
+            val path = document.removePrefix("@").trim()
+            val file = File(projectDir, path)
+            if (!insideWorktreeOrAgent(file)) {
+                return refusal(
+                    "The request file \"$path\" is outside this project, so it cannot be read. A " +
+                        "request file lives inside the project, like \"agent/http/user.http\".",
+                )
+            }
+            if (!file.isFile) return refusal("The request file \"$path\" is not there.")
+            file.readText()
+        } else {
+            document
+        }
+        val parsed = HttpRequest.parse(text).getOrElse { return refusal(it.message.orEmpty()) }
+        Addresses.problem(parsed.url, privateAllowed())?.let { return refusal(it) }
+        val host = Secrets.hostOf(parsed.url)
+        val names = Expand.names(projectDir, host, credentials, project, branch)
+        val request = parsed.expand(host, names).getOrElse { return refusal(it.message.orEmpty()) }
+        deadline.check("http")
+
+        val outcome = HttpRun.send(request, projectDir, fetcher, fetchLimit())
+            .getOrElse { return refusal(it.message ?: "The request to ${request.url} failed") }
+        return if (outcome.ok) success(outcome.said) else refusal(outcome.said)
+    }
+
+    /**
      * Reads a page.
      *
      * **The engine is not this file's business.** [browser] is an interface, and what answers is
@@ -3101,220 +3160,6 @@ class AgentTools(
             refusal("The query ran but the file could not be written: ${e.message}")
         }
     }
-
-    /**
-     * Downloads one file from a URL into `agent/fetched/`.
-     *
-     * ## Why this tool had to exist
-     *
-     * The app could not turn a URL into a file at all. `browse` gives a page's **text**, `shot` a
-     * **PNG**, `artifact` one file from a **CI run** — and none of them takes a URL. So "vendor this
-     * library" or "get me that release asset" had no answer, which is a hole in a coding agent
-     * rather than a missing convenience.
-     *
-     * ## Why there is no `into`
-     *
-     * The operator's answer to *"where does a fetch land"* was *"everything can land there"*, and
-     * `agent/` is already git-excluded — so a download never commits itself. That makes **vendoring
-     * two visible steps**: `fetch`, then `archive` with `unpack`. A `fetch` that could write into
-     * `vendor/` would commit forty megabytes on the strength of one call the person never saw.
-     *
-     * ## What it refuses, and why each refusal is its own sentence
-     *
-     * - **A private address**, by the same call `browse` makes. A fetcher is a worse SSRF surface
-     *   than a browser: a page can lie, a download can *write into the project*.
-     * - **A size past the cap** — refused, never truncated, because half an archive fails later with
-     *   the cause three steps back.
-     * - **A server error**, quoted, because "the download failed" tells a model nothing it can act
-     *   on and the person can act on a `404`.
-     *
-     * ## What it answers
-     *
-     * The path, the size, and for a zip the entry names — **the same shape `artifact` returns**,
-     * because that shape was right: a zip in the conversation is binary that costs the whole context
-     * to say nothing.
-     */
-    /**
-     * `http` — **one request, to anywhere, with any verb.**
-     *
-     * ## Why this is one tool and not a method per service
-     *
-     * The app has no shell: there is no `curl`, no `gh`, no `sh`. Adding GitHub's API as typed Kotlin
-     * (`createRepo`, `dispatch`, `logs`, …) is what made the CI screen take five compile rounds and
-     * leaves four `REPOSITORY:` bindings to keep in step — and every new endpoint would need another
-     * round. That screen is deleted rather than ported; this tool is what replaced it. A request is
-     * a request: `method`, `url`, `headers`, `body`, `auth`. A GitHub endpoint nobody has written yet works
-     * on the first try, and so does every other API on the internet.
-     *
-     * ## The four rules it inherits, and the one it adds
-     *
-     * `Fetcher.request` keeps everything `bytes` does — the address check on **every hop**, the size counted
-     * while reading, the status kept separate from the body, `Accept` and `User-Agent` always set — because
-     * those are what make a request safe rather than what make a download work. It adds one: **a redirect on
-     * anything but a GET is returned rather than followed**, because a `POST` redirected to a `GET` silently
-     * loses its body and GitHub's API does exactly that when a repository is renamed.
-     *
-     * ## What is filed and what is said
-     *
-     * **The body is always filed**, in `agent/http/`, named from the URL plus a short hash of the method and
-     * body so two `POST`s to one endpoint do not overwrite each other. A small text answer is also put in the
-     * conversation, because an API's answer is what the next decision is made from; anything else is filed
-     * only and the path is named. That is the same protocol as `runs`, `shot` and `background`: **the
-     * destination differs, so the result-size rule does not apply** — the agent names the request, the app
-     * names the file, and the app says where it is.
-     *
-     * ## `auth:` names a secret and never holds one
-     *
-     * The value comes from the vault, is never echoed — not in the answer, the trace, the request log or a
-     * `background` result — and **only resolves for the host it was stored for**. Without that last rule the
-     * agent could name the secret and choose the destination, which is a token-exfiltration primitive rather
-     * than an authentication feature.
-     */
-    private fun http(args: JSONObject, deadline: Deadline): String {
-        val document = args.optString("request", "").trim()
-        if (document.isEmpty()) {
-            return refusal(
-                "`http` needs a `request`: the whole request as one document, or `@path` to a file " +
-                    "that holds it. It begins with the method and the address:\n\n" +
-                    "GET https://api.github.com/user\n" +
-                    "Authorization: Bearer {{secret:github}}\n\n" +
-                    "…or send `@agent/http/user.http` to send a file you wrote.",
-            )
-        }
-        // **`@path` reads the document from the project**, which is how a request can be kept,
-        // reviewed and edited like anything else — and how a `.http` file runs.
-        val text = if (document.startsWith("@")) {
-            val path = document.removePrefix("@").trim()
-            val file = File(projectDir, path)
-            if (!insideWorktreeOrAgent(file)) {
-                return refusal(
-                    "The request file \"$path\" is outside this project, so it cannot be read. A " +
-                        "request file lives inside the project, like \"agent/http/user.http\".",
-                )
-            }
-            if (!file.isFile) return refusal("The request file \"$path\" is not there.")
-            file.readText()
-        } else {
-            document
-        }
-        val parsed = HttpRequest.parse(text).getOrElse { return refusal(it.message.orEmpty()) }
-        // **The address rule before the expansion**, because expansion is what puts a secret into the
-        // document: a private address must be refused before a token is anywhere near it.
-        Addresses.problem(parsed.url, privateAllowed())?.let { return refusal(it) }
-        val host = Secrets.hostOf(parsed.url)
-        val names = Expand.names(projectDir, host, credentials, project, branch)
-        val request = parsed.expand(host, names).getOrElse { return refusal(it.message.orEmpty()) }
-        deadline.check("http")
-
-        val answer = fetcher.request(request.url, request.method, request.headers, request.body, fetchLimit())
-            .getOrElse { return refusal(it.message ?: "The request to ${request.url} failed") }
-
-        // ---- file it, then say what happened ----
-        val dir = File(projectDir, Fetched.HTTP_DIR)
-        val file = File(dir, httpNameFor(request.url, request.method, request.body))
-        val rel = try {
-            dir.mkdirs()
-            file.writeBytes(answer.bytes)
-            file.relativeTo(projectDir).invariantSeparatorsPath
-        } catch (e: Throwable) {
-            return refusal("The answer came back and could not be saved: " + Secrets.explain(e, "not written"))
-        }
-        // **The status is the first thing said**, because an API's vocabulary is statuses and a model that
-        // read "done" for a 422 would stop checking. A 4xx is not a failure of the tool: the body is the
-        // diagnostic, and it is filed and quoted like any other.
-        val head = "${request.method} ${request.url} → ${answer.status}"
-        val text2 = answer.text()
-        // **Small text goes in the conversation as well as the file**, because the next decision is made
-        // from it. Binary, or anything large, is filed only — putting a JPEG in the window spends the
-        // budget on something the model cannot read.
-        val inline = answer.bytes.size <= HTTP_INLINE && !looksBinary(answer.bytes)
-        // **A downloaded archive says what is inside it.** This was `fetch`'s answer and it is the
-        // reason `fetch` was not simply `http` with GET: an archive is the thing people download
-        // most, and "which files did this produce" is the question asked next. It moved here rather
-        // than being lost when `fetch` was deleted.
-        //
-        // A zip that will not open is not a failure of the download — the bytes are on disk either
-        // way — so an unreadable one simply has nothing to list.
-        val inside = if (request.method == "GET" && answer.ok) archiveListing(file) else null
-        return if (answer.ok) {
-            success(
-                head + "\n\n" + (if (inline) text2 else "The answer is ${Fetcher.size(answer.bytes.size.toLong())} and is filed, not quoted.") +
-                    "\n\nIt is at $rel." +
-                    (inside ?: "") +
-                    rateLimitNote(answer),
-            )
-        } else {
-            refusal(
-                head + "\n\n" + (if (inline) text2 else "The answer is filed at $rel.") +
-                    if (answer.status in 300..399) {
-                        "\n\nA redirect was returned rather than followed: a $request.method that became a GET " +
-                            "would lose its body. Location: " + answer.headers["Location"].orEmpty()
-                    } else {
-                        ""
-                    } +
-                    rateLimitNote(answer),
-            )
-        }
-    }
-
-    /**
-     * What an archive holds, as a sentence, or `null` when the file is not one.
-     *
-     * **Moved from `fetch`, which is why `fetch` was not merely `http` with GET.** A model that has
-     * just downloaded a zip needs to know which paths are inside before it can unpack it, and the
-     * listing is the difference between "I have a file" and "I have a dependency".
-     */
-    private fun archiveListing(file: File): String? {
-        val inside = try {
-            java.util.zip.ZipFile(file).use { zip ->
-                zip.entries().asSequence().filterNot { it.isDirectory }
-                    .take(FETCHED_SHOWN).map { it.name }.toList()
-            }
-        } catch (e: Throwable) {
-            return null
-        }
-        if (inside.isEmpty()) return null
-        return "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
-            (if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else "") +
-            // **The next step, named.** A downloaded archive that stays in `agent/http/` never
-            // reaches the project, and "which files did this produce" is answered by unpacking it.
-            "\n\nTo put it in the project, " +
-            "{\"unpack\":\"${file.relativeTo(projectDir).invariantSeparatorsPath}\",\"into\":\"<folder>\"}."
-    }
-
-    /**
-     * The rate-limit headers, when there are any.
-     *
-     * **Because a caller that is about to be refused should be told before it is.** GitHub answers `403`
-     * with `X-RateLimit-Remaining: 0` long before it stops answering at all, and a model that knows the
-     * number can wait instead of retrying into the same wall.
-     */
-    private fun rateLimitNote(answer: Fetcher.Answer): String {
-        val left = answer.headers.entries
-            .firstOrNull { it.key.equals("X-RateLimit-Remaining", ignoreCase = true) }?.value
-            ?: return ""
-        val reset = answer.headers.entries
-            .firstOrNull { it.key.equals("X-RateLimit-Reset", ignoreCase = true) }?.value
-        return "\n\n$left requests remain" + if (reset.isNullOrEmpty()) "." else " until $reset."
-    }
-
-    /**
-     * A filename for an answer, **unique per request and readable to a person.**
-     *
-     * `Fetched.nameFor` already answers the readable half — the last path segment, or the host when the URL
-     * is a bare endpoint. The hash is of the **method and the body**, not the URL: two `POST`s to one
-     * endpoint are two different requests, and without it the second would overwrite the first's answer and
-     * a model comparing them would be reading the same file twice.
-     */
-    private fun httpNameFor(url: String, method: String, body: ByteArray?): String {
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-            .digest((method + "\n" + (body?.let { String(it, Charsets.UTF_8) } ?: "")).toByteArray())
-        val short = digest.take(3).joinToString("") { "%02x".format(it) }
-        return Fetched.nameFor(url) + "-" + short
-    }
-
-
-
     /**
      * `pack` and `unpack` — **one tool with a mode, because it is one capability.**
      *

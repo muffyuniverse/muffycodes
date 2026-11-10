@@ -130,17 +130,16 @@ data class HttpRequest(
             val first = lines[at].trim()
             at++
             val space = first.indexOf(' ')
+            val firstWord = if (space < 0) "" else first.substring(0, space)
             val (method, url) = when {
                 space < 0 -> "GET" to first
-                // **A verb only when the first word is one.** `https://example.com/a b` is an address
-                // with a space in it — which is wrong, but it is wrong in a way the address check can
-                // say better than a guess at the verb.
-                first.substring(0, space).uppercase() in METHODS -> first.substring(0, space).uppercase() to first.substring(space + 1).trim()
                 // **A word where a verb goes is a verb, even when it is the wrong one.** `TRACE
                 // https://…` read as an address would be refused as "not an address", which sends a
-                // model looking for a typo in a URL that is fine. A candidate is a run of letters with
-                // no address punctuation in it, so `https://example.com/a b` stays an address.
-                isVerbLike(first.substring(0, space)) -> first.substring(0, space).uppercase() to ""
+                // model hunting a typo in a URL that is fine — the refusal below names the six verbs
+                // that work instead. The test is a run of letters, so `https://example.com/a b` (an
+                // address with a space in it) is still read as an address.
+                firstWord.uppercase() in METHODS || isVerbLike(firstWord) ->
+                    firstWord.uppercase() to first.substring(space + 1).trim()
                 else -> "GET" to first
             }
             if (url.isEmpty()) {
@@ -173,13 +172,19 @@ data class HttpRequest(
                 }
                 val name = line.substring(0, colon).trim()
                 val value = line.substring(colon + 1).trim()
-                // **A secret header cannot be written by hand.** A token typed into a document is a
-                // token in the conversation, the log and the trace; the vault attaches it by name.
-                if (name.lowercase() in SECRET_HEADERS) {
+                // **A secret header may hold a vault value and nothing else.** A token typed into a
+                // document is a token in the conversation, the log and the trace, which is the one
+                // thing the vault exists to prevent — so the value is either a `{{secret:…}}`
+                // placeholder, with at most a scheme word in front of it, or it is refused.
+                //
+                // **The scheme is the exception because it is not secret.** `Bearer` and `Basic` are
+                // in every request ever written; a credential header holding nothing but the
+                // placeholder would be a header an API could not read.
+                if (name.lowercase() in SECRET_HEADERS && !onlyPlaceholder(value)) {
                     return Result.failure(
                         IllegalArgumentException(
-                            "`$name` cannot be written by hand. A token written into a request is a " +
-                                "token in the conversation and in the log; write " +
+                            "`$name` cannot be written by hand. A token written into a request is " +
+                                "a token in the conversation and in the log; write " +
                                 "`$name: Bearer {{secret:<name>}}` and the vault supplies it.",
                         ),
                     )
@@ -195,6 +200,10 @@ data class HttpRequest(
                 // rather than consuming it — a body that began with its separator's own newline would
                 // arrive at the server with a leading blank line, which a JSON parser tolerates and a
                 // script does not.
+                //
+                // **`lines()` keeps the empty element a trailing newline makes**, so a body that ended
+                // with one arrives with it — which matters because a body is data: a script being
+                // POSTed that ended with a newline must not arrive without it.
                 lines.drop(at + 1).joinToString("\n").toByteArray(Charsets.UTF_8)
             } else {
                 null
