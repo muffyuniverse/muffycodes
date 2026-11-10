@@ -54,12 +54,13 @@ class HistoryScreenTest {
     }
 
     /**
-     * A file with four versions, newest first: "four litres of milk", "three
-     * litres of milk", "one litre of milk", and the empty file it was created as.
+     * A file with **three** versions, newest first: "four litres of milk", "three litres of milk", and
+     * "one litre of milk".
      *
-     * Four, not three, because making a file is itself a version: that is the app
-     * being honest about what happened, and a screen test that pretended otherwise
-     * would be testing a history the app does not have.
+     * **Three, not four, because making a file is no longer a version** (2026-11-10): a save stages and
+     * a push commits, so the empty file a `create` leaves behind is never a version of its own — the
+     * first version is the first *pushed* content. The old comment here said four and gave the reason
+     * ("making a file is itself a version"), and the reason is exactly what changed.
      */
     private fun versions(): File {
         // **A version belongs to a project.** The history is the project's repository now — there
@@ -171,10 +172,11 @@ class HistoryScreenTest {
         waitFor("one litre of milk")
         compose.onNodeWithText(">").assertIsEnabled()
 
-        // The file's first version is the empty file it was made as, so the last
-        // page is what the count says rather than a sentence on the page.
+        // **Three pages, because a creation is not a version any more** — so the second save is the
+        // last one, and the arrow has nothing left to do. The count is the app's, not a number the test
+        // decided on: it is read from the screen.
         compose.onNodeWithText(">").performClick()
-        waitFor("4 of 4")
+        waitFor("3 of 3")
 
         // And the oldest is the last page, so the arrow on that side has nothing to
         // do — while the one going back towards the newest still does.
@@ -187,13 +189,13 @@ class HistoryScreenTest {
         versions()
         compose.setContent { history() }
 
-        // "1 of 4 · newest first": the page number and the order agree, which is
+        // "1 of 3 · newest first": the page number and the order agree, which is
         // what a person needs in order to know which way the arrows go.
-        waitFor("1 of 4")
+        waitFor("1 of 3")
 
         compose.onNodeWithText(">").performClick()
 
-        waitFor("2 of 4")
+        waitFor("2 of 3")
     }
 
     // ---- 7. an empty history says what makes one appear ----------------------
