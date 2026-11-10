@@ -74,21 +74,21 @@ class WorkspaceTest {
         val proj = workspace.projectDir("Shopping")
         proj.mkdirs()
         File(proj, ".git/info").mkdirs()
-        File(proj, ".git/info/exclude").writeText("agent/\n.muffy/\nrequests/\n")
+        File(proj, ".git/info/exclude").writeText("agent/context.log\n.muffy/\nrequests/\n")
 
         assertTrue("the link was made", workspace.linkSystem(proj))
 
         val lines = File(proj, ".git/info/exclude").readLines()
         assertEquals(
             "and the line for it was added once, after the ones already there",
-            listOf("agent/", ".muffy/", "requests/", "shared"),
+            listOf("agent/context.log", ".muffy/", "requests/", "shared"),
             lines,
         )
         // **Idempotent**, because this runs on every refresh: a second pass must not append again.
         workspace.linkSystem(proj)
         assertEquals(
             "a second refresh adds nothing",
-            listOf("agent/", ".muffy/", "requests/", "shared"),
+            listOf("agent/context.log", ".muffy/", "requests/", "shared"),
             File(proj, ".git/info/exclude").readLines(),
         )
     }
@@ -725,13 +725,23 @@ class WorkspaceTest {
         assertEquals("the project is the repository folder", project, workspace.repoOf("Shopping"))
         assertEquals("and it is at the account root", workspace.accountDir, project.parentFile)
         assertEquals(
-            // **Four, and the fourth has no trailing slash on purpose.** `requests/` is written on
+            // **Five, and the last has no trailing slash on purpose.** `requests/` is written on
             // every response, including the keepalives sent while nobody is looking, so left
             // unignored it would be the noisiest thing in the working tree. `system` is the link to
             // the account's own folder (§13f) - and `system/` would match nothing, because a symlink
             // is not a directory. Measured: with the slash the link stayed untracked.
+            //
+            // **The first two are the agent's live conversation, not its record.** `agent/` is
+            // tracked so a fork carries it; `context.log` and `session.log` are one branch's position
+            // in that conversation, so a fork must not carry them — see `Workspace.APP_IGNORES`.
             "the app's own lines, and nothing else",
-            listOf("agent/", ".muffy/", "requests/", "shared"),
+            listOf(
+                "agent/context.log",
+                "agent/session.log",
+                ".muffy/",
+                "requests/",
+                "shared",
+            ),
             File(project, ".git/info/exclude")
                 .readLines()
                 .filter { it.isNotBlank() && !it.startsWith("#") },
@@ -760,7 +770,10 @@ class WorkspaceTest {
         )
         val exclude = File(project, ".git/info/exclude")
         val lines = exclude.readLines()
-        assertTrue("the app's lines are git's own exclude list", "agent/" in lines)
+        assertTrue(
+            "the app's lines are git's own exclude list",
+            "agent/context.log" in lines && "agent/session.log" in lines,
+        )
         // A second pass is a no-op, so nothing is rewritten on every open.
         val once = exclude.readText()
         workspace.ensureIgnore(project)

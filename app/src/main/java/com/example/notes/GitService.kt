@@ -883,6 +883,32 @@ object GitService {
     }
 
     /**
+     * **Stages everything, and commits nothing.** The person's save.
+     *
+     * The operator's decision (2026-11-10): *"make it so that we dont commit on save, we commit on push,
+     * on save changes are only staged. and add a commit message arg to push tool."*
+     *
+     * **Why this is the right shape for this app.** A commit is a *version*, and versions are what the
+     * history, the restore and the branch screens read — so an autosave that made one per keystroke
+     * filled the history with noise and made "what did I change" a question about the app's timing
+     * rather than about the work. Staged changes are the honest middle: the work is recorded in the
+     * index (so `changes` can list it, and a push can turn it into one version with a message somebody
+     * wrote), and the history holds the versions a person decided on.
+     *
+     * **The index is where git already keeps this.** `git add` writes the blob and the index entry, so
+     * a save that stages is a save whose content is in the object database — an interrupted phone loses
+     * the commit, not the text.
+     */
+    fun stageAll(repo: Repository, inFlight: Boolean = false): Boolean = try {
+        Git(repo).use { git ->
+            retryingLock(repo, inFlight) { stageEverything(git) }
+            true
+        }
+    } catch (e: Throwable) {
+        false
+    }
+
+    /**
      * The paths the newest commit changed, against its parent.
      *
      * **The commit's own diff, not the working tree's.** After a commit the working tree is clean, so
@@ -1121,6 +1147,23 @@ object GitService {
             b++
         }
         return out
+    }
+
+    /**
+     * **What is staged and not yet committed** — the work a push is about to turn into a version.
+     *
+     * A save stages now (§"we commit on push"), so the question "is there anything to commit" is asked
+     * of the index rather than of the working tree. `added`, `changed` and `removed` are the index's own
+     * three answers; `modified` and `missing` would be *unstaged* edits, which a save has already
+     * staged and which a push must not quietly include under a message that did not mention them.
+     */
+    fun stagedPaths(repo: Repository): List<String> = try {
+        val status = Git(repo).use { it.status().call() }
+        (status.added + status.changed + status.removed)
+            .filter { !it.startsWith(".") }
+            .sorted()
+    } catch (e: Throwable) {
+        emptyList()
     }
 
     fun changedPaths(repo: Repository): List<String> {
@@ -2046,7 +2089,7 @@ object GitService {
      * **Refused rather than guessed** when the name is one git would reject or when it already
      * exists: a branch made twice is a person working in the wrong one for an hour.
      */
-    fun createBranch(repo: Repository, name: String, from: String = "main"): Result<String> {
+    fun createBranch(repo: Repository, name: String, from: String? = AgentSession.MAIN): Result<String> {
         val problem = branchNameProblem(name)
         if (problem != null) return Result.failure(IllegalArgumentException(problem))
         return try {
@@ -2054,18 +2097,24 @@ object GitService {
                 if (git.branchList().call().any { it.name == "refs/heads/$name" }) {
                     return Result.failure(IllegalStateException("There is already a branch called $name."))
                 }
-                if (repo.exactRef("refs/heads/$from") == null) {
-                    return Result.failure(IllegalStateException("There is no $from to branch from."))
-                }
+                // **`from` may be null, and null means "from nothing".** A branch started from no parent
+                // has no commits, so its first tree is empty and its first commit is the app's — which
+                // is what "a clear slate" is, and the operator asked for both kinds in one dialog.
+                //
                 // **`setStartPoint` takes a String or a RevCommit, not an ObjectId** — the ref name
                 // itself is the argument, so resolving it first would only be a way to get it wrong.
-                git.branchCreate().setName(name).setStartPoint("refs/heads/$from").call()
+                val start = from?.let { "refs/heads/$it" }
+                if (start != null && repo.exactRef(start) == null) {
+                    return Result.failure(IllegalStateException("There is no $from to branch from."))
+                }
+                git.branchCreate().setName(name).setStartPoint(start).call()
                 Result.success(name)
             }
         } catch (e: Throwable) {
             Result.failure(IllegalStateException(Secrets.describe(e)))
         }
     }
+
 
     /**
      * **The branches holding commits `main` does not have** — the ones a row must say so about.

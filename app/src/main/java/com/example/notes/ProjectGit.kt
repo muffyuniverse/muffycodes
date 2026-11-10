@@ -278,6 +278,19 @@ class ProjectGit(
             }
         }
 
+    /**
+     * **Stages everything, and commits nothing** — what a save does now.
+     *
+     * The same hold and the same `inFlight = false` reasoning as [commitOutcome], because it is the
+     * same write to the same index. Answers false when the index could not be written, so a save whose
+     * work is on disk but not staged says so rather than reporting a clean save.
+     */
+    fun stage(project: String): Boolean =
+        RepoLocks.hold(repoDir(project), "stage") {
+            val repo = open(project) ?: return@hold false
+            repo.use { GitService.stageAll(it, inFlight = false) }
+        }
+
     @JvmOverloads
     fun sync(project: String, note: String = ""): GitService.RemoteResult =
         // **The whole sync under one hold.** It commits, prunes, and pushes, and every one of those
@@ -303,11 +316,12 @@ class ProjectGit(
     ): GitService.RemoteResult {
         return repo.use {
             try {
-                // Every change is already committed, so this can only be catching
-                // something that slipped past — a half-written file, a deletion made
-                // by another app. It stays because a push that silently leaves a
-                // change behind is worse than a commit nobody asked for.
-                val changed = GitService.changedPaths(it)
+                // **The staged work, which is what a save leaves behind now.** `changedPaths` answers
+                // the working tree and `stagedPaths` the index; a save stages, so the index is where
+                // the work is. Both are read because a sync also catches what slipped past a save — a
+                // half-written file, a deletion made by another app — and a push that silently leaves
+                // a change behind is worse than a commit nobody asked for.
+                val changed = (GitService.stagedPaths(it) + GitService.changedPaths(it)).distinct()
                 // **The trace names what was waiting.** "10 changed" on a row is a
                 // number nobody can act on; the names are what says whether it is real
                 // work or something the app left behind. One line per sync, so it costs
@@ -324,6 +338,9 @@ class ProjectGit(
                     // and their sentence explains it better than the app can.
                     val made = GitService.commitEverything(
                         it,
+                        // **The person's sentence, or one written from what changed.** With the commit
+                        // moved to the push, this is the version's only message — so a note that was
+                        // typed is used verbatim and a sync with none names the files.
                         note.trim().ifBlank { CommitMessage.sync(changed) },
                         authorProvider(),
                         // Inside `RepoLocks.hold`, so a lock failure is a corpse, not a rival.
@@ -340,9 +357,12 @@ class ProjectGit(
                         )
                     }
                 }
-                // The sync's own message, on its own commit, so that the push carries
-                // a reason to the remote rather than only a list of files.
-                GitService.commitMarker(it, note, authorProvider())
+                // **No marker commit any more.** The note is the message of the commit made above
+                // from the staged work, which is where a version is made now (2026-11-10) — so a
+                // second, empty commit carrying the same sentence would be the same reason told twice.
+                // It survives as the *fallback* above: a sync with nothing staged but a note still
+                // says why it was pushed, which is what a person pressing Sync on a clean tree means.
+                if (changed.isEmpty()) GitService.commitMarker(it, note, authorProvider())
                 // **What is sent is `HEAD` minus the unsynced paths.** The local commit is already
                 // made above and stays exactly as it is; the push derives a tree without them, so a
                 // file the person unsynced keeps every version it has on this phone and never
@@ -393,13 +413,43 @@ class ProjectGit(
      *
      * Answers the same shape as [sync], because the callers say the same kind of sentence.
      */
-    fun push(project: String): GitService.RemoteResult =
+    fun push(project: String, message: String = ""): GitService.RemoteResult =
         RepoLocks.hold(repoDir(project), "push") {
             val repo = open(project) ?: return@hold GitService.RemoteResult(
                 "This project has no repository yet", false
             )
             repo.use {
                 try {
+                    // **The commit happens here, because a save only stages now.**
+                    //
+                    // The operator's decision (2026-11-10): *"we dont commit on save, we commit on
+                    // push."* So the staged work becomes one version with the message somebody wrote
+                    // — the person's, or the agent's — and a push is the moment a version is made.
+                    //
+                    // **A message that was not given is still a commit.** A push with staged work and
+                    // no message is a person pressing the button they pressed before this rule
+                    // existed, and refusing it would be the app teaching a rule by breaking a habit.
+                    // The message then names what changed, which is what the old autosave said.
+                    val staged = GitService.stagedPaths(it)
+                    if (staged.isNotEmpty()) {
+                        val made = GitService.commitEverything(
+                            it,
+                            message.trim().ifBlank { CommitMessage.sync(staged) },
+                            authorProvider(),
+                            // Inside `RepoLocks.hold`, so a lock failure is a corpse, not a rival.
+                            inFlight = false,
+                        )
+                        // **Nothing is pushed over a commit that did not happen.** Pushing now would
+                        // send a tree missing exactly the work the person was trying to save, and
+                        // report the push as done.
+                        if (!made.ok) {
+                            return GitService.RemoteResult(
+                                "Nothing was pushed, because the changes could not be committed: " +
+                                    made.error,
+                                false,
+                            )
+                        }
+                    }
                     val remote = remoteUrlOf(it)
                     val (token, user) = when (val answer = credentialFor(project, remote)) {
                         is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(

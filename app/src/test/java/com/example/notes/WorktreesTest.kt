@@ -66,6 +66,83 @@ class WorktreesTest {
         return dir
     }
 
+    /**
+     * **A fork carries its parent's committed work, and starts its own conversation.**
+     *
+     * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch
+     * I am forking (or none for a clear slate), and the new branch agent keeps the memories of the
+     * initial branch."* — and then, precisely: *"I mean memory (context and session log) of an agent"*.
+     *
+     * **So this asserts the split the app actually makes**, which is not the one a first reading
+     * suggests. A worktree is filled from a commit, so what arrives is what was committed:
+     *
+     * - `agent/`'s artifacts are tracked, so they come with the fork;
+     * - `agent/context.log` and `agent/session.log` are ignored, so they do **not** — a fork starts a
+     *   conversation of its own rather than inheriting the parent's live position, which is what would
+     *   make two branches rewrite the same rows on their first turn.
+     */
+    @Test
+    fun `a fork brings the parent's committed files and leaves the live conversation behind`() {
+        val dir = projectWithBranch()
+        // **The parent's own conversation, committed the way a person's work is.** `agent/` is tracked
+        // now, so a fetched answer and a diff travel; the two logs are ignored and must not.
+        val agent = File(dir, "agent").apply { mkdirs() }
+        File(agent, "fetched-answer.txt").writeText("what the server said")
+        File(agent, AgentLog.CONTEXT).writeText("   1     9 agent  hi\n")
+        File(agent, AgentLog.SESSION).writeText("a conversation\n")
+        workspace.ensureIgnore(dir)
+        commitAll(dir, "with a record")
+        GitService.openExisting(dir)!!.use { repo ->
+            GitService.createBranch(repo, "forked").getOrThrow()
+        }
+
+        val tree = trees.make("Shopping", "forked").getOrThrow()
+
+        assertTrue(
+            "the parent's committed work is there",
+            File(tree, "agent/fetched-answer.txt").isFile,
+        )
+        assertEquals(
+            "and its text is the parent's",
+            "what the server said",
+            File(tree, "agent/fetched-answer.txt").readText(),
+        )
+        assertFalse(
+            "the live conversation did not come with it",
+            File(tree, AgentLog.CONTEXT).isFile,
+        )
+        assertFalse(
+            "nor its running log",
+            File(tree, AgentLog.SESSION).isFile,
+        )
+    }
+
+    /**
+     * **A branch from nothing is a real branch**, and its folder is empty on purpose.
+     *
+     * The other half of the operator's question — *"or none for a clear slate"*. A ref with no commits
+     * cannot be resolved, so the folder is written and left with nothing in it; `Worktrees.make` used to
+     * refuse that as "there is no branch called …", which would have made the clear-slate answer a
+     * dialog that always failed.
+     */
+    @Test
+    fun `a branch with no commits gets a folder and no files`() {
+        val dir = projectWithBranch()
+        GitService.openExisting(dir)!!.use { repo ->
+            GitService.createBranch(repo, "empty", from = null).getOrThrow()
+        }
+
+        val tree = trees.make("Shopping", "empty").getOrThrow()
+
+        assertTrue("the folder exists", tree.isDirectory)
+        assertTrue("and it is a worktree git knows", File(tree, ".git").isFile)
+        assertEquals(
+            "with nothing in it but the app's own links",
+            emptyList<String>(),
+            (tree.listFiles() ?: emptyArray()).map { it.name }.filter { it != "shared" },
+        )
+    }
+
     /** Stages and commits everything in [dir], from real files, so the tree is not empty. */
     private fun commitAll(dir: File, message: String) {
         val repo = GitService.initOrOpen(dir, author)

@@ -102,12 +102,11 @@ class Worktrees(private val workspace: Workspace) {
             } catch (e: Throwable) {
                 null
             }
-            if (tip == null) {
-                return Result.failure(
-                    IllegalStateException("There is no branch called $branch in $project."),
-                )
-            }
-
+            // **A branch with no commits is a real branch, and this is the case a clear slate makes.**
+            // `createBranch(name, from = null)` writes an unborn ref, so there is nothing to resolve —
+            // and refusing here would make "from nothing" a dialog that always fails. The folder is
+            // made and left empty, which is exactly what a clear slate is; the app's own first commit
+            // fills it (see `Workspace.ensureFreshIgnore`).
             val dir = dirOf(project, branch)
             val private = commonEntry(project, branch)
             try {
@@ -118,7 +117,9 @@ class Worktrees(private val workspace: Workspace) {
                 Beside.write(File(private, "commondir"), "../..\n")
                 Beside.write(File(private, "gitdir"), File(dir, ".git").absolutePath + "\n")
                 Beside.write(File(private, "HEAD"), "ref: refs/heads/$branch\n")
-                populate(dir, tip)
+                // **Nothing to check out, and that is not a failure.** An unborn branch has no tree,
+                // so the folder is written and left empty; the first commit is the app's.
+                if (tip != null) populate(dir, tip)
                 // **The system folder comes with the checkout** (§13f). Done here rather than waiting
                 // for the next refresh, because a person who opens a branch is about to look at it.
                 workspace.linkSystem(dir)

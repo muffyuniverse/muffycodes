@@ -1054,13 +1054,17 @@ private fun Dialogs(
                   },
         )
 
-        is Pending.NewBranch -> PromptDialog(
-            title = "New branch",
-            label = "Name",
-            initial = "",
-            confirm = "Create",
+        is Pending.NewBranch -> NewBranchDialog(
+            // **The branches this project already has**, which is what a parent may be. Read from the
+            // state the branch screen keeps rather than from the repository: the screen has just listed
+            // them, and a second read on the frame the window opens would be file I/O for an answer
+            // that cannot have changed since.
+            parents = viewModel.choosingBranches,
             onDismiss = dismiss,
-            onConfirm = { name -> viewModel.newBranch(name) },
+            onConfirm = { name, from ->
+                Trace.tap("confirm add branch", name)
+                viewModel.newBranch(name, from)
+            },
         )
 
         is Pending.RemoveBranch -> ConfirmDialog(

@@ -569,7 +569,7 @@ class AgentTools(
             // whether there is anything to send.
             "git" to setOf("op", "path", "from", "to"),
             "pull" to setOf(),
-            "push" to setOf(),
+            "push" to setOf("message"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -893,6 +893,19 @@ class AgentTools(
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
             spec(
+                "push",
+                "**Send what is staged to the remote, as one version.** A save only stages now — " +
+                    "`write`, `delete`, `move` and `restore` record the work in the index and leave " +
+                    "the history alone — so a push is the act that turns staged work into a commit, " +
+                    "and `message` is what that version is. " +
+                    "**`message` is required when anything is staged**, because the version's reason " +
+                    "is the thing a person reads in the history later and only you know it. A push " +
+                    "with nothing staged is answered honestly and sends nothing. " +
+                    "A rejection means the remote moved: call `pull`, resolve anything it names, then " +
+                    "push again. Nothing is ever forced.",
+                "{\"message\":\"Add the shopping list and its prices\"}",
+            ),
+            spec(
                 "git",
                 "What changed between two revisions. **The compressed form of a change**, which " +
                     "`read` cannot give you: reading a 400-line file to find that three lines moved " +
@@ -1089,7 +1102,7 @@ class AgentTools(
             "mcp" -> mcp(args, deadline)
             "git" -> gitTool(args, deadline)
             "pull" -> pull()
-            "push" -> push()
+            "push" -> push(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
         if (call.tool in CHANGES_DISK) onDiskChanged()
@@ -3890,33 +3903,38 @@ class AgentTools(
      * matters to the model's next move: a failure invites a retry, and retrying a rejected push
      * fails the same way forever. Naming it a conflict points at `pull`.
      */
-    private fun push(): String {
+    private fun push(args: JSONObject): String {
         // **`repository`, not `repo`**, because [repo] is the branch's view of the project and a local
         // of the same name would shadow it — which Kotlin reports as a self-reference rather than as a
         // shadowing mistake, so the message names the wrong problem.
         val repository = repo.open(project)
             ?: return refusal("This project has no repository yet")
-        // **Committed first, so what is sent is a thing you can point at.** A push carrying
-        // uncommitted work would send something the model never chose, and the app's own rule is
-        // that every change is a version.
-        val dirty = repository.use {
+        // **A push is where a version is made now**, so it takes the message that says what the version
+        // is. The operator's decision (2026-11-10): *"we dont commit on save, we commit on push, on save
+        // changes are only staged. and add a commit message arg to push tool."*
+        //
+        // **The message is the agent's, and it is required when there is anything staged.** A push with
+        // no message and nothing staged is a no-op that answers honestly; a push with no message and
+        // work waiting would be the app inventing one, which is what the operator's change is against.
+        val message = args.optString("message", "").trim()
+        val staged = repository.use {
             try {
-                val status = GitService.status(it)
-                status.staged + status.unstaged
+                GitService.stagedPaths(it)
             } catch (e: Throwable) {
-                -1
+                return refusal("This project's repository could not be read")
             }
         }
-        if (dirty > 0) {
+        if (staged.isNotEmpty() && message.isEmpty()) {
+            val count = if (staged.size == 1) "1 change is" else "${staged.size} changes are"
             return refusal(
-                "There are $dirty uncommitted change(s). A push sends commits, not files — " +
-                    "write what you changed first (a write commits itself), or the change you " +
-                    "meant to send will not be in it.",
+                "$count waiting, and a push is what turns them into a version — so give " +
+                    "`message`: what this version is, in one sentence. The files are: " +
+                    staged.take(12).joinToString(", ") +
+                    (if (staged.size > 12) " and ${staged.size - 12} more" else "") + ".",
             )
         }
-        if (dirty < 0) return refusal("This project's repository could not be read")
 
-        val result = repo.push(project)
+        val result = repo.push(project, message)
         // **A push is the one act that leaves the phone**, so the log says so whether it worked or
         // not. Without it a person reading the trace could not tell that the agent had sent
         // anything to GitHub at all — the trace would show the writes and then stop, and "the
@@ -3938,18 +3956,24 @@ class AgentTools(
 
     // ---- the promises -------------------------------------------------------
     /**
-     * Commits what a tool just changed, and says which of the two things happened.
+     * **Stages what a tool just changed, and says so.**
      *
-     * A file that changed but could not be committed is a `1`: the work is on the phone and not
-     * in its history, which is the one state this app exists to make impossible to miss.
+     * The operator's decision (2026-11-10): *"we dont commit on save, we commit on push, on save
+     * changes are only staged."* So a tool's write is recorded in the index and becomes a version when
+     * somebody pushes with a message — which is the one moment a version has a reason attached.
+     *
+     * **`what` is gone from the signature on purpose.** It was the commit message, and there is no
+     * commit here to name: a message written per tool call was the app narrating itself into a history
+     * nobody reads it in. The message a push carries is the one that describes a version.
+     *
+     * **A failure is still a `1`.** Work on disk that the index did not take is the state this app
+     * exists to make impossible to miss.
      */
     private fun commit(what: String, done: String): String {
-        val outcome = repo.commitOutcome(project, what)
-        return if (outcome.ok) {
-            success(done)
-        } else {
-            refusal("$done — but the history did not record it: ${outcome.error}")
+        if (!repo.stage(project)) {
+            return refusal("$done — but it could not be staged, so a push would not carry it.")
         }
+        return success(done)
     }
 
     private fun success(body: String): String = "0\n$body"

@@ -2597,10 +2597,12 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Commits [project]'s worktree, whatever changed in it.
+     * Stages [project]'s worktree, whatever changed in it.
      *
-     * Used for a change that spans two repositories — a move across the boundary —
-     * where the file that changed is no longer in one of them.
+     * Used for a change that spans two repositories — a move across the boundary — where the file
+     * that changed is no longer in one of them, so the caller cannot ask the file's own tree.
+     *
+     * **Staging, not committing** (2026-11-10): a save records the work and a push makes the version.
      */
     private fun commitProject(
         project: String,
@@ -2610,10 +2612,9 @@ class AppViewModel @JvmOverloads constructor(
         val g = git ?: return
         val login = activeLogin
         onWorker {
-            if (login != null && accounts.exists(login)) g.onBranch(branch).commit(project, what)
-            // The row's count was read *before* this commit, so it still says the
-            // change is waiting after it has been recorded. Ask again, now that the
-            // answer has changed.
+            if (login != null && accounts.exists(login)) g.onBranch(branch).stage(project)
+            // The row's count was read *before* this, so it still says the change is waiting after it
+            // has been recorded. Ask again, now that the answer has changed.
             main.post { refreshChanges() }
         }
     }
@@ -3074,12 +3075,21 @@ class AppViewModel @JvmOverloads constructor(
             // greying Save out, and a history with nothing new in it. The person's work
             // was safe in the file and invisible in the history, which is the failure
             // this app's design is about.
+            // **Staged, not committed.** The operator's decision (2026-11-10): *"we dont commit on
+            // save, we commit on push, on save changes are only staged."* So a save records the work in
+            // the index and leaves the history for a version somebody decided on — the push, whose
+            // message says what the version is.
+            //
+            // **`changes` still sees it**, because the row's count is asked of the index and the tree,
+            // so nothing disappears from the screen; what changes is that ten saves are one version
+            // instead of ten, and "what did I change" is a question about the work rather than about
+            // the app's timing.
             var refused: String? = null
             if (login != null && accounts.exists(login)) {
                 // **The tree the file was written into**, not the project's root — see [gitFor].
                 val here = g?.onBranch(ws.branchOf(file))
-                val outcome = project?.let { here?.commitOutcome(it, CommitMessage.SAVE) }
-                if (outcome != null && !outcome.ok) refused = outcome.error
+                val staged = project?.let { here?.stage(it) } ?: true
+                if (!staged) refused = "the change could not be staged"
             }
             // **The save answers itself here, and not after the hop to the screen.** A save
             // changes the file and its history, and neither is on the screen: the name is the
@@ -3091,7 +3101,7 @@ class AppViewModel @JvmOverloads constructor(
             // because the main thread has not got to it. The message still goes through the
             // post, because it is state the screen draws.
             val answer = if (refused != null) {
-                "Saved to the file, but not to its history: $refused"
+                "Saved to the file, but not staged: $refused"
             } else {
                 "Saved $name"
             }
@@ -3139,13 +3149,12 @@ class AppViewModel @JvmOverloads constructor(
                         main.post { message = "The photograph could not be written" }
                         return@fold
                     }
-                    // **Its own commit, so the picture is in the history with the file it is about.**
-                    // A photograph that existed only on the phone would be the one kind of work this
-                    // app does not record.
+                    // **Staged, like every other write.** A photograph is the person's work, so it
+                    // goes into the index with the file it is about and becomes a version at the next
+                    // push — the same rule as a save, because two kinds of change with two rules about
+                    // when they are recorded is a history nobody can predict.
                     val project = ws.projectOf(file)
-                    project?.let {
-                        git?.onBranch(ws.branchOf(file))?.commitOutcome(it, "Photographed ${file.name}")
-                    }
+                    project?.let { git?.onBranch(ws.branchOf(file))?.stage(it) }
                     Trace.answered(
                         tap,
                         "Photographed ${file.name} as $name " +
@@ -3329,16 +3338,14 @@ class AppViewModel @JvmOverloads constructor(
             var refused: String? = null
             if (login != null && accounts.exists(login)) {
                 // **The picture's own tree**, for the same reason as a text save: a picture written in
-                // a branch's worktree must be committed there, or the save has no version behind it.
-                // Asked of `into` — the file that was just written — and not of the source it came from,
-                // which may be a picture in another folder.
-                val outcome = project?.let {
-                    g?.onBranch(ws.branchOf(into))?.commitOutcome(it, CommitMessage.SAVE)
-                }
-                if (outcome != null && !outcome.ok) refused = outcome.error
+                // a branch's worktree must be staged there, or a push from that branch would not carry
+                // it. Asked of `into` — the file that was just written — and not of the source it came
+                // from, which may be a picture in another folder.
+                val staged = project?.let { g?.onBranch(ws.branchOf(into))?.stage(it) } ?: true
+                if (!staged) refused = "it could not be staged"
             }
             val answer = if (refused != null) {
-                "Saved the picture, but not to its history: $refused"
+                "Saved the picture, but not staged: $refused"
             } else {
                 "Saved $name"
             }
@@ -3360,12 +3367,11 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Syncs a project: commit what changed, then force push.
      *
-     * [note] is the message the person typed in the window the Sync button opens.
-     * It is written as the sync's **own** commit — a commit whose tree is what was
-     * already committed, whose message is theirs. Without it the only messages in a
-     * project's history would be the app's own ("Saved", "Created Drafts/"), and the
-     * answer to "why was this pushed" would be a list of file names. A blank note means
-     * "just push", which is what a project with nothing waiting gets.
+     * [note] is the message the person typed in the window the Sync button opens, and **it is the
+     * version's message now** — the push is where a commit happens (2026-11-10), so the sentence a
+     * person writes there is the one the history shows. A blank note means "just push", and a push with
+     * staged work and no note writes one from the names that changed, which is what the old autosave
+     * did.
      */
     @JvmOverloads
     fun sync(project: String, note: String? = null) {
@@ -3464,6 +3470,11 @@ class AppViewModel @JvmOverloads constructor(
             // showing four changes nobody made. That is the same fault the preset copy had, one
             // layer down, and it is why this returns the list rather than nothing.
             val wrote = ProjectTree.create(ws.projectDir(clean))
+            // **The markers are committed**, and this is the one place that is still true. They are
+            // the folder tree the app makes before a person has written anything, and a project whose
+            // first push would be "four folders" is a project whose first version says nothing. So the
+            // scaffold is its own version, made by the app, before the person's work is staged on top
+            // of it.
             if (wrote.isNotEmpty()) {
                 git.commitOutcome(clean, "Start the project's folders")
             }
@@ -5479,28 +5490,68 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Makes a branch in the project whose branches are on screen.
+     * **Makes a branch, from the branch the person chose or from nothing.**
      *
-     * **The refusal is said, not swallowed.** A name git would reject, an existing name, `main` — all
-     * three are refusals the person has to see, or the button looks broken.
+     * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch
+     * I am forking (or none for a clear slate), and the new branch agent keeps the memories of the
+     * initial branch."*
+     *
+     * **[from] is a branch name, or null for a clear slate.** Both are one act with one dialog, because
+     * "where does this start" is one question and its two answers are "here" and "nowhere".
+     *
+     * **What a fork actually carries, stated exactly, because the operator asked.** A branch's working
+     * tree is filled from a commit, so only what is *in* the commit arrives. `agent/` is tracked now
+     * (see `Workspace.APP_IGNORES`), so a fork from `main` brings `main`'s record — the fetched answers,
+     * the diffs, the screenshots. What it does **not** bring is the live conversation:
+     * `agent/context.log` and `agent/session.log` are ignored, because they are one branch's position in
+     * a conversation rather than a fact about the work.
+     *
+     * **Why that is the right split rather than a compromise.** If `context.log` travelled, both
+     * branches would start from the parent's identical position and the first turn in either would
+     * rewrite the same rows — two agents editing one context. And the thing a person means by "keeps the
+     * memories" is already carried: `session.log` is the *evidence*, and the branch's agent can read its
+     * record the same way it reads any file. A fork therefore starts knowing what happened, with a
+     * conversation of its own.
+     *
+     * A branch made from nothing starts with an empty tree, and its first commit is the app's.
+     *
+     * **The refusal is said, not swallowed.** A name git would reject, an existing name, a parent that
+     * is not there — all three are refusals the person has to see, or the button looks broken.
      */
-    fun newBranch(name: String) {
-        Trace.tap("confirm add branch", name)
+    fun newBranch(name: String, from: String? = AgentSession.MAIN) {
+        // **The tap is recorded by the window that pressed it**, because the window knows which parent
+        // was chosen and a second record here would give one press two ids.
         val project = choosingBranchFor ?: return
         val repo = git?.open(project) ?: run {
             message = "There is no repository for $project, so there is nothing to branch."
             return
         }
         val outcome = try {
-            GitService.createBranch(repo, name)
+            GitService.createBranch(repo, name, from)
         } finally {
             repo.close()
         }
         message = outcome.fold(
-            { "Made $it, from main." },
+            { made ->
+                // **The tree, so the folder exists the moment the branch does.** Without this the row
+                // appeared and opening it made the tree, which meant "made from nothing" and "made from
+                // main" were only decided when somebody looked. The checkout is where the memory
+                // arrives, so it is also where a failure has to be said rather than shown as an empty
+                // branch later.
+                val ws = workspace
+                val tree = ws?.let { Worktrees(it).make(project, made) }
+                val where = from?.let { "from $it" } ?: "from nothing"
+                val failed = tree?.exceptionOrNull()?.message
+                if (failed != null) {
+                    "Made $made $where, but its folder could not be checked out: $failed"
+                } else {
+                    "Made $made $where."
+                }
+            },
             { it.message ?: "The branch could not be made." },
         )
         refreshBranches()
+        refresh()
     }
 
     /**
