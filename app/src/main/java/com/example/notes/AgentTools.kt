@@ -324,6 +324,18 @@ class AgentTools(
         const val DIFF_SHOWN = 20
 
         /**
+         * How many versions `log` names when nothing says otherwise.
+         *
+         * **Twenty, because a log is read to find one version**, not to read a history. The answer
+         * says when it stopped, so a model that needs an older one raises `count` rather than
+         * guessing that the history is short.
+         */
+        const val LOG_SHOWN = 20
+
+        /** The most `log` will name in one answer, so a history cannot fill a context. */
+        const val LOG_MOST = 200
+
+        /**
          * How many rows one `forget` may name, after ranges are expanded.
          *
          * Generous against any real context — a row costs about a hundred bytes, so four thousand is
@@ -587,9 +599,15 @@ class AgentTools(
             // that it can determine when to push and to which branches (but still within their
             // project)". `state` is the reading half — an agent cannot decide *when* without knowing
             // whether there is anything to send.
-            "git" to setOf("op", "path", "from", "to"),
+            // **`git` is gone as a wrapper.** Its two ops became their own commands: `diff` is a
+            // question about two versions, `log` is a question about one path's history, and neither
+            // needed an `op` key to say which. `tag` moved to `push`, where the version it marks is
+            // made — a tag on a push is a tag on the commit that push creates, which is the only
+            // thing a tag can mean.
+            "diff" to setOf("path", "from", "to"),
+            "log" to setOf("path", "count"),
             "pull" to setOf(),
-            "push" to setOf("message"),
+            "push" to setOf("message", "tag"),
             // **`help` is the one command that describes the others**, so it is also the one
             // argument a wrong call is pointed at. It takes `of` and nothing else: the name of the
             // command to explain, or absent for the list.
@@ -659,7 +677,8 @@ class AgentTools(
             "archive" to setOf("path"),
             "http" to setOf(),
             "mcp" to setOf(),
-            "git" to setOf("path"),
+            "diff" to setOf("path"),
+            "log" to setOf("path"),
             "help" to setOf(),
             "forget" to setOf(),
             "background" to setOf(),
@@ -990,14 +1009,18 @@ class AgentTools(
                     "anything it names, then push again. Nothing is ever forced. " +
                     "**The branch is the one you stand in** — there is no argument to name another, so " +
                     "an agent can only ever send the tree it is working in.",
-                "{\"message\":\"Add the shopping list and its prices\"}",
+                "{\"message\":\"Add the shopping list and its prices\"," +
+                    "\"tag\":\"1.4.0\"}",
+                // **`tag` is optional and the message is not**, because a push with nothing to say is
+                // a no-op while a push without a tag is the ordinary case.
+                required = listOf("message"),
             ),
             spec(
-                "git",
-                "What changed between two revisions. **The compressed form of a change**, which " +
+                "diff",
+                "**What changed between two revisions.** The compressed form of a change, which " +
                     "`read` cannot give you: reading a 400-line file to find that three lines moved " +
                     "costs 400 lines of context and leaves you to diff in your head. " +
-                    "`from` and `to` are revision ids from `search {history}` or the history screen; " +
+                    "`from` and `to` are revision ids from `log` or `search {history: true}`; " +
                     "**both are required**: a diff here is between two versions, so there is no " +
                     "working-tree side to compare against. Staged work has no id yet — it becomes a " +
                     "version at the next `push`. " +
@@ -1005,16 +1028,22 @@ class AgentTools(
                     "path answers for that file. " +
                     "The answer names each changed file with its added and removed counts; a binary " +
                     "file is named and not diffed, because a diff of a zip is a page of replacement " +
-                    "characters. " +
-                    "**`op` is also `tag`**, which marks a version: `{\"op\":\"tag\",\"to\":\"1.4.0\"}`. " +
-                    "A tag is a git ref, so it works on every host — what a host builds from it is " +
-                    "that host's business, and `http` is how to ask for it. A tag is refused off " +
-                    "`main` and over unsent work, because either would mark a commit nobody can see.",
-                "{\"op\":\"diff\",\"path\":\"a file or folder\",\"from\":\"a revision id\"," +
+                    "characters. The whole diff is written to a file and the answer says where.",
+                "{\"path\":\"a file or folder\",\"from\":\"a revision id\"," +
                     "\"to\":\"another revision id\"}",
-                // **Nothing is required**, because which keys apply depends on `op`: a `diff` needs
-                // `from` and `to`, a `tag` needs `to` and nothing else. Marking all four required
-                // would tell a provider that a tag is malformed. The refusal names what each op takes.
+                required = listOf("from", "to"),
+            ),
+            spec(
+                "log",
+                "**The versions of a file, one line each** — id, when, and what the commit said. " +
+                    "This is the call that comes before `diff` and `restore`: those need revision " +
+                    "ids, and this is where they come from. With no `path` it answers the project's " +
+                    "whole history, newest first. " +
+                    "**Not the same question as `search {history: true}`**, which answers which " +
+                    "versions' *text* matches a pattern — this answers which versions there *are*. " +
+                    "`count` says how many to name: 20 by default, and the answer says when it " +
+                    "stopped.",
+                "{\"path\":\"a file or folder, or leave it out for the whole project\",\"count\":20}",
                 required = emptyList(),
             ),
             spec(
@@ -1190,6 +1219,10 @@ class AgentTools(
             call = { tool, inner ->
                 run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
             },
+            // **A key that holds a call is not a value.** `background`'s `args` describe the command
+            // it defers — resolving them would run that command now, which is the one thing a
+            // background must not do. `mcp`'s `args` go to a remote tool, which interprets them.
+            verbatim = setOf("args"),
         ).getOrElse { return refusal(it.message ?: "that argument cannot be expanded") }
         // **One path, many values is a refusal, not a choice.** A command that takes one file has no
         // rule for picking one of twelve, and acting on the first would be a silent partial act — the
@@ -1230,7 +1263,8 @@ class AgentTools(
                 )
             }
             "mcp" -> mcp(values, deadline)
-            "git" -> gitTool(values, deadline)
+            "diff" -> diffTool(values, deadline)
+            "log" -> logTool(values, deadline)
             "pull" -> pull()
             "push" -> push(values)
             "help" -> help(values)
@@ -3012,48 +3046,38 @@ class AgentTools(
      * commit along with the tag and leave `main` behind it — a version of different code from the one
      * on screen, and nothing would say so.
      */
-    private fun tagTool(args: JSONObject, deadline: Deadline): String {
-        val name = args.optString("to", "").trim()
-        if (name.isEmpty()) {
-            return refusal(
-                "`tag` needs `to`: the version's name, like 1.4.0. It is what the history shows and " +
-                    "what a host builds from, so it is the one thing that cannot be guessed.",
-            )
-        }
-        // **`to` and not a new key**, because a version is where a change arrives at — the same word
-        // `move` uses for its destination. Adding `name` or `tag` would be a fourth word for it.
+    /**
+     * **Marks the version this push just made.**
+     *
+     * It used to be an op of `git` with two refusals — not on `main`, and not over unsent work —
+     * because a tag naming a commit the remote did not have is a mark nobody can see. Here both are
+     * true by construction: `push` sends the branch it stands in and commits the staged work first,
+     * so by the time this runs the commit is on the remote. **The refusals are gone because the state
+     * they refused cannot happen**, which is a better fix than a check.
+     *
+     * What remains is the branch question, and it stays: a tag on a feature branch marks a commit
+     * that is not on the main line, and a host building from it would build something the project
+     * does not call a version.
+     */
+    private fun tagNow(name: String): String {
         if (branch != AgentSession.MAIN) {
-            return refusal(
-                "A version is tagged on ${AgentSession.MAIN}, and you are on $branch. A tag there " +
-                    "would mark work ${AgentSession.MAIN} does not have. Merge it into " +
-                    "${AgentSession.MAIN} first, or tag from a chat on ${AgentSession.MAIN}.",
-            )
-        }
-        deadline.check("git")
-        // **Read before tagging, not after.** A tag that went over unsent work is already sent by the
-        // time the count could be taken, so the check has to come first or it reports the wrong thing.
-        val unsent = try {
-            repo.changes(project).total
-        } catch (t: Throwable) {
-            0
-        }
-        if (unsent > 0) {
-            return refusal(
-                "$project has $unsent change(s) not sent yet, so a version would name a commit the " +
-                    "remote does not have. `push` first, then tag.",
-            )
+            return "It was not tagged: a version is tagged on ${AgentSession.MAIN}, and you are on " +
+                "$branch. A tag there would mark work ${AgentSession.MAIN} does not have."
         }
         val result = repo.tag(project, name, "Version $name")
-        // **Traced either way**, like the person's button: a version that did not go is the report
-        // that reads as "the tag did nothing".
         // **The same name the person's own button writes**, because it is the same act: one word for
         // one thing, so a log reader comparing an agent's release with a person's is comparing like
         // with like.
         Trace.note("release", "$project · $name · ${if (result.success) "tagged" else "refused"}")
-        return if (result.success) success(result.message.ifBlank { "Tagged $name" }) else refusal(result.message)
+        return if (result.success) {
+            result.message.ifBlank { "Tagged $name" }
+        } else {
+            "It was pushed, but not tagged: ${result.message}"
+        }
     }
 
     /**
+     * Reads a page.    /**
      * Reads a page.
      *
      * **The engine is not this file's business.** [browser] is an interface, and what answers is
@@ -3905,27 +3929,7 @@ class AgentTools(
      * is not committed does not exist. That is why both ends are required rather than one defaulting
      * to HEAD.
      */
-    private fun gitTool(args: JSONObject, deadline: Deadline): String {
-        val op = args.optString("op", "").trim().lowercase()
-        if (op.isEmpty()) {
-            return refusal(
-                "`git` needs an `op`: `diff` (takes `path`, `from`, `to`) or `tag` (takes `to`, the " +
-                    "version's name).",
-            )
-        }
-        if (op == "tag") {
-            return tagTool(args, deadline)
-        }
-        if (op != "diff") {
-            // **Named, because a model that guessed `log` or `status` deserves to know why not.**
-            return refusal(
-                "`op` is `diff` or `tag`, and \"$op\" is not either. A diff is the one question " +
-                    "`read` cannot answer: it shows what changed between two revisions rather than " +
-                    "what a file says. A tag is the portable half of a release — it marks a commit " +
-                    "and sends the mark, and what a host builds from it is the host's business. For " +
-                    "history, `search` with `history: true`; for what is unsent, `push` tells you.",
-            )
-        }
+    private fun diffTool(args: JSONObject, deadline: Deadline): String {
         val path = args.optString("path", "").trim()
         val from = args.optString("from", "").trim()
         val to = args.optString("to", "").trim()
@@ -3987,6 +3991,53 @@ class AgentTools(
             ""
         }
         return success("$head\n\n$listed$more\n\nThe whole diff is at $rel.")
+    }
+
+    /**
+     * **What happened to a file, one line per commit.**
+     *
+     * The question `read` cannot answer and `diff` answers too expensively: `diff` shows *what*
+     * changed between two named versions, which requires knowing which two. This says which versions
+     * there are — so it is the call that comes first, and its answer names the ids `diff` and
+     * `restore` take.
+     *
+     * **One line per commit, because that is the whole point.** A commit's full message is written
+     * for a person reading a history page; what a model needs to decide "is this the one" is the
+     * subject, the date, and enough of the id to use. `search` with `history: true` answers a
+     * *different* question — which versions' **text** matches a pattern — and answers it per matching
+     * line, which is why this exists rather than being a flag on that.
+     */
+    private fun logTool(args: JSONObject, deadline: Deadline): String {
+        val path = args.optString("path", "").trim()
+        val most = count(args, "count", LOG_SHOWN)
+            .getOrElse { return refusal(it.message ?: "that count cannot be used") }
+            .coerceIn(1, LOG_MOST)
+        deadline.check("log")
+        val commits = repo.log(project, path.ifEmpty { null }, most)
+        if (commits.isEmpty()) {
+            return success(
+                if (path.isEmpty()) {
+                    "This project has no versions yet: nothing has been pushed."
+                } else {
+                    "Nothing has ever changed \"$path\" in this project's history."
+                },
+            )
+        }
+        val where = if (path.isEmpty()) "" else " of \"$path\""
+        val head = "${commits.size} version(s)$where, newest first:"
+        // **`shortId  when  subject`**, and the subject is the message's first line — a commit
+        // message may be several paragraphs, and a log line is a line.
+        val lines = commits.joinToString("\n") { one ->
+            val when_ = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.ROOT)
+                .format(java.util.Date(one.timestamp * 1000))
+            "${one.shortId}  $when_  ${one.message.lineSequence().firstOrNull().orEmpty()}"
+        }
+        val more = if (commits.size >= most) {
+            "\n(the newest $most; raise `count` for more)"
+        } else {
+            ""
+        }
+        return success("$head\n$lines$more")
     }
 
     /** A revision id as a person reads it — seven characters, or whatever was given if shorter. */
@@ -4071,7 +4122,16 @@ class AgentTools(
         // anything to GitHub at all — the trace would show the writes and then stop, and "the
         // project is on GitHub" would be an assertion with nothing behind it.
         Trace.note("push", "${project} · ${if (result.success) "sent" else "refused"}")
-        if (result.success) return success(result.message.ifBlank { "Pushed" })
+        if (result.success) {
+            // **The tag rides on the push, because a version is what a tag marks.** `tag` used to be
+            // an op of `git`, and it had to refuse over unsent work — a tag would then name a commit
+            // the remote did not have. Here there is no such state: the push just made the commit, so
+            // the tag marks the thing that was sent, which is the only thing it can mean.
+            val tag = args.optString("tag", "").trim()
+            val sent = result.message.ifBlank { "Pushed" }
+            if (tag.isEmpty()) return success(sent)
+            return success(sent + "\n\n" + tagNow(tag))
+        }
         // **Rejected means the remote moved.** `RemoteResult` carries the server's own words, so the
         // answer passes them on rather than guessing — but it says what they mean.
         //

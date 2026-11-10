@@ -88,9 +88,22 @@ object Args {
         read: (String) -> String?,
         row: (Int) -> String?,
         call: (String, JSONObject) -> String,
+        /**
+         * Keys whose value is **a call, not a value**, and so is not resolved here.
+         *
+         * `background`'s `args` is the arguments of the command it defers, and `mcp`'s `args` are
+         * passed to a remote tool. Both are objects that *describe* a call — resolving them would
+         * run the thing they describe, which is exactly backwards: a deferred command must not run
+         * now, and a remote tool's arguments are the remote's to interpret.
+         */
+        verbatim: Set<String> = emptySet(),
     ): Result<JSONObject> {
         val out = JSONObject()
         for (key in args.keys()) {
+            if (key in verbatim) {
+                out.put(key, args.get(key))
+                continue
+            }
             val raw = args.get(key)
             val isPath = key in pathKeys
             when (val expanded = expand(raw, isPath, read, row, call)) {
