@@ -39,7 +39,14 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
-        scene.file("milk.txt", "two litres")
+        // **A save, not `scene.file`.** That helper ends by pressing Sync — a version is what most
+        // callers want — and a synced file is exactly what this test must not have: the window lists
+        // what is *waiting to be sent*, so a pushed file leaves it empty. A save stages (2026-11-10),
+        // which is the state the window describes.
+        val file = File(scene.workspace!!.repoOf("groceries"), "milk.txt")
+        scene.openEditor(file)
+        scene.saveEditor("two litres")
+        scene.closeEditor()
         val project = "groceries"
 
         scene.viewModel.openChanges(project)

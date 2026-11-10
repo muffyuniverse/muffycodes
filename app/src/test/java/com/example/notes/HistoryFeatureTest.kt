@@ -600,7 +600,10 @@ class HistoryFeatureTest : FeatureTest() {
         val before = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
             .changes("shopping").total
         scene.viewModel.openHistory(file)
-        scene.restore(first)
+        // **`restoreAndSend`, because a restore is a change and a version is made at a push**
+        // (2026-11-10). `scene.restore` alone stages it, so waiting for the version afterwards waited
+        // for something no act in this test would make.
+        scene.restoreAndSend(first, file)
         scene.viewModel.closeHistory()
 
         assertEquals("the text went back", "one", file.readText())
@@ -672,12 +675,15 @@ class HistoryFeatureTest : FeatureTest() {
         // that carries it lands a moment later. So `deletedIn` read a history that still held only
         // the first draft, and the restore correctly brought back the wrong-but-newest-it-knew
         // version. The bug was in the wait, and the assertion found it.
-        scene.viewModel.openEditor(letter)
-        scene.viewModel.saveEditor("the second draft")
+        // **`saveAsVersion`, because a save alone is not a version any more** (2026-11-10): it stages,
+        // and the version is made at a push. Using `viewModel.saveEditor` here left the second draft in
+        // the index and the test waited for it in a history that would never hold it.
+        scene.openEditor(letter)
+        scene.saveAsVersion("the second draft")
         scene.await("both drafts to be in the history", 20_000) {
             scene.versionsOf(letter).any { (_, text) -> text == "the second draft" }
         }
-        scene.viewModel.closeEditor()
+        scene.closeEditor()
         delete(letter)
         scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
 
