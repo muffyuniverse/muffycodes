@@ -105,15 +105,26 @@ app's *add a project* flow is GitHub's API and a non-GitHub clone is not reachab
 flow becomes portable the guard moves to `GitCredentials` with the other verbs. Recorded rather than
 half-done.
 
-### P2 — the typed GitHub tools become the first user of `http`
+### P2 — the typed GitHub tools become the first user of `http`  ✅ *landed*
 
-`ci`, `runs`, `artifact` and the release dialog are provider logic in the app. Each becomes: a sentence in the
-prompt, a secret bound to the host, and `http`. Two small pieces of plumbing are needed first, both measured:
+`ci`, `runs`, `artifact` and the release dialog were provider logic in the app. **They are gone** — the typed
+tools were deleted before this phase was written, so what remained was the two plumbing pieces that made
+`http` able to replace them, and both have landed:
 
-- **`Link` header** is already in `Fetcher.Answer.headers` (`:66`) and is used only for `Location` and rate
-  limits (`AgentTools.kt:4242`, `:4284`). Surface it, and `http` can walk pages.
-- **A tag is a release that works everywhere.** `git push --tags` (a `tag` op on the existing `git` tool) is
-  the portable half; whatever the host builds from it is the host's business.
+- **`Link` surfaced** (`968646d5`): `HttpRun.linkNote` names `rel="next"`, so `http` can walk a paginated API.
+  Without it a model asking for "all the open issues" gets one page and believes it has them all — the quiet
+  kind of wrong, because nothing in the body says otherwise. The parse is **bracket-delimited, not
+  comma-delimited**, because a pagination cursor routinely holds a comma in its query string.
+- **`git {op:"tag"}`** (`ebe31b0b`): a tag is a git ref, so `git push --tags` works on every host. What a host
+  *builds* from a tag is that host's business, and `http` is how to ask for it. Refused off `main` and over
+  unsent work, for the reasons the person's own button already gives.
+
+**What the app still knows about GitHub, and should:** the sign-in flow (`Who`), because a device code is a
+host's own protocol and there is no portable version of "who does this key belong to". That is a *person's*
+door, not an agent's tool, and it is the whole remainder.
+
+**Measured, so it is not a claim:** `api.github.com` now appears in the source only in comments, examples, and
+`Who.API`. No agent tool names a host.
 
 ### P3 — what stays the app's, and why
 
