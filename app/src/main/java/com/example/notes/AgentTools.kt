@@ -901,8 +901,11 @@ class AgentTools(
                     "**`message` is required when anything is staged**, because the version's reason " +
                     "is the thing a person reads in the history later and only you know it. A push " +
                     "with nothing staged is answered honestly and sends nothing. " +
-                    "A rejection means the remote moved: call `pull`, resolve anything it names, then " +
-                    "push again. Nothing is ever forced.",
+                    "**Fast-forward only and never forced**, because a force-push can discard a commit " +
+                    "somebody else made. A rejection means the remote moved: call `pull`, resolve " +
+                    "anything it names, then push again. Nothing is ever forced. " +
+                    "**The branch is the one you stand in** — there is no argument to name another, so " +
+                    "an agent can only ever send the tree it is working in.",
                 "{\"message\":\"Add the shopping list and its prices\"}",
             ),
             spec(
@@ -931,22 +934,6 @@ class AgentTools(
                     "**conflicted paths** and stops: read one with `read` to see the `<<<<<<<` " +
                     "markers, choose what the file should say, and `write` the answer. Then `push`. " +
                     "There is nothing else to learn — resolution is ordinary editing.",
-                "{}",
-            ),
-            spec(
-                "push",
-                "Sends this project's `main` to its remote — **the address the project has, " +
-                    "whatever host that is**. **Fast-forward only and never forced**, " +
-                    "because a force-push can discard a commit somebody else made. " +
-                    "Pictures are uploaded first, before the branch that names them, because a host " +
-                    "rejects a tree referencing bytes it does not hold. " +
-                    "A push the remote refuses because it moved answers as a **conflict, " +
-                    "not a failure**: `pull`, resolve if needed, then `push` again. " +
-                    "It refuses outright when the working tree has uncommitted changes — commit " +
-                    "first, so that what is sent is a thing you can point at. " +
-                    "**`main` is the only branch**, and there is no parameter to name another: this " +
-                    "project is its own repository, so a second branch would let one writer diverge " +
-                    "from itself.",
                 "{}",
             ),
         ).filter { httpAllowed || it.name != "http" }

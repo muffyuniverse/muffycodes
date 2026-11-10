@@ -917,8 +917,18 @@ class Scenario(
     fun awaitCommits(project: String, atLeast: Int, check: (List<String>) -> Boolean): Boolean {
         var answer = false
         await("$project's history to hold the change", 30_000) {
-            val paths = newestPaths(project)
-            answer = paths != null && commitCount(project) >= atLeast && check(paths)
+            // **The index as well as the newest commit**, because a change is *recorded* in two ways
+            // since 2026-11-10: a save stages it, a push commits it. A move across projects stages on
+            // both sides and commits neither, so a wait that read only the history would never see it
+            // — and the assertion these callers make ("this project holds the path") is true either
+            // way. The union is what "recorded" means now.
+            val staged = try {
+                Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val paths = (newestPaths(project) ?: emptyList()) + staged
+            answer = commitCount(project) >= atLeast && check(paths)
             answer
         }
         return answer

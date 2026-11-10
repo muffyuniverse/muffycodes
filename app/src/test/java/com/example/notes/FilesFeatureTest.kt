@@ -34,12 +34,14 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a save is committed with one word, not a sentence naming the file`() {
-        // The person never types this message, every version of a file would carry the
-        // same sentence, and nothing on the screen shows it (`appVoice`). So it is not
-        // *disabled* — the version it records is the thing Restore brings back — but it
-        // says as little as an honest message can. `Edited milk.txt` on every save was
-        // the app narrating itself into a history nobody reads it in.
+    fun `a save is staged, and the push is where the version and its message come from`() {
+        // **The message rule moved with the commit** (2026-11-10). A save used to write `Saved` into
+        // the history, and the point of that one word was that the app should not narrate itself: a
+        // person never types it and no screen shows it. A save stages now, so there is no message to
+        // keep short — and the message that *does* exist is the one somebody wrote at the push.
+        //
+        // This asserts both halves, because the interesting failure is the one where the save quietly
+        // writes a commit anyway: the history would still say `Saved` and nothing here would notice.
         val project = "Shopping"
         scene.project(project)
         scene.open(project)
@@ -49,8 +51,18 @@ class FilesFeatureTest : FeatureTest() {
         scene.viewModel.saveEditor("three litres")
         scene.await("the save to settle") { !scene.viewModel.busy }
 
-        val newest = scene.repo(project).log(null).first()
-        assertEquals("one word", CommitMessage.SAVE, newest.message.trim())
+        val versions = scene.repo(project).log(null).map { it.message.trim() }
+        assertFalse(
+            "the save wrote no version of its own: $versions",
+            versions.any { it == CommitMessage.SAVE },
+        )
+        assertEquals(
+            "and the work is in the index, where the push reads it",
+            listOf("milk.txt"),
+            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf(project)).use {
+                GitService.stagedPaths(it.repository)
+            },
+        )
     }
 
     @Test

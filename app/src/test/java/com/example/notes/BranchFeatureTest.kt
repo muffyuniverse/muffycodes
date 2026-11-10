@@ -78,15 +78,22 @@ class BranchFeatureTest : FeatureTest() {
 
         val branchHistory = File(scene.workspace!!.treeOf(project), ".git")
         assertTrue("the branch's tree is its own", branchHistory.isFile)
-        // **The version count is read from the branch**, by asking the branch's own tree for its
-        // history through the same door the app uses.
+        // **The save is read from the branch's own index**, because since 2026-11-10 a save stages and
+        // a push is what makes the version. Asking the branch for a *commit* here would be asking for
+        // something a save no longer produces — and the rule this test is about is "the save landed in
+        // the branch and not in main", which the index answers exactly.
         val onFeature = GitService.openExisting(scene.workspace!!.treeOf(project))
         assertNotNull("the branch's repository opens", onFeature)
         onFeature!!.use { repo ->
-            val log = GitService.log(repo, null, 10)
-            assertTrue(
-                "the save is a version on the branch: ${log.map { it.message }}",
-                log.any { it.message.contains("Save") || it.message.contains("save") },
+            assertEquals(
+                "the save is staged on the branch",
+                listOf("milk.txt"),
+                GitService.stagedPaths(repo),
+            )
+            assertEquals(
+                "and the branch's tree holds what was saved",
+                "three litres\n",
+                File(scene.workspace!!.treeOf(project), "milk.txt").readText(),
             )
         }
         assertEquals("and main's history did not move", mainBefore, scene.commitCount(project))

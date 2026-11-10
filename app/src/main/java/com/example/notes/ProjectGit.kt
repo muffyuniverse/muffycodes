@@ -426,17 +426,22 @@ class ProjectGit(
                     // **The commit happens here, because a save only stages now.**
                     //
                     // The operator's decision (2026-11-10): *"we dont commit on save, we commit on
-                    // push."* So the staged work becomes one version with the message somebody wrote
-                    // — the person's, or the agent's — and a push is the moment a version is made.
+                    // push, on save changes are only staged."* So the staged work becomes one version
+                    // with the message somebody wrote — the person's, or the agent's — and a push is
+                    // the moment a version is made.
                     //
-                    // **A message that was not given is still a commit.** A push with staged work and
-                    // no message is a person pressing the button they pressed before this rule
-                    // existed, and refusing it would be the app teaching a rule by breaking a habit.
-                    // The message then names what changed, which is what the old autosave said.
+                    // **A blank message is still a commit here, and it names what changed.** The tool
+                    // refuses a blank message when work is staged, because the version's reason is the
+                    // one thing only its writer knows; but this function is also reached by the Sync
+                    // button, where "no note" is an ordinary thing to press and the file names are the
+                    // honest sentence. A push with nothing staged commits nothing.
                     val staged = GitService.stagedPaths(it)
                     if (staged.isNotEmpty()) {
                         val made = GitService.commitEverything(
                             it,
+                            // **A blank message here is unreachable from the tool** (it refuses
+                            // first) and means "the person pressed Sync with no note", where naming
+                            // the files is the honest sentence.
                             message.trim().ifBlank { CommitMessage.sync(staged) },
                             authorProvider(),
                             // Inside `RepoLocks.hold`, so a lock failure is a corpse, not a rival.

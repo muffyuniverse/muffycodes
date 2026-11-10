@@ -70,9 +70,9 @@ class SelectionFeatureTest : FeatureTest() {
         chooseAll("milk.txt", "bread.txt")
 
         assertTrue("moved into the project", scene.viewModel.moveSelected(worktree))
-        // The commit happens on the worker, so the repository has not answered yet:
-        // what is asked for is the project's own answer, not the app's opinion of
-        // what it just did.
+        // The recording happens on the worker, so the repository has not answered yet: what is asked
+        // for is the project's own answer — **the index**, since a save stages and a push commits
+        // (2026-11-10) — not the app's opinion of what it just did.
         scene.awaitCommits("groceries", 1) { paths ->
             paths.any { it.endsWith("milk.txt") } && paths.any { it.endsWith("bread.txt") }
         }

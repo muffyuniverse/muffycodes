@@ -999,11 +999,16 @@ object GitService {
      * on a push. When it is missing — a project that has never been pushed — the comparison is
      * against the empty tree, which is the truth: GitHub has none of these files yet.
      *
+     * **The near side is the index, not `HEAD`** (2026-11-10). A save stages and a push commits, so
+     * the work a person is looking at is in the index and *not yet in any commit* — a comparison
+     * against `HEAD` would say "up to date" about a tree full of unsent work, which is the exact
+     * sentence this function exists to prevent. The index is also what a commit is made from, so the
+     * two sides are the two things a push will actually diff.
+     *
      * Only tracked paths appear (an excluded `agent/` never does), so nothing is filtered here.
      */
     fun unsentPaths(repo: Repository): List<String> {
         val branch = repo.branch ?: return emptyList()
-        val head = repo.resolve("HEAD") ?: return emptyList()
         // **No remote, nothing to send.** A project that stays on this phone has no GitHub to be up
         // to date with, and comparing its history with the empty tree would make every file it holds
         // read as unsent for ever.
@@ -1011,7 +1016,7 @@ object GitService {
         if (remote.isNullOrBlank()) return emptyList()
         val pushed = repo.resolve(ORIGIN + branch)
         return try {
-            val newer = treeOf(repo, head) ?: return emptyList()
+            val newer = indexTree(repo) ?: return emptyList()
             val older: AbstractTreeIterator = pushed?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
             val out = sortedSetOf<String>()
             // A sink of our own: `OutputStream.nullOutputStream()` is API 33 and this app starts at 26.
@@ -1046,6 +1051,36 @@ object GitService {
         val parser = CanonicalTreeParser()
         repo.newObjectReader().use { reader -> parser.reset(reader, commit.tree.id) }
         parser
+    } catch (e: Throwable) {
+        null
+    }
+
+    /**
+     * **The tree the index describes** — what a commit made right now would hold.
+     *
+     * Written into the repository as an object, which is what `DirCache.writeTree` does: the index
+     * itself is a list of paths and ids, and a tree is the shape a diff can walk. It is a new object
+     * every call, so the repository grows by one tree per refresh — the same cost `git write-tree`
+     * pays, and the reason a caller should ask this once and not in a loop.
+     *
+     * Null when the index cannot be read, which is the case a caller must not mistake for "empty": a
+     * locked index is a moment, not a project with no files.
+     */
+    private fun indexTree(repo: Repository): CanonicalTreeParser? = try {
+        val cache = repo.readDirCache()
+        // **Two objects, because they are two jobs.** `writeTree` needs an `ObjectInserter` (it writes a
+        // new tree object into the repository), and `reset` needs an `ObjectReader` (it walks the tree
+        // back out). `ObjectReader` is not an `ObjectInserter`, which is the trap a one-object version
+        // of this would hit at compile time.
+        repo.newObjectInserter().use { inserter ->
+            val id = cache.writeTree(inserter)
+            inserter.flush()
+            repo.newObjectReader().use { reader ->
+                val parser = CanonicalTreeParser()
+                parser.reset(reader, id)
+                parser
+            }
+        }
     } catch (e: Throwable) {
         null
     }
