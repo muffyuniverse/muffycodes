@@ -1471,22 +1471,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun followLink(address: String, base: File?) {
         when {
-            address.startsWith("app:") -> {
-                // **Asked by name, not by `projectOf`.** The app's folder is not a project and has no
-                // `.git`, so `isProjectFolder` answers false for it and `projectOf` returns null —
-                // which would refuse the app's own pages. The question here is only "is this document
-                // inside `shared/`", and `isSystemPath` is that question: the path from the account
-                // root, whose first component is the name.
-                //
-                // **Answered without a workspace too**, which is the state a phone is in before anyone
-                // signs in — and the introduction is exactly the document that has to work there. The
-                // folder is compared canonically, the same way `partsOf` does it.
-                if (inAppFolder(base)) {
-                    runLinkAction(address.removePrefix("app:"))
-                } else {
-                    Trace.note("link-refused", "app: outside the system project")
-                }
-            }
+            // **`app:` is refused, in every document, and the refusal is the whole of the rule.** It
+            // was a vocabulary of verbs a page could press — `connect-github`, `use-token` — which
+            // made a Markdown file into a control panel and made "is this page the app's own?" a
+            // security question whose answer was a path comparison. The pages teach the journey now
+            // and every act has its own door, so there is nothing left for a verb to do: an address
+            // with a scheme the app does not serve is recorded and ignored.
+            address.startsWith("app:") ->
+                Trace.note("link-refused", "app: in a document")
             address.startsWith("http") -> openLink(address)
             else -> openPath(address, base)
         }
@@ -1572,8 +1564,10 @@ class AppViewModel @JvmOverloads constructor(
         }
         // **The app's folder is readable with no account** (§3.11) — it is the one place a phone that
         // has not signed in can open a file, and it is where the introduction lives. Everything else
-        // must be one the workspace can name.
-        if (ws.relative(file) == null && !inAppFolder(file)) {
+        // must be one the workspace can name. The question is asked through the workspace, which is
+        // what already knows where its two roots are; a second canonical-path comparison here was the
+        // same answer computed twice.
+        if (ws.relative(file) == null && !ws.isInAppFolder(file)) {
             message = "\"$address\" is outside this account, and the editor reads this account's files."
             return
         }
@@ -1588,32 +1582,6 @@ class AppViewModel @JvmOverloads constructor(
             forgetBranches()
         }
         openEditor(file)
-    }
-
-    /**
-     * An `app:` link: an action a document asks the app to perform.
-     *
-     * **A small closed set, and that is the point.** A document that could name an arbitrary
-     * function would be a document that can run the app — which is why this is a `when` over known
-     * verbs rather than a registry. Unknown verbs are recorded and ignored, because a page written
-     * for a newer app version must not break an older one.
-     *
-     * The caller has already checked that the document is one the app wrote (see
-     * `EditorScreen`'s `onLink`): a cloned page is ordinary user text and must not be able to act.
-     */
-    fun runLinkAction(verb: String) {
-        Trace.tap("link action", verb)
-        when (verb) {
-            // **The two connections onboarding ends on.** They open the same dialogs the settings
-            // screen does, so a page is a way in rather than a second implementation.
-            "connect-github" -> pendingConnection = Connection.GitHub
-            "connect-openrouter" -> pendingConnection = Connection.OpenRouter
-            // **The way past a sign-in that cannot succeed**, which is the reason this verb exists
-            // at all: onboarding cannot be left, so a page that offers only OAuth would trap a
-            // person whose provider is rate-limited or whose phone has no browser.
-            "use-token" -> pendingConnection = Connection.Token
-            else -> Trace.note("link-action-unknown", verb)
-        }
     }
 
     /**

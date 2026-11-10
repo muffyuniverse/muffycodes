@@ -361,32 +361,52 @@ class AccountsFeatureTest : FeatureTest() {
     // ---- the links a document may use ----------------------------------------
 
     /**
-     * **A locked page's `app:` link opens the real dialog.**
+     * **`app:` is refused, everywhere, and that is the whole rule.**
      *
-     * The mechanism exists so that the last onboarding page is a *form* rather than a description —
-     * the operator's own framing. Asserted through the view model's published state, which is what
-     * the screen acts on, so this pins the wiring rather than the rendering.
+     * It used to be a vocabulary of verbs a page could press, scoped by "is this page the app's own?".
+     * The pages teach the journey now and every act has its own door, so a document cannot act at all
+     * — which is a smaller rule with no path comparison behind it, and the one that cannot be got
+     * wrong by a clone or a message.
      */
     @Test
-    fun `an app link opens the connection it names`() {
-        scene.viewModel.runLinkAction("connect-github")
-        assertEquals(
-            "GitHub",
-            AppViewModel.Connection.GitHub,
-            scene.viewModel.pendingConnection,
+    fun `an app link does nothing, in the app's own folder and in a clone`() {
+        // **The app's folder, which is where the introduction lives** — the place the old rule allowed
+        // it, so this is the assertion that the exception is gone rather than merely narrowed.
+        val dir = File(scene.viewModel.accounts.sharedDir, Onboarding.DIR)
+        val page = File(dir, Onboarding.pages().last().name)
+        scene.viewModel.followLink("app:use-token", page.parentFile)
+        assertNull("the app's own page cannot act either", scene.viewModel.pendingConnection)
+
+        scene.viewModel.followLink("app:connect-github", scene.viewModel.currentDir ?: scene.root)
+        assertNull("and neither can a clone", scene.viewModel.pendingConnection)
+    }
+
+    @Test
+    fun `a refused app link is recorded`() {
+        // **Silent on screen, visible in the log.** A message per attempt would be the app explaining a
+        // wall; a refusal nobody can see being tested is a refusal nobody can check.
+        scene.viewModel.followLink("app:delete-account", scene.viewModel.currentDir ?: scene.root)
+
+        assertTrue(
+            "the refusal is recorded: ${Trace.report().lines.take(3)}",
+            Trace.report().lines.take(3).any { it.contains("link-refused") },
         )
-        scene.viewModel.connectionShown()
-        assertNull("answered once", scene.viewModel.pendingConnection)
+    }
 
-        scene.viewModel.runLinkAction("connect-openrouter")
-        assertEquals(AppViewModel.Connection.OpenRouter, scene.viewModel.pendingConnection)
-        scene.viewModel.connectionShown()
-
-        // **The way past a sign-in that cannot succeed.** Onboarding cannot be left, so a page that
-        // offered only OAuth would trap anyone whose provider is rate-limited or whose phone has no
-        // browser.
-        scene.viewModel.runLinkAction("use-token")
-        assertEquals(AppViewModel.Connection.Token, scene.viewModel.pendingConnection)
+    /**
+     * **A link press is traced**, and the two kinds are named differently — one leaves the app, the
+     * other opens a file. A log that called both "link" could not answer "did the page get them to the
+     * file it names".
+     */
+    @Test
+    fun `a link press is traced under the name that says which kind it was`() {
+        val before = Trace.report().taps
+        scene.viewModel.openLink("https://example.com")
+        assertTrue("the press was recorded", Trace.report().taps > before)
+        assertTrue(
+            "named: newest ${Trace.report().lines.take(3)}",
+            Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link") },
+        )
     }
 
     /**
@@ -426,54 +446,9 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     /**
-     * **A cloned page cannot act.**
-     *
-     * The security boundary of the whole link feature, and the reason `app:` is scoped by project
-     * rather than allowed everywhere: onboarding pages are locked and written by the app, so their
-     * links are the app's own. A person can clone one — that is the point of the lock being
-     * acceptable — and a clone is ordinary text in an ordinary project. If `app:` worked there, a
-     * document could run the app, and a page that says `[Delete everything](app:delete-account)`
-     * would be a button.
-     */
-    @Test
-    fun `an app link in a cloned page is refused`() {
-        // **The folder the document lives in**, which is what `followLink` is given: a relative link
-        // in it means a file beside it, and the project it belongs to is a fact about the folder.
-        val folder = scene.viewModel.currentDir ?: scene.root
-        scene.viewModel.followLink("app:connect-github", folder)
-
-        assertNull("a copy cannot act", scene.viewModel.pendingConnection)
-    }
-
-    @Test
-    fun `an app link in a locked onboarding page is followed`() {
-        // **The app's folder, asked of the store rather than of a workspace.** This class runs with
-        // nobody signed in, and with no account shipped (§3.11) that means no workspace — while the
-        // introduction is still there, because it is the app's.
-        val dir = File(scene.viewModel.accounts.sharedDir, Onboarding.DIR)
-        val page = File(dir, Onboarding.pages().last().name)
-        scene.viewModel.followLink("app:use-token", page.parentFile)
-
-        assertEquals(
-            "the app's own page may ask for the token door",
-            AppViewModel.Connection.Token,
-            scene.viewModel.pendingConnection,
-        )
-    }
-
-    @Test
-    fun `an unknown app link is ignored rather than crashing`() {
-        scene.viewModel.runLinkAction("delete-everything")
-        assertNull(
-            "a page written for a newer app must not break an older one",
-            scene.viewModel.pendingConnection,
-        )
-    }
-
-    /**
      * **A link press is traced**, and the two kinds are named differently — one leaves the app, the
-     * other makes it act. A log that called both "link" could not answer "did the onboarding page
-     * get them as far as the sign-in dialog".
+     * other opens a file. A log that called both "link" could not answer "did the page get them to
+     * the file it names".
      */
     @Test
     fun `a link press is traced under the name that says which kind it was`() {
@@ -485,34 +460,6 @@ class AccountsFeatureTest : FeatureTest() {
             Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link") },
         )
 
-        val beforeAction = Trace.report().taps
-        val page = File(
-            File(scene.viewModel.accounts.sharedDir, Onboarding.DIR),
-            Onboarding.pages().last().name,
-        )
-        scene.viewModel.followLink("app:connect-github", page.parentFile)
-        assertTrue("the action was recorded", Trace.report().taps > beforeAction)
-        assertTrue(
-            "named as an action: newest ${Trace.report().lines.take(3)}",
-            Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link-action") },
-        )
-    }
-
-    /**
-     * **A refused link says so in the log.**
-     *
-     * The refusal is silent on screen — a message per attempt would be the app explaining a wall —
-     * so the log is the only place the attempt is visible, and a security boundary nobody can see
-     * being tested is a boundary nobody can check.
-     */
-    @Test
-    fun `a refused app link is recorded`() {
-        scene.viewModel.followLink("app:delete-account", scene.viewModel.currentDir ?: scene.root)
-
-        assertTrue(
-            "the refusal is in the log: ${Trace.report().lines.take(3)}",
-            Trace.report().lines.take(3).any { it.contains("link-refused") },
-        )
     }
 
     @Test
@@ -565,14 +512,14 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `finishing onboarding leaves the connect page instead of stranding it`() {
+    fun `finishing onboarding leaves the last page instead of stranding it`() {
         // **The operator's report**: *"after both connections are done the onboarding screen should
         // close itself - and you automatically enter account screen"*.
         //
         // `onboarding = false` only stopped the page being an onboarding page. The editor stayed
-        // open on `06-connect.md`, so the person sat on the CONNECT page with the two links they had
-        // just used — and because the guard in `closeEditor` reads `onboarding`, it had already
-        // stopped refusing, leaving an ordinary file on screen with no reason to be there.
+        // open on the last page, so the person sat on a page that had done its job — and because the
+        // guard in `closeEditor` reads `onboarding`, it had already stopped refusing, leaving an
+        // ordinary file on screen with no reason to be there.
         val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
         try {
             scene.await("onboarding to open") { scene.viewModel.onboarding }

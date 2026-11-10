@@ -1118,24 +1118,12 @@ private fun Reader(
             // **The page being read, with its own kind**, so a picture is drawn rather than named.
             page = Neighbour(file, text, isMarkdown(file), kind),
             onLink = onLink,
-            // **The two connections, marked on the page that offers them.** Only there: a tick
-            // beside "Connect GitHub" on a page about writing files would be an answer to a
-            // question that page did not ask.
-            // **Keyed by the address the link already carries**, so the mark lands on the line
-            // whose link it describes — and a page that has no such line is simply unaffected.
-            //
-            // Only on the page that offers the connections: a tick beside "Connect GitHub" on a
-            // page about writing files would be an answer to a question that page did not ask.
-            marks = if (viewModel.onboardingIndexOf(file) >= 0 &&
-                file.name == Onboarding.pages().last().name
-            ) {
-                mapOf(
-                    "app:connect-github" to viewModel.signedIn,
-                    "app:connect-openrouter" to viewModel.hasModelKey,
-                )
-            } else {
-                emptyMap()
-            },
+            // **No marks.** There were two — a tick beside "Connect GitHub" and "Connect OpenRouter"
+            // on the last page — and they existed because that page *was* the control panel: its
+            // `app:` links opened the two connection windows and the ticks said which had been done.
+            // The journey has a page per step now and every act has its own door, so a page that
+            // offered a connection would be a second way into a window the accounts screen already
+            // opens. `app:` is refused outright (see `AppViewModel.followLink`).
             modifier = Modifier.offset { IntOffset(offset.roundToInt(), 0) },
         )
     }

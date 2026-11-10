@@ -567,20 +567,15 @@ fun MarkdownBody(
      */
     onLink: ((String) -> Unit)? = null,
     /**
-     * **A tick at the start of a list line whose link is done.**
+     * **A tick at the start of a list line whose link is done** — keyed by the link's address.
      *
-     * Keyed by the link's address — `app:connect-github` — because that is what identifies the line
-     * whoever wrote it. The value says whether it is done; a false entry draws an empty circle rather
-     * than nothing, so a line that *can* be done reads as not-yet rather than as a different kind of
-     * line.
+     * The one caller was the last onboarding page, whose `app:connect-*` links opened the two
+     * connection windows; the page and the links are gone (§3.11.6), so nothing passes a map today.
      *
-     * **A mark, not a word in the document.** The page is a file: versioned, editable, read by the
-     * agent. A tick written into it would be a claim that goes stale the moment somebody connects,
-     * and the operator's report — *"checkmarks should be on the same line with their links at the
-     * start of their lines (instead of at the bottom)"* — is about where the mark is drawn, not about
-     * what the file says.
-     *
-     * Empty by default, so every other document is unaffected.
+     * **Kept, and empty by default.** It is a rendering capability rather than a fact about that page:
+     * a list of links with a done/not-yet state is a shape any document can have — a checklist of
+     * setup steps, a release's own page — and deleting it would mean writing the same Row-and-glyph
+     * again the first time one is wanted. Nothing draws a tick unless a caller asks for one.
      */
     marks: Map<String, Boolean> = emptyMap(),
 ) {

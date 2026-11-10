@@ -1062,6 +1062,17 @@ class Workspace(
         return null
     }
 
+    /**
+     * **Is [file] inside the app's own folder?** — the question a page's `app:` link used to ask, kept
+     * because `openPath` still needs it.
+     *
+     * **Answered without an account**, which is the state a phone is in before anybody signs in: the
+     * app's folder is the one place readable there, and it is where the introduction lives. The answer
+     * comes from [partsOf], which already knows both roots and compares them canonically — a second
+     * comparison in the view model was the same answer computed twice, and the two could drift.
+     */
+    fun isInAppFolder(file: File): Boolean = partsOf(file)?.firstOrNull() == SYSTEM_PROJECT
+
     /** The file at a path from the account root. */
     /**
      * The file a path names — **through the open branch's worktree, when there is one.**
