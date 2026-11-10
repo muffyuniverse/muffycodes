@@ -23,6 +23,39 @@ Two defects found and fixed tonight, both worth keeping in mind while reading th
 
 ---
 
+## 0.5 `help` — one command that says what the others are
+
+**What is there now:** nothing. 131 `refusal(...)` sites, many of them hand-written sentences naming
+one key and one rule (`AgentTools.kt:635` explains `mode`; `:1301` explains `semantic`; `:1305` says
+`mode` is `regex`; `keysSaid` at `:590` builds a per-tool key list plus the tool's whole JSON shape).
+
+The operator's ruling: *"just if a nonexistent argument is called or value is wrong we respond with
+error and ask to use help command. and we need help command that shows a list of available commands
+and can take a command name as an optional arg to explain how to use it."*
+
+**Two commands, one shape:** `{"tool":"help"}` lists every command with its one line; `{"tool":"help","of":"search"}`
+explains one — its keys, its shape, and what each key means.
+
+**Why this is the right trade and not just a smaller one.** A refusal that explains one mistake has to
+be written per mistake and read by a model that is already wrong. A refusal that says *ask `help
+search`* is one sentence, always right, and the explanation is then **the same text the spec
+already carries** — one source, so a description cannot drift from the behaviour it describes. It
+also removes the failure mode where a model reads a bespoke sentence and concludes the rule is
+narrower than it is.
+
+**Work:** the `help` tool (spec text for the list, and the per-command page built from
+`specs().first { it.name == of }` so it cannot disagree with what the model was already sent);
+`keysSaid` shrinks to one sentence plus the pointer; the targeted sentences for `mode`, `semantic`,
+`lines` and the rest go — they are replaced by the pointer, and their content moves into the spec
+where it belongs.
+
+**Not deleted: refusals that are about a *value*, not a key.** "That range is past the end of the
+file", "this project has no repository yet", "the page could not be read" are facts about the world,
+and `help` cannot answer them. The rule is narrow: **a refusal about the shape of a call points at
+`help`; a refusal about the state of the world says what happened.**
+
+---
+
 ## 1. `search` — make it uniform, and stop it lying about what it is
 
 **What is there now** (`AgentTools.kt:1281`): `scope`, `query`, `mode`, `history`, `depth`, `paths`,
@@ -41,8 +74,12 @@ The operator's objections, each one measured:
 Update the spec text (which is long and mostly about `scope`/`query`), the refusals that name the old
 keys, and the tests. **`word` stays** — it is the whole-word flag both `read` and `write` share.
 
-**Risk:** every saved prompt, template and old session that says `scope` breaks. The app's own
-`KNOWN`-key refusal will name it, which is the honest failure. **No aliases** — the operator's rule.
+**The operator's answer on aliases:** *"why targeted refusals? just if a nonexistent argument is
+called or value is wrong we respond with error and ask to use help command."*
+
+That removes the whole question. There are **no aliases and no per-rename sentences** — an old call
+that says `scope` gets the same answer as any other wrong key: *this command does not take that, ask
+`help search`*. Which is why `help` (item 0 below) has to land **before** any rename.
 
 ---
 
@@ -82,9 +119,16 @@ so a restore that staged would be a second committer.
 `setMode(HARD)`), `ProjectGit.restoreTree`, the `path`-optional branch in `restore`, and a test that
 a file deleted in the target revision is gone afterwards and that `stagedPaths` is empty.
 
-**Danger:** this destroys uncommitted work in the tree. The tool must refuse when the working tree
-has changes that are not in a version — the same "a loss needs an asking" rule the person's UI
-follows. **I will implement the refusal and ask before writing it.**
+**The flag (the operator's answer):** `keep` — **by default the stage is discarded**, which is the
+safe direction: the checkout already changed every file, so a stage describing those changes is a
+description of a restore rather than of the person's work. `{"keep": true}` leaves the index as the
+checkout left it, for a caller that wants to inspect what moved before committing.
+
+**The refusal, which stays:** a checkout over a working tree with changes that are in no version is
+still refused. `keep` governs the *index*, not the person's uncommitted bytes — a flag that let a
+checkout destroy unsaved work would be the one irreversible thing in the tool list. **Discarding the
+stage after a checkout is not a loss** (the index is a description of the tree the checkout just
+made); discarding a working tree *before* one is.
 
 ---
 
@@ -175,14 +219,23 @@ may already be a tool call (`{"tool":"read","args":{…}}`, `AgentTools.kt:2521`
 2. **Any argument may be an id, a path, or a call**, expanded into text before use — "response column
    from that session row, or file content, or command result".
 
-**The half I can build tonight:** `original` as a third selector shape, kept alongside the others.
-**The half that needs a decision:** "any argument may be a row id" makes **every** argument
-polymorphic, which changes what the schema can say and what `unknownIn()` can check. It also
-interacts with the reasoning bug fixed tonight: a row id must refuse loudly when the row was trimmed,
-not substitute empty.
+**The operator's answer on `original`: it expands like `grep` does.** So `original` is not a third
+independent shape — it is **the same selector as `grep`, matched literally instead of as a regex**.
+That collapses the shape count rather than growing it:
 
-**I will build `original` and leave the polymorphic-arguments question open**, because guessing it
-would be exactly the kind of unasked-for build the operator has ruled against.
+| selector | meaning |
+|---|---|
+| `{path, text}` | the whole file |
+| `{path, from, to, text}` | those lines |
+| `{path, grep, text}` | every match of a **pattern** |
+| `{path, original, text}` | the one place that says exactly that **text** |
+
+`original` is what a model is good at (quoting what it just read) and `from`/`to` is what it is bad
+at (arithmetic over line numbers). Both stay: `grep` finds many, `original` finds one and **refuses
+when it matches zero or more than one** — which is the safety `grep` deliberately does not have.
+
+**Still open, and I am not building it:** "any argument may be a row id / a path / a call". That makes
+every key polymorphic and changes what the schema can say and what `unknownIn()` can check.
 
 ---
 
@@ -211,29 +264,33 @@ and the request rather than the screen.
 
 ## The order, and why
 
-1. **Green the branch** — nothing is measurable before this.
-2. **`search` rename** — the most visible lie in the tool list, and the smallest diff per unit of
+1. **Green the branch** — done: `05e521fe` is green on run 42913413702.
+2. **`help`** — **first, because it is the licence to delete the targeted refusals**, and every
+   rename below depends on the pointer existing. Building the renames first would leave the branch
+   with no explanation for an old call.
+3. **`search` rename** — the most visible lie in the tool list, and the smallest diff per unit of
    improvement.
-3. **`git log`, `diff` split, `tag`→`push`, `query` folder, `browse` dump** — four small, independent
+4. **`git log`, `diff` split, `tag`→`push`, `query` folder, `browse` dump** — four small, independent
    changes, each with its own commit and its own doc update.
-4. **`restore` whole-tree** — needs the uncommitted-work refusal first.
-5. **Brace expansion** — the biggest new code; goes after the small ones so the branch is never far
+5. **`restore` whole-tree** — needs the uncommitted-work refusal first.
+6. **Brace expansion** — the biggest new code; goes after the small ones so the branch is never far
    from green.
-6. **`write {original}`** — last, because it touches the command every other one depends on.
-7. **Chat-mechanics tests** — with whatever time is left, because they protect everything above.
+7. **`write {original}`** — last, because it touches the command every other one depends on.
+8. **Chat-mechanics tests** — with whatever time is left, because they protect everything above.
 
 Each commit: QC clean, push, CI green before the next. If a run is red, **that is the night's work**
 and nothing else starts.
 
 ---
 
-## What I need from the operator before starting
+## The operator's answers, as given
 
-1. **`restore` with no path**: confirm it should **refuse** when the working tree has uncommitted
-   changes, rather than warn and proceed.
-2. **`write`'s `original`**: confirm it is a **third shape** kept alongside `from`/`to` and `grep`,
-   rather than replacing them.
-3. **`search`'s renames**: confirm no aliases — an old call using `scope` gets a refusal naming the
-   new key, not a silent translation.
+| question | answer |
+|---|---|
+| pathless `restore` and uncommitted work | **`keep` flag; the stage is discarded by default.** The refusal over a working tree with no version stays. |
+| `write`'s `original` | **expands as `grep` does** — the same selector matched literally, not a new shape |
+| `search` renames and aliases | **no targeted refusals at all**: a wrong key gets "ask `help <command>`" |
+| `help` | **a command**, listing every command, taking an optional name to explain one |
 
-Everything else above I can decide from the code and the standing rules.
+Nothing else is blocked. If the night ends with the branch green and `help` + `search` landed, that
+is a good night; the rest is ordered so that stopping anywhere leaves the tree consistent.
