@@ -2064,6 +2064,10 @@ class AgentTest {
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("it says which tool it was: $body", body.contains("delete"))
+        // **And says why, which is the part that changed.** The rule moved from `write` to `Args`
+        // when sources became general, so the sentence is now about sources rather than about
+        // replacements — but the refusal is the same refusal, and the file is still untouched.
+        assertTrue("and what a source may be: $body", body.contains("`read`"))
         assertEquals("and nothing was written", "text", ws.read(File(ws.repoOf("shopping"), "todo.txt")))
     }
 

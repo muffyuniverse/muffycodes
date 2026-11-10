@@ -445,6 +445,15 @@ class AgentTools(
         const val SUMMARY_CHARS = 70
 
         /**
+         * How deeply a `{"tool":…}` argument may nest.
+         *
+         * **Two, because one is the use and more is a program.** The use is "read this, write it
+         * there"; anything deeper is a chain a model built by accident, and the alternative to a
+         * bound is a stack overflow that reads as a crash rather than as a refusal.
+         */
+        const val NESTED_MOST = 2
+
+        /**
          * The commands that can leave the project folder different from how they found it.
          *
          * **`read`-only tools are absent on purpose**, and so are the ones that only reach the
@@ -624,6 +633,50 @@ class AgentTools(
             return "`$tool` does not take " + unknown.joinToString(", ") { "`$it`" } +
                 ". It takes $keys. Call `help` with `{\"of\":\"$tool\"}` for how to use it."
         }
+
+        /**
+         * **Which arguments are paths**, and so the only ones brace expansion applies to.
+         *
+         * The operator's rule (2026-11-10): braces multiply a **path**. A document that happens to
+         * contain `{a,b}` is a document about braces, and expanding it would rewrite a person's text
+         * into two different files — so `text`, `grep`, `sql`, `of` and every other prose value are
+         * absent here on purpose, and absence is the default.
+         *
+         * **`look`'s `paths` is an array already**, so a brace pattern inside one of its entries is
+         * expanded by [Args] element by element rather than turning the array into a list of lists.
+         */
+        val PATHS: Map<String, Set<String>> = mapOf(
+            "search" to setOf("path"),
+            "read" to setOf("path"),
+            "write" to setOf("path"),
+            "delete" to setOf("path"),
+            "move" to setOf("path", "into"),
+            "restore" to setOf("path"),
+            "browse" to setOf(),
+            "shot" to setOf(),
+            "look" to setOf("paths"),
+            "query" to setOf(),
+            "archive" to setOf("path"),
+            "http" to setOf(),
+            "mcp" to setOf(),
+            "git" to setOf("path"),
+            "help" to setOf(),
+            "forget" to setOf(),
+            "background" to setOf(),
+            "pull" to setOf(),
+            "push" to setOf(),
+        )
+
+        /**
+         * **The path arguments that are lists already**, so many values are their normal shape.
+         *
+         * Only `look` has one: it attaches pictures, and "one picture" would be a strange restriction
+         * on a command whose whole job is a set. Every other path argument names one thing, and an
+         * expansion to many there is a refusal rather than a choice — a command with one file has no
+         * rule for picking one of twelve, and acting on the first would leave the model believing it
+         * had done all twelve.
+         */
+        val MULTI_KEYS: Set<String> = setOf("paths")
 
         /**
          * Every tool the agent has, **minus the ones this account has turned off.**
@@ -1083,10 +1136,26 @@ class AgentTools(
          * where report 13 lives.
          */
         canHandOver: Boolean = false,
+        /**
+         * How many nested calls deep this one is.
+         *
+         * **A `{"tool":…}` argument runs a command to get a value**, so a value could name a command
+         * whose own value names a command. The nesting is useful one deep — "read this and write it
+         * there" — and unbounded nesting is a stack overflow a model could reach by accident. The
+         * bound is small enough to be a real answer and large enough for any honest use.
+         */
+        nested: Int = 0,
     ): String = try {
         // **The arguments, or a sentence about them.** `JSONObject(...)` throws on anything that is
         // not one — a model that sends `[]`, or a bare string where the object should be — and
         // "that tool could not be run" would leave it guessing at which part of the call was wrong.
+        if (nested > NESTED_MOST) {
+            return refusal(
+                "Arguments nested $nested calls deep, and $NESTED_MOST is the limit. A value that " +
+                    "names a command is for reading one thing once — write the intermediate result " +
+                    "to a file if you need a chain.",
+            )
+        }
         val args = try {
             JSONObject(call.args.ifBlank { "{}" })
         } catch (e: Throwable) {
@@ -1101,36 +1170,70 @@ class AgentTools(
         // can leave everything exactly as it was.
         val unknown = unknownIn(call.tool, args)
         if (unknown.isNotEmpty()) return refuseKeys(call.tool, unknown)
+        // **Every value is expanded before any command sees it** — a source (`{"row":17}`,
+        // `{"file":…}`, `{"tool":…}`) or a brace pattern in a path. One place, called once, after
+        // the keys are checked and before dispatch, so no command can forget it and two commands
+        // cannot disagree about what a value means.
+        //
+        // **After `unknownIn`, deliberately.** Expanding a value for a key the command does not take
+        // would do work on the way to a refusal — and a `{"row":7}` naming a deleted row would then
+        // answer about the row instead of about the key, which is the wrong sentence.
+        val values = Args.resolve(
+            args = args,
+            pathKeys = PATHS[call.tool].orEmpty(),
+            read = { path ->
+                resolveFile(path).getOrNull()?.takeIf { it.isFile }?.let { file ->
+                    if (file.length() > Args.MOST_CHARS) null else file.readText()
+                }
+            },
+            row = { id -> log.rows().firstOrNull { it.id == id }?.body },
+            call = { tool, inner ->
+                run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
+            },
+        ).getOrElse { return refusal(it.message ?: "that argument cannot be expanded") }
+        // **One path, many values is a refusal, not a choice.** A command that takes one file has no
+        // rule for picking one of twelve, and acting on the first would be a silent partial act — the
+        // model would believe it had done all twelve. `look` is the one command whose path key is a
+        // list already, and `Args` keeps it a list.
+        for (key in PATHS[call.tool].orEmpty() - MULTI_KEYS) {
+            val value = values.opt(key)
+            if (value is JSONArray) {
+                return refusal(
+                    "`$key` expanded to ${value.length()} paths, and `${call.tool}` acts on one. " +
+                        "Give one path, or call it once per path.",
+                )
+            }
+        }
         // **Every path out of the `when` is answered, and every one of them tells the screens.**
         // The command's own answer is what comes back; the notification is a separate act that
         // happens after it, whether the answer was a success or a refusal.
         val said = when (call.tool) {
-            "search" -> searchTool(args, deadline)
-            "read" -> read(args, deadline)
-            "write" -> write(args, deadline)
-            "forget" -> forget(args)
-            "delete" -> delete(args, deadline)
-            "move" -> move(args, deadline)
-            "restore" -> restore(args, deadline)
-            "background" -> background(call, args)
-            "browse" -> browse(args, deadline)
-            "shot" -> shot(args, deadline)
-            "look" -> look(args)
-            "query" -> query(args, deadline)
-            "archive" -> archive(args, deadline)
+            "search" -> searchTool(values, deadline)
+            "read" -> read(values, deadline)
+            "write" -> write(values, deadline)
+            "forget" -> forget(values)
+            "delete" -> delete(values, deadline)
+            "move" -> move(values, deadline)
+            "restore" -> restore(values, deadline)
+            "background" -> background(call, values)
+            "browse" -> browse(values, deadline)
+            "shot" -> shot(values, deadline)
+            "look" -> look(values)
+            "query" -> query(values, deadline)
+            "archive" -> archive(values, deadline)
             "http" -> if (httpAllowed()) {
-                http(args, deadline)
+                http(values, deadline)
             } else {
                 refusal(
                     "Reaching the network is switched off in this account's settings, so nothing can be " +
                         "sent. A page can still be read with `browse`.",
                 )
             }
-            "mcp" -> mcp(args, deadline)
-            "git" -> gitTool(args, deadline)
+            "mcp" -> mcp(values, deadline)
+            "git" -> gitTool(values, deadline)
             "pull" -> pull()
-            "push" -> push(args)
-            "help" -> help(args)
+            "push" -> push(values)
+            "help" -> help(values)
             else -> refusal("There is no tool called ${call.tool}")
         }
         if (call.tool in CHANGES_DISK) onDiskChanged()
@@ -2331,10 +2434,10 @@ class AgentTools(
                 }
             }
             deadline.check("write")
-            // **The same `replacementText` the other shapes use**, so a `read` call pastes into a
-            // file that does not exist yet — "make this file from that one" is one call, not two.
-            val body = replacementText(args, deadline)
-                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
+            // **`text` arrives already resolved**, by `Args` before this command ran — so a `read`
+            // call pastes into a file that does not exist yet, and "make this file from that one"
+            // is one call rather than two.
+            val body = args.optString("text")
             val made = ws.createFile(parent, file.name, body)
             return made.fold(
                 onSuccess = {
@@ -2385,8 +2488,7 @@ class AgentTools(
                 // answered `12: the line`, and a model that fed that answer back as `replace`
                 // wrote the line number into the file. Nothing here goes through a formatter: the
                 // argument is the text, and a nested `read` is that call's body.
-                val put = replacementText(args, deadline)
-                    .getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                val put = args.optString("text")
                 // **Per line, like every other command.** A pattern is a test of one line here, as
                 // it is in `read` and `search`; applying it to the whole file would make `^milk`
                 // match only at position 0, which is the bug that made the walk miss a file whose
@@ -2472,8 +2574,7 @@ class AgentTools(
                 if (from > to) {
                     return refusal("There is no line $from: the file has ${lines.size} lines")
                 }
-                val put = replacementText(args, deadline)
-                    .getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                val put = args.optString("text")
                 // **An empty replacement here means the lines are gone, not that one blank line
                 // stands in their place.** These are whole lines, so "replace them with nothing" is
                 // "there are none of them" — a person who selects three lines and deletes them
@@ -2488,10 +2589,9 @@ class AgentTools(
                 (lines.take(from - 1) + replacement + lines.drop(to)).joinToString("\n")
             }
             // **The whole file, and it may be a `read` call** — the paste that must not pass
-            // through the conversation. `replacementText` is what allows that without turning one
-            // call into a small program: `read` is the only tool it accepts.
-            else -> replacementText(args, deadline)
-                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
+            // through the conversation. `Args` resolved it before this ran, which is why the paste
+            // never enters the conversation at all.
+            else -> args.optString("text")
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
         // **Asked before the one write, because the write is atomic.** A `write` either lands whole
@@ -2507,42 +2607,6 @@ class AgentTools(
         noticeStale(file)
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
         return commit("Wrote ${file.name}", "${rel(file)} changed")
-    }
-
-    /**
-     * What `text` says: text, or the body of a `read` call.
-     *
-     * **Only `read` is allowed there.** A replacement that could name any tool would turn one call
-     * into a small program with an order nobody wrote down; `read` is the one tool whose whole job is
-     * to produce text, and it takes the same `from`/`to`/`grep` arguments it takes anywhere else —
-     * applied to the **source** file, which is the unambiguous direction.
-     *
-     * **The nested read is not measured against the result limit**, because its text goes into a
-     * file and never through the conversation. That is the whole point of the shape: a paste of two
-     * hundred kilobytes is exactly the case a tool must not refuse for being large.
-     */
-    private fun replacementText(args: JSONObject, deadline: Deadline): Result<String> {
-        // **An absent `text` is refused by the shape check, not defaulted here.** That check is in
-        // [write]: a call that says where but not what is refused before this is reached, which is
-        // where the data loss used to be. `"text": ""` remains the way to mean nothing on purpose.
-        val call = args.optJSONObject("text") ?: return Result.success(args.optString("text"))
-        val tool = call.optString("tool").trim()
-        if (tool != "read") {
-            return Result.failure(
-                IllegalArgumentException(
-                    "A replacement is text or a read call, and $tool is neither",
-                ),
-            )
-        }
-        val inner = call.optJSONObject("args") ?: JSONObject()
-        // **The nested read is checked like a real one.** It is not dispatched through [run] — its
-        // text goes into a file, not into the conversation — so without this the one place a model
-        // could send a key nobody reads would be the one place a large paste is built from.
-        val unknown = unknownIn("read", inner)
-        if (unknown.isNotEmpty()) {
-            return Result.failure(IllegalArgumentException(keysSaid("read", unknown)))
-        }
-        return readInto(inner, deadline)
     }
 
     /**

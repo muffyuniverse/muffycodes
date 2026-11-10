@@ -17,7 +17,7 @@ command is added only when nothing else can answer the question.
 | command | one line | arguments |
 |---|---|---|
 | `help` | what the other commands are, and how to use one | `of` |
-| `search` | find files by where they are, what they say, and whether it is a saved version | `scope`, `query`, `mode`, `history`, `depth`, `paths`, `word`, `count` |
+| `search` | find files by where they are, what they say, and whether it is a saved version | `path`, `grep`, `history`, `depth`, `count`, `total`, `word` |
 | `read` | read a file, or one of its versions | `path`, `from`, `to`, `grep`, `revision`, `multi`, `word`, `numbers` |
 | `write` | make a file or change it — **one command for both** | `path`, `grep`, `from`, `to`, `text`, `multi`, `word` |
 | `forget` | take rows out of the agent's own context | `ids` |
@@ -38,6 +38,12 @@ command is added only when nothing else can answer the question.
 
 **Two commands have ops.** `git` is the only one with a sub-selector, and it has exactly two ops. Every other
 command is one act.
+
+**`search` lost `mode` on 2026-11-10.** It accepted one value (`regex`), refused the other by name, and
+refused to appear without a `grep` — a parameter whose only work was refusing. Its arguments are now
+`path` (a pattern over the path), `grep` (a case-insensitive per-line regex), `history`, `depth`,
+`count` (how many paths) and `total` (the tally instead of the lines). `paths` was the count and
+`count` was the flag, which is the confusion the swap removed.
 
 **No command names a host.** Not one of them mentions GitHub, GitLab, or any provider. That is the
 portability rule enforced where it is visible — in the list a model reads.

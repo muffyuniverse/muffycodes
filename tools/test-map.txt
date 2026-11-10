@@ -15,6 +15,7 @@
 # that matters: the worst it can do is run too many tests. It can only run too
 # few if a source is named here that the test does not really exercise, so name
 # dependencies honestly.
+ArgsTest app/src/main/java/com/example/notes/Args.kt
 
 AppThemeTest app/src/main/java/com/example/notes/AppTheme.kt
 HttpToolTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt
