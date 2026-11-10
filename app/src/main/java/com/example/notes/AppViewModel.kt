@@ -62,7 +62,19 @@ class AppViewModel @JvmOverloads constructor(
      * answer a *release* build gives, and that is asserted separately.
      */
     private val signInGitHub: () -> Who = { HttpWho() },
+    /**
+     * Where a hand-run request gets its bytes.
+     *
+     * **A seam so a test can answer without a socket**, the same rule the agent's own wiring follows.
+     * Null means "the real one, with this account's settings", and the default is built lazily rather
+     * than passed in so a view model made in a test needs no fetcher at all.
+     */
+    private val fetcher: Fetcher? = null,
 ) : AndroidViewModel(app) {
+
+    /** The fetcher a hand-run request uses: the seam's, or the real one obeying this account. */
+    private val requestFetcher: Fetcher
+        get() = fetcher ?: Fetcher.http(privateAllowed = { settings.browsePrivate })
 
     /** The accounts on this phone. */
     val accounts = AccountStore(rootDir)
@@ -3228,7 +3240,7 @@ class AppViewModel @JvmOverloads constructor(
                 main.post { message = said }
                 return@onWorker
             }
-            Addresses.problem(parsed.url, settings.browsePrivate)?.let {
+            com.example.notes.browser.Addresses.problem(parsed.url, settings.browsePrivate)?.let {
                 Trace.failed(tap, it, "run request")
                 main.post { message = it }
                 return@onWorker
@@ -3243,8 +3255,7 @@ class AppViewModel @JvmOverloads constructor(
                 main.post { message = said }
                 return@onWorker
             }
-            val fetcher = Fetcher.http(privateAllowed = { settings.browsePrivate })
-            HttpRun.send(request, ws.projectDir(project), fetcher, settings.fetchBytes)
+            HttpRun.send(request, ws.projectDir(project), requestFetcher, settings.fetchBytes)
                 .fold(
                     onSuccess = { outcome ->
                         Trace.answered(tap, "${request.method} ${request.url} → ${outcome.status}")

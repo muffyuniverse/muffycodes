@@ -364,6 +364,14 @@ class Scenario(
      * path is the one that has to say no.
      */
     signInGitHub: (() -> Who)? = null,
+    /**
+     * Where a hand-run request gets its bytes.
+     *
+     * **A parameter so a feature test can send without a socket**, the same rule the agent's wiring
+     * follows. Null leaves the app's own fetcher, which is what every scenario but the request ones
+     * wants.
+     */
+    fetcher: Fetcher? = null,
 ) {
 
     /** Everything this scenario makes lives here and goes away with it. */
@@ -385,6 +393,7 @@ class Scenario(
         // once so that what is being tested is the behaviour, not the pause.
         saveDebounceMs = 0,
         signInGitHub = signInGitHub ?: { HttpWho() },
+        fetcher = fetcher,
     )
 
     val login: String get() = AppViewModel.TEST_ACCOUNT
