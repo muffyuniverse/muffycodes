@@ -35,6 +35,43 @@ class HistoryFeatureTest : FeatureTest() {
         scene.open(name)
     }
 
+    /**
+     * **The acts in this file end by pressing Sync**, because the file is about *history*.
+     *
+     * Since 2026-11-10 a change is staged and a push is what makes it a version, so "the change was
+     * recorded" has two halves and a history test needs both. Writing the send at fifteen call sites
+     * would bury the subject of the file under the plumbing; naming it here says once what these tests
+     * mean by "recorded".
+     *
+     * **`sendIfWaiting` and not `sync`**, because a local project has no address and `sync` says so
+     * rather than recording anything — which is the rule these tests are not about.
+     */
+    private fun delete(file: File) {
+        delete(file)
+        scene.sendIfWaiting(file)
+    }
+
+    /** See [delete]: a move is a change like any other, and its version arrives at the send. */
+    private fun move(item: File, into: File): Boolean {
+        val answer = scene.viewModel.move(item, into)
+        // **The destination's project**, because that is the repository the move is recorded in — and
+        // the file that changed is the one that arrived there.
+        scene.sendIfWaiting(File(into, item.name).takeIf { it.exists() } ?: into)
+        return answer
+    }
+
+    /**
+     * See [delete]: a rename is a change like any other.
+     *
+     * **The parent folder is what is sent**, because the item no longer has its old path — asking
+     * `sendIfWaiting` about a file that has just been renamed would ask about a path that does not
+     * exist. The project is the same either way, and the send is about the project.
+     */
+    private fun rename(item: File, name: String) {
+        scene.viewModel.rename(item, name)
+        scene.sendIfWaiting(item.parentFile ?: item)
+    }
+
     @Test
     fun `a project arrives with its repository's versions, and the first change adds one`() {
         start()
@@ -90,7 +127,7 @@ class HistoryFeatureTest : FeatureTest() {
         // reaching for.
         val version = scene.versionsOfFolder("empty").first().first.id
         val folder = File(scene.workspace!!.projectDir("work"), "empty")
-        scene.viewModel.delete(folder)
+        delete(folder)
         assertFalse("the folder is gone", folder.exists())
 
         scene.restore(version)
@@ -263,7 +300,7 @@ class HistoryFeatureTest : FeatureTest() {
         }
         val letters = File(scene.workspace!!.projectDir("work"), "letters")
 
-        scene.viewModel.delete(letters)
+        delete(letters)
         scene.await("the folder to go", 20_000) { !letters.exists() }
 
         val gone = scene.viewModel.deletedIn(scene.workspace!!.projectDir("work"))
@@ -292,7 +329,7 @@ class HistoryFeatureTest : FeatureTest() {
         // history ever held would "work" while putting files back that never went
         // anywhere, and overwriting what is on disk with an older reading of it.
         val kept = scene.file("kept.txt", "still here")
-        scene.viewModel.delete(kept)
+        delete(kept)
         scene.await("the file to go", 20_000) { !kept.exists() }
         val root = scene.workspace!!.projectDir("work")
         scene.viewModel.restoreDeleted(root, scene.viewModel.deletedIn(root).first { it.name == "kept.txt" })
@@ -331,7 +368,9 @@ class HistoryFeatureTest : FeatureTest() {
         scene.closeEditor()
         val count = scene.versionsOf(file).size
 
-        scene.restore(scene.versionsOf(file).last().first.id)
+        // **A restore is a change like any other**: it is staged, and the send is what makes it a
+        // version (2026-11-10) — so both halves are here rather than the restore alone.
+        scene.restoreAndSend(scene.versionsOf(file).last().first.id, file)
         scene.await("the restore to be recorded") { scene.versionsOf(file).size > count }
 
         assertTrue("nothing was deleted from the history", scene.versionsOf(file).size > count)
@@ -346,7 +385,7 @@ class HistoryFeatureTest : FeatureTest() {
         val version = scene.versionsOf(file).first().first.id
         val path = file.absolutePath
 
-        scene.viewModel.delete(file)
+        delete(file)
         assertFalse("the file is gone", File(path).exists())
 
         // The history is opened again, because a restore acts on the history that is open and the
@@ -380,7 +419,7 @@ class HistoryFeatureTest : FeatureTest() {
         val version = scene.versionsOfFolder("letters").first().first.id
         val letters = File(scene.workspace!!.projectDir("work"), "letters")
 
-        scene.viewModel.delete(letters)
+        delete(letters)
         assertFalse("the folder is gone", letters.exists())
 
         // **The history is opened again after the deletion.** Restoring acts on the history that
@@ -429,15 +468,16 @@ class HistoryFeatureTest : FeatureTest() {
 
         assertTrue(
             "the folder was renamed",
-            scene.viewModel.rename(folder, "archive"),
+            rename(folder, "archive"),
         )
 
         val renamed = File(scene.workspace!!.projectDir("work"), "archive")
         assertTrue("the folder has its new name", renamed.isDirectory)
         assertTrue("and holds what it held", File(renamed, "first.txt").isFile)
 
-        // The history knows the rename happened, and the version before it still
-        // has the folder under its old name with its contents.
+        // **The history knows the rename happened**, because `rename` sent it — the version before it
+        // still has the folder under its old name with its contents, which is the half that makes a
+        // version of a rename worth having.
         val versions = log()
         assertTrue("there is more than one version", versions.size >= 2)
         assertTrue(
@@ -460,7 +500,7 @@ class HistoryFeatureTest : FeatureTest() {
         val archive = File(scene.workspace!!.projectDir("work"), "archive")
         val before = scene.headId()
 
-        assertTrue("the folder moved", scene.viewModel.move(inbox, archive))
+        assertTrue("the folder moved", move(inbox, archive))
 
         scene.await("the move to be recorded") { scene.headId() != before }
         val moved = File(archive, "inbox")
@@ -469,41 +509,43 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `each save inside a project is a version of it, with no sync anywhere`() {
-        // The worry this answers: inside a project, does the history move between
-        // *syncs*, or between changes? It has to be changes — "go back to how it was"
-        // is wanted a second after the mistake, not after the next push — and the way
-        // to know is to save twice and never sync at all.
+    fun `ten saves are one version, and the send is what makes it`() {
+        // **This test used to prove the opposite**, and the change is the operator's: it was called
+        // "each save inside a project is a version of it, with no sync anywhere" and it asserted three
+        // saves made three versions without a push. Since 2026-11-10 a save stages and a push commits,
+        // so three saves are three *staged* changes and one version — which is the point of the change:
+        // a commit is a version a person decided on, and ten saves are not ten decisions.
+        //
+        // Both halves are asserted, because either one alone passes over the failure the other is
+        // about: the index holds the newest text, and the history has exactly one more version.
         scene.project("shopping")
         scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
-        // Written through the editor, because the editor is what commits: writing
-        // to the disk behind it is not a change the app was told about.
         scene.viewModel.refresh()
         scene.openEditor(file)
-        scene.saveAsVersion("one")
-        scene.saveAsVersion("two")
-        scene.saveAsVersion("three")
+        scene.saveEditor("one")
+        scene.saveEditor("two")
+        scene.saveEditor("three")
         scene.closeEditor()
 
+        assertEquals(
+            "the index holds the newest text, and nothing is a version yet",
+            "three",
+            org.eclipse.jgit.api.Git.open(ws.repoOf("shopping")).use { git ->
+                val entry = git.repository.readDirCache().getEntry("milk.txt")
+                entry?.let {
+                    String(git.repository.open(it.objectId).bytes, Charsets.UTF_8)
+                }
+            },
+        )
+
+        // **One send, one version** — and it carries the newest text, because that is what the index
+        // had when it was made.
+        scene.sendIfWaiting(file)
         val versions = scene.versionsOf(file)
-        assertEquals("three changes, three versions", 3, versions.size)
-        assertEquals("the newest is what is on disk", "three", versions[0].second)
-        assertEquals("and the first is still there", "one", versions[2].second)
-        // **What arrived with the project, and nothing since.** A new project starts with the
-        // commits that made it — its licence, and the preset pair the app copies in — and the point
-        // of the assertion is that none of the three saves reached GitHub, not that the seed is
-        // exactly one commit. Counting the seed instead of the difference meant this test failed
-        // when the app started making projects with one more file in them, which is a fact about
-        // the seed and not about saving.
-        // **Asked as a difference, because that is the only number that means anything here.** The
-        // seed is a licence and a preset pair, and how many commits those make is a fact about how a
-        // project is made — not about saving. Three saves that each reached GitHub would move the
-        // count by three, so "the count did not move" is exactly the claim.
-        val arrived = scene.remoteCommits("shopping")
-        val moved = arrived - scene.seedCommits("shopping")
-        assertEquals("no save reached GitHub: $arrived total, $moved from the saves", 0, moved)
+        assertEquals("one version, not three", 1, versions.size)
+        assertEquals("and it holds what was last saved", "three", versions[0].second)
     }
 
     @Test
@@ -567,7 +609,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.folder("letters")
         scene.openIn("letters")
         val letter = scene.file("milk.txt", "two litres")
-        scene.viewModel.delete(letter)
+        delete(letter)
         scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
 
         val gone = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
@@ -610,7 +652,7 @@ class HistoryFeatureTest : FeatureTest() {
             scene.versionsOf(letter).any { (_, text) -> text == "the second draft" }
         }
         scene.viewModel.closeEditor()
-        scene.viewModel.delete(letter)
+        delete(letter)
         scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
 
         val gone = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
@@ -644,7 +686,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.await("the picture to be recorded", 20_000) {
             scene.trackedFiles().contains("pictures/dot.png")
         }
-        scene.viewModel.delete(picture)
+        delete(picture)
         scene.await("the deletion to be recorded", 20_000) { !picture.exists() }
 
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
@@ -668,7 +710,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.openEditor(file)
         scene.saveAsVersion("two litres")
         scene.closeEditor()
-        scene.viewModel.delete(file)
+        delete(file)
         scene.await("the deletion", 20_000) { !file.exists() }
 
         scene.open("shopping")
@@ -687,9 +729,14 @@ class HistoryFeatureTest : FeatureTest() {
         // worker puts them in the order they were asked for.
         start()
         val file = scene.file("milk.txt", "one litre")
-        scene.viewModel.openEditor(file)
-        scene.viewModel.saveEditor("two litres")
-        scene.viewModel.closeEditor()
+        scene.openEditor(file)
+        scene.saveEditor("two litres")
+        scene.closeEditor()
+        // **The send is what makes it a version** (2026-11-10), so "the version that was just saved" is
+        // the version that was just *sent*. The ordering defect this test was written for — a history
+        // read that ran before the save's own commit — is still what it proves: the read is asked for
+        // after the send, and it must find the send's text rather than the one before it.
+        scene.sendIfWaiting(file)
         // The history screen is what asks, so the history is what has to be open.
         scene.viewModel.openHistory(file)
 
@@ -715,11 +762,11 @@ class HistoryFeatureTest : FeatureTest() {
         val first = scene.file("one.txt", "the first")
         val second = scene.file("two.txt", "the second")
         val third = scene.file("three.txt", "the third")
-        scene.viewModel.delete(first)
+        delete(first)
         scene.await("the first deletion", 20_000) { !first.exists() }
-        scene.viewModel.delete(second)
+        delete(second)
         scene.await("the second deletion", 20_000) { !second.exists() }
-        scene.viewModel.delete(third)
+        delete(third)
         scene.await("the third deletion", 20_000) { !third.exists() }
 
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!).map { it.name }
@@ -741,7 +788,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.folder("drafts")
         scene.openIn("letters", "drafts")
         val deep = scene.file("deep.txt", "kept in drafts")
-        scene.viewModel.delete(deep)
+        delete(deep)
         scene.await("the deletion", 20_000) { !deep.exists() }
         scene.openIn("letters")
 

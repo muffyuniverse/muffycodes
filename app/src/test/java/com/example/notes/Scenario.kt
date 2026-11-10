@@ -522,6 +522,32 @@ class Scenario(
         }
     }
 
+    /**
+     * **Presses the person's own Sync when there is something to send, and does nothing otherwise.**
+     *
+     * A save stages and a push commits (2026-11-10), so a test that needs a *version* has to do the
+     * second half of what a person does. Two things this gets right that a bare `sync` does not:
+     *
+     * - **Nothing staged is nothing to do.** A sync on a clean tree is a round trip for an answer that
+     *   is already "up to date", and in a wait loop it would be one per poll.
+     * - **A local project is not synced.** It has no address by design, `sync` says so and leaves the
+     *   change count alone, so waiting for the count to fall would wait for ever.
+     *
+     * Returns true when it actually pressed Sync, so a caller can say so if it wants.
+     */
+    fun sendIfWaiting(file: File): Boolean {
+        val project = projectOf(file) ?: return false
+        if (viewModel.isLocalProject(project)) return false
+        val staged = try {
+            Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (staged.isEmpty()) return false
+        sync(project)
+        return true
+    }
+
     /** How many versions a project's history holds. */
     fun versions(project: String): Int = repo(project).log(null).size
 
@@ -576,21 +602,14 @@ class Scenario(
             viewModel.closeEditor()
         }
         // **Sync last, and only once.** A creation no longer makes a version (2026-11-10), so a caller
-        // that goes on to read a history — `HistoryScreenTest` is one — needs one to exist. Pressing it
-        // *after* the text is written matters: pressing it after the creation would record the empty
-        // file as a version of its own, which is the version this rule removed.
+        // that goes on to read a history needs one to exist. Pressing it *after* the text is written
+        // matters: pressing it after the creation would record the empty file as a version of its own,
+        // which is the version this rule removed.
         //
-        // Only for a project with something staged: a file beside a project has no history at all, and
-        // a project with no address has nothing to send.
-        val project = projectOf(file)
-        if (project != null) {
-            val staged = try {
-                Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
-            } catch (e: Exception) {
-                emptyList()
-            }
-            if (staged.isNotEmpty()) sync(project)
-        }
+        // **`sendIfWaiting`, not `sync`**, because `sync` waits for the change count to reach zero and a
+        // local project has no remote to reach zero against — it would wait out its sixty seconds and
+        // then report the app as broken. The helper is where that distinction lives.
+        sendIfWaiting(file)
         return file
     }
 
@@ -850,16 +869,7 @@ class Scenario(
         // here instead was the same race one level up: a save's two facts land at different moments,
         // and asking "is anything staged" between them answers no.
         saveEditor(text)
-        projectOf(file)?.let { project ->
-            // Only when something is staged: a project with no remote has nothing to send, and its
-            // count is zero, so pressing Sync is a no-op that says so.
-            val staged = try {
-                Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
-            } catch (e: Exception) {
-                emptyList()
-            }
-            if (staged.isNotEmpty()) sync(project)
-        }
+        sendIfWaiting(file)
         await("a version of ${file.name} holding \"$text\"", 30_000) {
             newestVersionText(file) == text && file.readText() == text
         }
@@ -896,6 +906,18 @@ class Scenario(
     /** Puts a version back, from the history that is open. */
     fun restore(revisionId: String) {
         viewModel.restoreVersion(revisionId)
+    }
+
+    /**
+     * **Restores a version, then sends it — so the restore becomes a version of its own.**
+     *
+     * A restore stages like any other change (2026-11-10), so a test that asks "did the restore become
+     * a version" has to do the second half of what a person does. The file it happened to is the one
+     * the history screen is showing, which is what `versionsOf` leaves open.
+     */
+    fun restoreAndSend(revisionId: String, file: File) {
+        restore(revisionId)
+        sendIfWaiting(file)
     }
 
     /** Closes the history screen. */
