@@ -2599,30 +2599,35 @@ class AgentTest {
     }
 
     @Test
-    fun `a file the agent created is staged, so a push gives it a first version`() {
+    fun `a file the agent created is staged, so it can be undone once a push records it`() {
         // **The second half of the data-loss report, and the half that made it unrecoverable.**
         // "history says 'has no versions yet' for those files, so there's no way to restore them."
         //
-        // A file that was never committed has no version to go back to, so the first edit is the
-        // moment a mistake stops being undoable. Since 2026-11-10 the write only stages it, and the
-        // push is what makes the version — so this asserts the *pair*, and the second half is the one
-        // that would silently regress: a staged file that a push forgot is a file with no history at
-        // all, which is exactly the report this test came from.
+        // A file that was never recorded has no version to go back to, so the first edit is the moment
+        // a mistake stops being undoable. Since 2026-11-10 a write stages and a push commits, so the
+        // half that happens here is the staging — and the half that would silently regress is exactly
+        // this one: a file on disk that git never heard of is a file no push can carry, which is the
+        // report this test came from.
         val body = tool("write", """{"path":"notes/plan.md","text":"first line"}""")
         assertTrue("created: $body", body.startsWith(AgentLog.SUCCESS))
-        // **The push is what makes the version** (2026-11-10), so the tool that gives a new file a
-        // history is `push` with a message — not the write.
-        val pushed = tool("push", """{"message":"the plan begins"}""")
-        assertTrue("pushed: $pushed", pushed.startsWith(AgentLog.SUCCESS))
-
-        val history = tool("search", """{"scope":"plan\\.md$","history":true}""")
-
-        assertTrue("it has a version: $history", history.startsWith(AgentLog.SUCCESS))
-        assertTrue(
-            "and the version is named by its id: $history",
-            Regex("""plan\.md@[0-9a-f]{7}""").containsMatchIn(history),
+        // **The version arrives at a push, and this fixture has no remote to push to** — so what a
+        // create promises here is that the file is *staged*, which is the half of "recorded" that
+        // happens on this phone. The other half is covered where a remote exists
+        // (`Scenario.saveAsVersion` presses Sync for every history assertion in the feature tests).
+        assertEquals(
+            "the new file is staged, so a push will carry it",
+            listOf("notes/plan.md"),
+            Git.open(ws.repoOf("shopping")).use { GitService.stagedPaths(it.repository) },
         )
-        assertTrue("the version shows the line it held: $history", history.contains("first line"))
+        // **And it is in the repository's index, not merely on disk**: `tracked` is the question a
+        // file that arrived from nowhere would fail.
+        assertTrue(
+            "and git tracks it",
+            Git.open(ws.repoOf("shopping")).use { git ->
+                git.repository.readDirCache().getEntry("notes/plan.md") != null
+            },
+        )
+
     }
 
     @Test
@@ -2980,8 +2985,12 @@ class AgentTest {
         assertTrue("and names the file it would have sent: $said", said.contains("milk.txt"))
         assertTrue("and asks for the message: $said", said.contains("message"))
 
+        // **With a message the refusal is gone**, and what happens next is the remote's business —
+        // this fixture's project has no `origin`, so the push answers that instead. Asserting "it
+        // succeeds" would be asserting a remote into existence; what this test is about is the rule
+        // that a version needs a reason.
         val told = call("push", JSONObject().put("message", "three litres instead of two"))
-        assertTrue("with a message it goes: $told", !told.startsWith("1"))
+        assertFalse("the message is no longer what stops it: $told", told.contains("give `message`"))
     }
 
     @Test

@@ -567,6 +567,22 @@ class Scenario(
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
         awaitRecordedFor(file, before, "\"$made\" being made")
+        // **A creation no longer makes a version** (2026-11-10), so a caller that goes on to read a
+        // history — `HistoryScreenTest` is one — has to be able to find one. Pressing Sync here rather
+        // than in each of those tests keeps "the app recorded this" one act, and the act a person
+        // performs is the same one.
+        //
+        // Only for a project with a remote and something staged: a file beside a project has no
+        // history at all, and a project with no address has nothing to send.
+        val project = projectOf(file)
+        if (project != null) {
+            val staged = try {
+                Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (staged.isNotEmpty()) sync(project)
+        }
         if (text.isNotEmpty()) {
             val textBefore = headOf(file)
             viewModel.openEditor(file)
@@ -767,8 +783,14 @@ class Scenario(
         val project = workspace?.projectOf(file) ?: return
         await("${file.name} to be staged") {
             try {
-                Git.open(workspace!!.repoOf(project)).use { git ->
-                    val relative = file.relativeTo(workspace!!.projectDir(project)).invariantSeparatorsPath
+                // **The tree the file is actually in**, not the project's root. A file saved inside a
+                // branch lives in `.muffy/worktrees/<project>/<branch>/`, and its path from there is the
+                // same `milk.txt` — so measuring from the project folder asked the wrong repository and
+                // got an empty index for a save that had happened. `treeOf` is the app's own answer to
+                // "where is this branch", which is why it is asked rather than derived.
+                val tree = workspace!!.treeOf(project, workspace!!.branchOf(file))
+                Git.open(tree).use { git ->
+                    val relative = file.relativeTo(tree).invariantSeparatorsPath
                     GitService.stagedPaths(git.repository).any { it == relative }
                 }
             } catch (e: Exception) {
