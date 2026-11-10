@@ -39,16 +39,6 @@ fun ModelSection(
     /** Opens `.muffy/schemas` in the browser — the whole template manager, which already exists. */
     onOpenTemplates: () -> Unit = {},
 ) {
-    val problem = viewModel.modelConfigProblem
-    if (problem != null) {
-        // Named with its line, because the file is the operator's and they are the one who can fix it.
-        Text(
-            text = "This file will not read, so the model here is the last that did. $problem",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-
     // **Read per composition, not remembered.** The browser is where these files are written, and a
     // remembered count would keep saying "three" after the person added a fourth — the settings screen
     // recomposes on the way back from the browser, so a plain read is both fresher and smaller.

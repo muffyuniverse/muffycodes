@@ -3958,6 +3958,18 @@ class AppViewModel @JvmOverloads constructor(
         }
 
     /**
+     * **The units in the chat folder**, by file name, for the settings row's count.
+     *
+     * `ensure` first, for the same reason [chatForms] does it: a fresh install has no folder, and a row
+     * that read "none yet" beside a picker offering three would be two answers to one question.
+     */
+    fun templateNames(): List<String> {
+        val ws = workspace ?: return emptyList()
+        Schemas.ensure(ws)
+        return Schemas.names(ws, ShapeKind.CHAT)
+    }
+
+    /**
      * **The forms a chat may pick from**, by name, each with the model it asks.
      *
      * The model id is under the name because that is what a person is choosing between: two forms
