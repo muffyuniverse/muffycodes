@@ -116,7 +116,8 @@ class BrowseToolsTest {
         val lines = answer.lines()
         assertEquals("the status", "0", lines[0])
         assertTrue("then where", lines[1].contains("example.com"))
-        assertEquals("then the text", "one", lines[2])
+        assertEquals("a blank line, then the text", "", lines[2])
+        assertEquals("the text", "one", lines[3])
     }
 
     @Test
@@ -135,22 +136,33 @@ class BrowseToolsTest {
     }
 
     @Test
-    fun `from and to select lines of the answer, like read does`() {
-        // **One range language.** `read` selects lines with `from`/`to`, so a page does too — an
-        // agent that has learned one has learned both, and a long page can be read a window at a
-        // time without fetching it twice.
+    fun `the whole page is filed, and the answer says where`() {
+        // **`from`/`to` are gone** (operator, 2026-11-10): paging a file is what `read` is for, and a
+        // second pager is a second way to say one thing. So a page of any size lands in
+        // `agent/browser/` and the answer quotes its opening lines — which is enough to decide
+        // whether this is the page that was wanted, and `read` takes a range of it.
         val five = fake("a\nb\nc\nd\ne")
-        val answer = tools(browser = five).run(call("browse", """{"url":"https://example.com/","from":2,"to":4}"""))
-        assertEquals("0\nhttps://example.com/ · A page\nb\nc\nd", answer)
+        val answer = tools(browser = five).run(call("browse", """{"url":"https://example.com/"}"""))
+        assertTrue("it answers: $answer", answer.startsWith("0\n"))
+        assertTrue("the text is quoted: $answer", answer.contains("\na\nb\nc\n"))
+        val where = answer.substringAfter("The whole page is at ").trim()
+        assertTrue("and the file is named: $answer", where.startsWith("agent/browser/page-"))
+        val file = File(ws.repoOf("shopping"), where)
+        assertTrue("the file is there", file.isFile)
+        assertTrue(
+            "and it holds the whole page, not the quote",
+            file.readText().endsWith("a\nb\nc\nd\ne"),
+        )
     }
 
     @Test
-    fun `a range past the end is the end, not a crash`() {
-        val answer = tools().run(
-            call("browse", """{"url":"https://example.com/","from":2,"to":9999}"""),
-        )
-        assertTrue("it answers: $answer", answer.startsWith("0\n"))
-        assertTrue("with what there was", answer.endsWith("two\nthree"))
+    fun `a long page is quoted in part, and the quote says how much was left`() {
+        // **A quote that simply stopped would read as a page that ended.** The sentence is what
+        // makes the difference between "that is the page" and "that is the start of it".
+        val many = fake((1..200).joinToString("\n") { "line $it" })
+        val answer = tools(browser = many).run(call("browse", """{"url":"https://example.com/"}"""))
+        assertTrue("it says more exists: $answer", answer.contains("more lines in the file"))
+        assertTrue("and does not quote all 200: $answer", !answer.contains("line 200"))
     }
 
     @Test
@@ -240,7 +252,7 @@ class BrowseToolsTest {
         // The table is what refuses a wrong key, so a key the code reads and the table omits would
         // be refused; a key the table lists and the code ignores would be silently dropped.
         assertEquals(
-            setOf("url", "wait", "eval", "from", "to"),
+            setOf("url", "wait", "eval"),
             AgentTools.KEYS["browse"],
         )
         assertEquals(setOf("url", "full", "eval"), AgentTools.KEYS["shot"])

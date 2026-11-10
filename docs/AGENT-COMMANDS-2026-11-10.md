@@ -11,7 +11,7 @@ stale — the same rule the plan tables are held to.
 
 ## 1. The set
 
-**Nineteen commands.** The list is part of every request's cache prefix, so it is kept short deliberately: a
+**Twenty commands.** The list is part of every request's cache prefix, so it is kept short deliberately: a
 command is added only when nothing else can answer the question.
 
 | command | one line | arguments |
@@ -25,19 +25,24 @@ command is added only when nothing else can answer the question.
 | `move` | move, copy, or rename | `path`, `into`, `copy` |
 | `restore` | put an old version back | `path`, `revision` |
 | `background` | run any command, answer written to a file | `tool`, `args` |
-| `browse` | read a web page with JavaScript run | `url`, `wait`, `eval`, `from`, `to` |
+| `browse` | read a web page with JavaScript run — the page is dumped to a file | `url`, `wait`, `eval` |
 | `shot` | photograph a page to a PNG | `url`, `full`, `eval` |
 | `look` | attach pictures to the next message | `paths` |
-| `query` | SQL over the request log, written to a file | `sql`, `path` |
+| `query` | SQL over the request log, written to `agent/sql/` | `sql` |
 | `archive` | zip something, or unpack a zip | `path`, `unpack`, `seal`, `key` |
 | `http` | send one request, written as the request | `request` |
 | `mcp` | ask a server described by an article | `server`, `tool`, `args` |
-| `git` | **ops:** `diff`, `tag` | `op`, `path`, `from`, `to` |
+| `diff` | what changed between two revisions | `path`, `from`, `to` |
+| `log` | the versions of a file, one line each | `path`, `count` |
 | `pull` | fetch and merge `origin/main` | *(none)* |
-| `push` | make a version and send it | `message` |
+| `push` | make a version and send it, optionally tagging it | `message`, `tag` |
 
-**Two commands have ops.** `git` is the only one with a sub-selector, and it has exactly two ops. Every other
-command is one act.
+**No command has ops any more.** `git` was the only wrapper, and its two ops became `diff` and `log`:
+`diff` is a question about two versions, `log` is a question about one path's history, and neither
+needed an `op` key to say which. `tag` moved to `push`, where the version it marks is made — a tag on a
+push is a tag on the commit that push creates, which is the only thing a tag can mean. That also
+deleted two refusals: a tag used to have to refuse off `main` and over unsent work, and on a push both
+are true by construction.
 
 **`search` lost `mode` on 2026-11-10.** It accepted one value (`regex`), refused the other by name, and
 refused to appear without a `grep` — a parameter whose only work was refusing. Its arguments are now
@@ -70,25 +75,30 @@ missing line 400 would send a model to a page that cannot help it.
 
 ## 2. The ops
 
-### `git` — two ops, and they answer different questions
+### `git` is gone — `diff` and `log` are commands, `tag` is a push argument
 
-| op | takes | what it does |
+`git` was the only command with an `op`, and it was two questions wearing one name:
+
+| was | is now | why |
 |---|---|---|
-| `diff` | `path`, `from`, `to` | what changed between two revisions. **Both revisions required** — there is no working-tree side to omit, because staged work has no id until a `push` makes it a version |
-| `tag` | `to` | marks a version and pushes the mark |
+| `{"op":"diff",…}` | `diff` | a question about **two versions** — `path`, `from`, `to` |
+| `{"op":"tag","to":…}` | `push {"tag":…}` | a tag marks **the version a push makes** |
+| — | `log` | **new**: which versions there are, one line each |
 
-**`tag`'s two refusals**, both for reasons the person's own release button already gives:
+**`log` answers the question that comes first.** `diff` needs two revision ids, and `search
+{history:true}` answers a different question — which versions' *text* matches a pattern — per matching
+line. `log` says which commits touched a path, `id  when  subject`, newest first; `count` is how many
+(20 by default, 200 at most), and the answer says when it stopped.
 
-- **off `main`** — a tag on a feature branch marks work `main` does not have;
-- **over unsent work** — a tag over a commit the remote does not have would send that commit *with* the tag
-  and leave `main` behind it: a version of different code from the one on screen, and nothing would say so.
-  The count is read **before** the tag, since afterwards it would be reporting what already went.
+**`tag`'s two refusals are gone, because the state they refused cannot happen.** As an op it had to
+refuse off `main` (a tag there marks work `main` does not have) and over unsent work (a tag over a
+commit the remote does not have would send that commit *with* the tag and leave `main` behind it). On
+a push, the push has just made the commit and sent the branch it stands in — so both are true by
+construction. **The refusals were replaced by a state that cannot occur**, which is a better fix than a
+check. The branch rule survives as a sentence rather than a refusal: the work is pushed, and the answer
+says it was not tagged and why.
 
 `tag` writes the same `release` trace line the person's button does, because it is the same act.
-
-**Why a tag and not a release API.** A tag is a git ref, so `git push --tags` works on every host. What a host
-*builds* from a tag — a GitHub release, a GitLab release, a page — is that host's business, and `http` is how
-an agent asks for it. That is the whole of the portability decision in one command.
 
 ### `write` — three shapes, one `text`
 

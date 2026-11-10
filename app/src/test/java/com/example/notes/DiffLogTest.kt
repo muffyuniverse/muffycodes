@@ -11,17 +11,21 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * `git {op: "diff"}` — **the compressed form of a change.**
+ * `diff` and `log` — **the two questions about a history.**
+ *
+ * `diff` is the compressed form of a change: `read` gives full contents, so a 400-line file where
+ * three lines moved costs 400 lines of context and leaves the model to diff in its head, which it
+ * does badly. `log` is the question that comes *first* — which versions there are — and its answer
+ * names the ids `diff` takes.
  *
  * The one question `read` cannot answer. `read` gives full contents, so a 400-line file where three
  * lines moved costs 400 lines of context and leaves the model to diff in its head, which it does
  * badly.
  *
- * **Revisions only**, because every change here is committed the moment it happens: an agent write
- * ends in a commit and a person's edit goes through `afterChange`, so there is no working-tree side
- * to compare against.
+ * **Revisions only**, because work that is staged has no id until a `push` makes it a version — so
+ * there is no working-tree side to compare against.
  */
-class GitToolTest {
+class DiffLogTest {
 
     @get:Rule
     val temp = TemporaryFolder()
@@ -40,7 +44,10 @@ class GitToolTest {
     }
 
     private fun tool(args: String): String =
-        AgentTools(ws, "shopping", git, log).run(Call("c1", "git", args))
+        AgentTools(ws, "shopping", git, log).run(Call("c1", "diff", args))
+
+    private fun logged(args: String): String =
+        AgentTools(ws, "shopping", git, log).run(Call("c2", "log", args))
 
     private fun write(path: String, text: String) =
         ws.write(File(ws.projectDir("shopping"), path), text)
@@ -60,7 +67,7 @@ class GitToolTest {
     fun `a diff names the file, its counts, and files the lines`() {
         val (from, to) = twoVersions("milk.txt", "one\ntwo\nthree\n", "one\nTWO\nthree\nfour\n")
 
-        val body = tool("""{"op":"diff","path":"milk.txt","from":"$from","to":"$to"}""")
+        val body = tool("""{"path":"milk.txt","from":"$from","to":"$to"}""")
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the file is named: $body", body.contains("milk.txt"))
@@ -75,7 +82,7 @@ class GitToolTest {
     fun `the filed diff holds the added and removed lines`() {
         val (from, to) = twoVersions("milk.txt", "one\ntwo\n", "one\nTWO\n")
 
-        val body = tool("""{"op":"diff","path":"milk.txt","from":"$from","to":"$to"}""")
+        val body = tool("""{"path":"milk.txt","from":"$from","to":"$to"}""")
         // **The path as the answer gives it**, which is project-relative and ends in `.txt`.
         val where = Regex("""agent/git/diff-[^ ]+\.txt""").find(body)!!.value
         val filed = File(ws.projectDir("shopping"), where).readText()
@@ -98,7 +105,7 @@ class GitToolTest {
         write("README.md", "readme, changed\n")
         val to = git.commit("shopping", "second")!!
 
-        val body = tool("""{"op":"diff","path":"src/","from":"$from","to":"$to"}""")
+        val body = tool("""{"path":"src/","from":"$from","to":"$to"}""")
 
         assertTrue("a is there: $body", body.contains("src/a.kt"))
         assertTrue("and b: $body", body.contains("src/b.kt"))
@@ -114,7 +121,7 @@ class GitToolTest {
         write("blob.bin", "changed\n")
         val to = git.commit("shopping", "second")!!
 
-        val body = tool("""{"op":"diff","path":"blob.bin","from":"$from","to":"$to"}""")
+        val body = tool("""{"path":"blob.bin","from":"$from","to":"$to"}""")
 
         assertTrue("it is named: $body", body.contains("blob.bin"))
         assertTrue("and said to be binary: $body", body.contains("binary"))
@@ -125,7 +132,7 @@ class GitToolTest {
         write("milk.txt", "one\n")
         val from = git.commit("shopping", "first")!!
 
-        val body = tool("""{"op":"diff","path":"milk.txt","from":"$from","to":"$from"}""")
+        val body = tool("""{"path":"milk.txt","from":"$from","to":"$from"}""")
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("and says nothing changed: $body", body.contains("nothing changed"))
@@ -141,7 +148,7 @@ class GitToolTest {
         write("milk.txt", "one\n")
         val from = git.commit("shopping", "first")!!
 
-        val body = tool("""{"op":"diff","path":"milk.txt","from":"$from"}""")
+        val body = tool("""{"path":"milk.txt","from":"$from"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("naming both ends: $body", body.contains("both `from` and `to`"))
@@ -152,22 +159,11 @@ class GitToolTest {
     }
 
     @Test
-    fun `an op that is not diff is refused, and the refusal says what is`() {
-        // **Named, because a model that guessed `log` or `status` deserves to know why not** — and
-        // what to use instead. `status` was deleted; this is where a model learns that.
-        val body = tool("""{"op":"status"}""")
-
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("naming the one op: $body", body.contains("`diff`"))
-        assertTrue("and what to use for history: $body", body.contains("history"))
-    }
-
-    @Test
     fun `a revision that does not exist is refused by name, not silently treated as HEAD`() {
         write("milk.txt", "one\n")
         val from = git.commit("shopping", "first")!!
 
-        val body = tool("""{"op":"diff","path":"milk.txt","from":"$from","to":"0000000"}""")
+        val body = tool("""{"path":"milk.txt","from":"$from","to":"0000000"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("naming the id: $body", body.contains("0000000"))
@@ -176,11 +172,88 @@ class GitToolTest {
     @Test
     fun `the tool takes no argument it does not describe`() {
         // The schema is built from the example, so a key the runner reads and the schema omits is a
-        // key the model cannot send. `op`, `path`, `from`, `to` are all four.
-        val spec = AgentTools.specs().first { it.name == "git" }
+        // key the model cannot send. `path`, `from`, `to` are all three.
+        val spec = AgentTools.specs().first { it.name == "diff" }
         val described = spec.parameters.optJSONObject("properties")!!.keys().asSequence().toSet()
 
-        assertEquals(setOf("op", "path", "from", "to"), described)
-        assertEquals(described, AgentTools.KEYS["git"])
+        assertEquals(setOf("path", "from", "to"), described)
+        assertEquals(described, AgentTools.KEYS["diff"])
+    }
+
+    // ---- log ----------------------------------------------------------------
+
+    @Test
+    fun `log answers one line per version, newest first, and the ids are usable`() {
+        // **The call that comes before `diff`.** `diff` needs two revision ids; this is where they
+        // come from. The assertion that matters is that the id the answer gives is the id `diff`
+        // takes — a log that named commits in a form nothing else accepts would be a dead end.
+        write("milk.txt", "one\n")
+        val first = git.commit("shopping", "first")!!
+        write("milk.txt", "two\n")
+        val second = git.commit("shopping", "second")!!
+
+        val body = logged("""{"path":"milk.txt"}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the newest is named: $body", body.contains(second.take(7)))
+        assertTrue("and the older one: $body", body.contains(first.take(7)))
+        assertTrue("with its subject: $body", body.contains("second"))
+        // **Newest first**, which is the order a person reads a history in and the order that makes
+        // "the last change" the first line.
+        assertTrue(
+            "newest first: $body",
+            body.indexOf(second.take(7)) < body.indexOf(first.take(7)),
+        )
+    }
+
+    @Test
+    fun `log with no path answers the whole project`() {
+        write("a.txt", "one\n")
+        git.commit("shopping", "touched a")!!
+        write("b.txt", "two\n")
+        git.commit("shopping", "touched b")!!
+
+        val body = logged("{}")
+
+        assertTrue("both are named: $body", body.contains("touched a") && body.contains("touched b"))
+        assertTrue("and it says how many: $body", body.contains("version"))
+    }
+
+    @Test
+    fun `log names nothing for a path that never changed`() {
+        // **A sentence, not an empty list.** "Nothing has ever changed that file" is an answer; a
+        // blank body would read as a command that failed to say anything.
+        write("a.txt", "one\n")
+        git.commit("shopping", "touched a")!!
+
+        val body = logged("""{"path":"never.txt"}""")
+
+        assertTrue("it answers: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and says so in words: $body", body.contains("Nothing has ever changed"))
+    }
+
+    @Test
+    fun `log stops at count and says it stopped`() {
+        // **A log that silently truncated would read as a short history.** The sentence is what
+        // makes the difference, and it is the same rule every other bounded answer follows.
+        write("a.txt", "0\n")
+        repeat(5) { i ->
+            write("a.txt", "$i\n")
+            git.commit("shopping", "change $i")!!
+        }
+
+        val body = logged("""{"count":2}""")
+
+        assertTrue("it answers: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and says it stopped: $body", body.contains("raise `count`"))
+    }
+
+    @Test
+    fun `log takes path and count, and nothing else`() {
+        val spec = AgentTools.specs().first { it.name == "log" }
+        val described = spec.parameters.optJSONObject("properties")!!.keys().asSequence().toSet()
+
+        assertEquals(setOf("path", "count"), described)
+        assertEquals(described, AgentTools.KEYS["log"])
     }
 }

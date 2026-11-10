@@ -3033,33 +3033,27 @@ class AgentTest {
     }
 
     @Test
-    fun `tag refuses a name it was not given, and says what a version is`() {
-        // **The one thing that cannot be guessed.** A version's name is what the history shows and
-        // what a host builds from, so a tag with no `to` is refused rather than given a number.
-        val said = call("git", JSONObject("""{"op":"tag"}"""))
+    fun `a push with no message and nothing staged is an honest no-op, not a failure`() {
+        // **`tag` used to be a command, and this test was its "you did not say the name" refusal.**
+        // A tag is now an argument of `push`, and `push` with nothing staged and nothing to say is
+        // the ordinary "there is nothing to send" — which the operator's own Sync button reaches.
+        // So the old test's subject is gone; what replaces it is the case a model will actually hit.
+        val said = call("push", JSONObject("""{}""").toString())
 
-        assertTrue("it is refused: $said", said.startsWith("1"))
-        assertTrue("and asks for the version's name: $said", said.contains("`to`"))
+        assertTrue("it answers: $said", said.startsWith("0"))
     }
 
     @Test
-    fun `tag is refused off main, because a version names what main has`() {
-        // A tag on a feature branch marks work `main` does not have — the same refusal `tagRelease`
-        // makes for the person's button, so an agent cannot do what the button will not.
-        val said = tools(branch = "feature").run(
-            Call("c-git", "git", JSONObject("""{"op":"tag","to":"1.4.0"}""").toString()),
-        )
-
-        assertTrue("it is refused: $said", said.startsWith("1"))
-        assertTrue("and names the branch it is on: $said", said.contains("feature"))
-        assertTrue("and says where a version belongs: $said", said.contains("main"))
-    }
-
-    @Test
-    fun `tag refuses over unsent work, because the commit would not be on the remote`() {
-        // **A tag over unsent work sends that commit with the tag** and leaves `main` behind it — a
-        // version of different code from the one on screen, with nothing saying so. The count is read
-        // before the tag, because afterwards it would be reporting what already went.
+    fun `a tag on a push off main sends the work and says it was not tagged`() {
+        // **The refusal became a sentence, because the act it refused no longer exists alone.** A
+        // tag used to be its own command with two refusals — off `main`, and over unsent work —
+        // because a tag naming a commit the remote did not have is a mark nobody can see. A tag is
+        // now an argument of `push`, and a push has already made and sent the commit, so the second
+        // refusal cannot happen.
+        //
+        // What survives is the branch rule, and it survives as **a sentence rather than a refusal**:
+        // the work is pushed, and the answer says the tag did not go and why. Refusing the whole push
+        // over a tag would be throwing away work for a marking, which is the wrong way round.
         val bare = File(File(account, "remote"), "shopping.git")
         org.eclipse.jgit.api.Git.init().setBare(true).setDirectory(bare).call().close()
         org.eclipse.jgit.api.Git.open(ws.repoOf("shopping")).use { git ->
@@ -3069,11 +3063,14 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "three litres")
         git.stage("shopping")
 
-        val said = call("git", JSONObject("""{"op":"tag","to":"1.4.0"}"""))
+        val said = tools(branch = "feature").run(
+            Call("c-push", "push", JSONObject("""{"message":"Add milk","tag":"1.4.0"}""").toString()),
+        )
 
-        assertTrue("it is refused: $said", said.startsWith("1"))
-        assertTrue("and says the work is unsent: $said", said.contains("not sent"))
-        assertTrue("and says what to do instead: $said", said.contains("push"))
+        assertTrue("the push went: $said", said.startsWith("0"))
+        assertTrue("and it says the tag did not: $said", said.contains("not tagged"))
+        assertTrue("naming the branch: $said", said.contains("feature"))
+        assertTrue("and where a version belongs: $said", said.contains("main"))
     }
 
     @Test
