@@ -194,6 +194,15 @@ class ShapeTest {
             "http://192.168.1.9:8000/v1/rerank",
             Shape("rerank", Shape.CHAT.body).address("http://192.168.1.9:8000/v1"),
         )
+        // **A blank base is not a default any more** (2026-11-10). `chatEndpoint` used to fall back to
+        // OpenRouter's address here, which meant a form with no address sent the person's key to a
+        // server nobody named. `Schema.addressProblem` refuses it instead, and the refusal is the
+        // better answer: a form is a document a person writes, and one that does not say where it goes
+        // is unfinished rather than asking for a vendor's default.
+        assertTrue(
+            "an empty address is refused, not defaulted: ${Schema.addressProblem("")}",
+            Schema.addressProblem("") != null,
+        )
     }
 
     // ---- the one property a shared default has to have --------------------------

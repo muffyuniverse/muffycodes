@@ -1078,36 +1078,6 @@ class AgentTest {
         assertFalse("and a ping's answer is not streamed", body.getBoolean("stream"))
     }
 
-    /**
-     * **The address is the connection's**, so the same door can speak to any compatible server.
-     *
-     * `chatEndpoint` is where the join happens, and it is a function of its own because the two ways a
-     * person writes a base URL — with a trailing slash and without — must produce one address.
-     */
-    @Test
-    fun `a door's request goes to the connection's address`() {
-        assertEquals(
-            "no slash, one path",
-            "https://openrouter.ai/api/v1/chat/completions",
-            chatEndpoint("https://openrouter.ai/api/v1"),
-        )
-        assertEquals(
-            "and a slash the person typed changes nothing",
-            "https://openrouter.ai/api/v1/chat/completions",
-            chatEndpoint("https://openrouter.ai/api/v1/"),
-        )
-        assertEquals(
-            "a server of one's own",
-            "http://192.168.1.9:8000/v1/chat/completions",
-            chatEndpoint("http://192.168.1.9:8000/v1"),
-        )
-        assertEquals(
-            "and an empty address is the shipped default, not a relative URL",
-            "https://openrouter.ai/api/v1/chat/completions",
-            chatEndpoint("   "),
-        )
-    }
-
     @Test
     fun `a ping's body is the turn's body with one token asked for, and nothing else`() {
         // **The cache, stated as a fact about the bytes.** A provider matches the longest common

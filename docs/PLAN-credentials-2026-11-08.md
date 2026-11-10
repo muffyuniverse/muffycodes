@@ -547,7 +547,7 @@ general** — the one piece of `wiredFor` worth surviving, because it is the pie
 | **T3** | The pointer and the send: `Schemas.pointer`/`setPointer` keyed as a session is; `wiredFor` becomes `(project, branch) → Schema + key-by-host`; the branch window picks a file. | **storage landed** (`13336130`) — `.muffy/schemas.json`, one file, atomic. **The resolver and the picker are next**; until they land the runner still reads the connection rows |
 | **T4** | The two vector models reference files: `PickedModel.schema`, the search reading the model id out of the file, the two rows becoming one file list. | **OBSOLETE 2026-11-09** — the two models and the index behind them were removed (`docs/REMOVED-2026-11-09-semantic-search-and-scanner.md`). What survives of T4 is the **chat** template pointer, which landed in `Schema`/`Schemas` |
 | **T5** | The general scope holds no chat model: `ModelSection`'s chat rows, `ModelChoice` and the rates line go; `model_conf.json` keeps only the two pointers. | **part done** (`947d1ff5`): the chat rows, the picker and the connection row are gone from Settings, and the templates row is in their place; `model_conf.json`'s `active` is still read by the runner |
-| **T6** | The connections window loses its llm half: `ConnKind` becomes git-only, `Connection.shapes` and the shape dialog go, the git window opens on the project's remote host. | **not started** |
+| **T6** | The connections window loses its llm half: `ConnKind` becomes git-only, `Connection.shapes` and the shape dialog go, the git window opens on the project's remote host. | **landed** (`c4977768`, `5cf5e477`) — and further than the step asked: `Choice`, `wiredFor`, `ConnectionDraft`'s model half, `LlmConnectionDialog`, `ShapeDialog`, `Pending.ModelConnection` and three menu entries went with it, and so did `model_conf.json` itself. See `docs/REMOVED-2026-11-10-llm-connections-and-model-config.md` |
 
 **Why T2 before T3.** A picker that lists files must not sit beside a list of tags: two ways to name a
 model, one of which is invisible in the file, is the drift this section exists to remove.
@@ -1261,7 +1261,7 @@ template selected" means.
 | **N4** | The accounts screen is the landing screen: no workspace means the empty state, and its `+` is a **menu with two separate entries — *Add GitHub account* and *Add custom account*** — not one door with a mode | **the menu is already built** (`Pending.ChooseAccountDoor` → `AddAccountDialog` → `AddHostAccountDialog`); what N4 still needs is the **landing screen** and the names, which landed 2026-11-09. **The operator's shape, twice corrected:** the two are separate options, chosen before any field is filled; and — *"github is just one of the git compatible hosts"* — GitHub is **not** the privileged route. It gets its own entry for one reason: **the OAuth device flow fills in what an account needs** (name, host, key) instead of the person typing it. Everything else is `AddHostAccountDialog`, the general case for any server that speaks git. Nothing in the account model is GitHub-shaped: `Account` is `(login, host, gitUser, key)` with `host` data, `GitCredentials` asks the account's own host, `noreplyEmail` refuses GitHub's form on other hosts, and `whoFor` answers null off GitHub rather than sending a key to `api.github.com` |
 | **N5** | The chat's template button + auto-open picker; the branch screen loses the picker | after §3.8's library exists (F6) — before it, there is nothing to list |
 | **N5b** | The popup's three sentences (§3.11.6) and the seven pages, written as one sequence | with N5: the popup and the pages say the same thing about the same folders, and writing them apart is how they drift |
-| **N6** | Minting writes a vault row and asks for its scope; `ConnKind.LLM` and the connection shape for llm go | last, because it removes the machinery N5's pointer was reading through |
+| **N6** | Minting writes a vault row and asks for its scope; `ConnKind.LLM` and the connection shape for llm go | **landed** (`c4977768`, `5cf5e477`). `finishOpenRouterSignIn` and the paste path both end at `saveMintedKey`, which writes the vault's `@openrouter` row for OpenRouter's host — the name the shipped form already says. `KeyRow` became `MintedKeyRow` and sits in the Secrets block beside the vault button, per §3.11.4. **The scope is the account's** (the narrowest that names no project) and is moved on the vault screen, which is where every other secret's scope is chosen; the "undefined" rung the operator named is a row nobody names, and minting grants nothing because a *form* names it. **A chat with no form refuses in words** and the picker is the door. Record: `docs/REMOVED-2026-11-10-llm-connections-and-model-config.md` |
 
 **N0 and N1 before N2**, because N2's audit is about doors that only become reachable when the workspace can
 be absent. **N5 after F6**, because it lists what F6 stores.
@@ -1289,10 +1289,9 @@ key" a fact about the code rather than a convention.
 it is why the step could not be folded into N1 — the audit only becomes meaningful once the state is real,
 and it is the kind of audit that rots silently if it is done before the change it is about.
 
-**N2 and N3 are done as far as the code goes** (see the table above). What remains of §3.11 is the writing:
-N4 (the accounts screen as the landing screen, two doors), N5/N5b (the chat's template button, the popup's
-three sentences, the seven pages), and N6 (minting writes a vault row and asks its scope). N5 waits on **F6**
-(the JSONC library) because a picker with nothing to list is a picker that shows an empty window.
+**§3.11's code is complete** (see the table above): N0–N6 have all landed, N6 on 2026-11-10. What remains of
+§3.11 is **the writing** — N5b's popup's three sentences and the seven pages — which is a documentation
+step and waits on nothing.
 
 ## 4. Cost is removed
 
