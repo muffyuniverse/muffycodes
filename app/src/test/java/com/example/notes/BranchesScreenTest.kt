@@ -204,6 +204,44 @@ class BranchesScreenTest {
         assertNull("the branch screen is closed by the switch", scene.viewModel.choosingBranchFor)
     }
 
+    /**
+     * **Making a branch says which branch it came from, and what came with it.**
+     *
+     * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch
+     * I am forking … and the new branch agent keeps the memories of the initial branch"*, narrowed to
+     * *"only parent branch selector stays (default parent is main, no parent is not an option)"*.
+     *
+     * **The sentence is the assertion**, because the sentence is the only place a person learns that
+     * the memory came too. A test that only checked `choosingBranches` would pass on a branch that
+     * silently inherited nothing.
+     */
+    @Test
+    fun `a new branch names its parent and carries its conversation`() {
+        scene.project("Shopping")
+        // **The parent's conversation, on disk, the way a real one is** — `agent/` is ignored, so this
+        // is not committed and still has to travel.
+        val main = scene.workspace!!.projectDir("Shopping")
+        File(main, "agent").mkdirs()
+        File(main, "agent/${AgentLog.SESSION}").writeText("   1     9 agent  hi\n")
+        scene.viewModel.openBranches("Shopping")
+        scene.await("the branches") { "main" in scene.viewModel.choosingBranches }
+
+        scene.viewModel.newBranch("feature", "main")
+        scene.await("feature to exist") { "feature" in scene.viewModel.choosingBranches }
+
+        assertEquals(
+            "the answer names the parent and the conversation",
+            "Made feature from main, with main's conversation.",
+            scene.viewModel.message,
+        )
+        val tree = Worktrees(scene.workspace!!).dirOf("Shopping", "feature")
+        assertEquals(
+            "and the record is in the new tree",
+            "   1     9 agent  hi\n",
+            File(tree, "agent/${AgentLog.SESSION}").readText(),
+        )
+    }
+
     @Test
     fun `removing a branch removes its working tree too`() {
         // **A fork point is a folder git still lists and the app still offers.** Deleting only the ref

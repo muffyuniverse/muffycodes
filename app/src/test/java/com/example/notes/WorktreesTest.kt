@@ -67,79 +67,85 @@ class WorktreesTest {
     }
 
     /**
-     * **A fork carries its parent's committed work, and starts its own conversation.**
+     * **A fork carries its parent's conversation, and the memory is the two logs.**
      *
-     * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch
-     * I am forking (or none for a clear slate), and the new branch agent keeps the memories of the
-     * initial branch."* — and then, precisely: *"I mean memory (context and session log) of an agent"*.
+     * The operator's rule (2026-11-10): *"agent folder stays gitignored but inherited from parent"*. The
+     * two halves of that are both load-bearing and they pull in opposite directions, which is why this
+     * test asserts both:
      *
-     * **So this asserts the split the app actually makes**, which is not the one a first reading
-     * suggests. A worktree is filled from a commit, so what arrives is what was committed:
+     * - **Inherited**: `session.log` (the record) and `context.log` (the rows last sent) arrive in the
+     *   new tree, byte for byte, from the parent's *working tree* — so the parent's conversation does
+     *   not have to have been committed or pushed to be passed on.
+     * - **Gitignored**: the same files are in `.git/info/exclude`, so no commit ever holds them. A
+     *   branch's history carrying its agent's log would put a 100 MB `fetch` tarball and every
+     *   screenshot in the project, because `agent/` is where those land.
      *
-     * - `agent/`'s artifacts are tracked, so they come with the fork;
-     * - `agent/context.log` and `agent/session.log` are ignored, so they do **not** — a fork starts a
-     *   conversation of its own rather than inheriting the parent's live position, which is what would
-     *   make two branches rewrite the same rows on their first turn.
+     * **The scratch is not copied**, and that is the part worth measuring: a fork that cloned
+     * `agent/fetched/` would copy megabytes to answer a question the new branch can ask again.
      */
     @Test
-    fun `a fork brings the parent's committed files and leaves the live conversation behind`() {
+    fun `a fork inherits the parent's two logs and not its scratch`() {
         val dir = projectWithBranch()
-        // **The parent's own conversation, committed the way a person's work is.** `agent/` is tracked
-        // now, so a fetched answer and a diff travel; the two logs are ignored and must not.
         val agent = File(dir, "agent").apply { mkdirs() }
-        File(agent, "fetched-answer.txt").writeText("what the server said")
-        File(agent, AgentLog.CONTEXT).writeText("   1     9 agent  hi\n")
-        File(agent, AgentLog.SESSION).writeText("a conversation\n")
+        File(agent, AgentLog.SESSION).writeText("   1     9 agent  hi\n")
+        File(agent, AgentLog.CONTEXT).writeText("   1     9 in     what it was told\n")
+        File(agent, "fetched").mkdirs()
+        File(agent, "fetched/lib-1.2.tar.gz").writeText("a tarball")
         workspace.ensureIgnore(dir)
-        commitAll(dir, "with a record")
+        commitAll(dir, "with a conversation")
         GitService.openExisting(dir)!!.use { repo ->
             GitService.createBranch(repo, "forked").getOrThrow()
         }
 
         val tree = trees.make("Shopping", "forked").getOrThrow()
+        val kept = trees.inherit("Shopping", "forked", "main").getOrThrow()
 
-        assertTrue(
-            "the parent's committed work is there",
-            File(tree, "agent/fetched-answer.txt").isFile,
+        assertEquals("both logs were copied", 2, kept)
+        assertEquals(
+            "the record is byte for byte the parent's",
+            "   1     9 agent  hi\n",
+            File(tree, "agent/${AgentLog.SESSION}").readText(),
         )
         assertEquals(
-            "and its text is the parent's",
-            "what the server said",
-            File(tree, "agent/fetched-answer.txt").readText(),
+            "and so is the context",
+            "   1     9 in     what it was told\n",
+            File(tree, "agent/${AgentLog.CONTEXT}").readText(),
         )
         assertFalse(
-            "the live conversation did not come with it",
-            File(tree, AgentLog.CONTEXT).isFile,
+            "the scratch stayed behind",
+            File(tree, "agent/fetched/lib-1.2.tar.gz").exists(),
         )
-        assertFalse(
-            "nor its running log",
-            File(tree, AgentLog.SESSION).isFile,
+        // **The other half: git never sees any of it.** Read from the tree's own exclude list, which is
+        // where the app writes its lines, and not from a `.gitignore` — a tracked rule would ship the
+        // app's bookkeeping to the person's repository.
+        val exclude = File(tree, ".git/info/exclude").takeIf { it.isFile }
+        assertTrue(
+            "the folder is git's own exclude list, so no commit can hold it",
+            exclude == null || "agent/" in exclude.readLines(),
         )
     }
 
     /**
-     * **A branch from nothing is a real branch**, and its folder is empty on purpose.
+     * **A parent with no conversation copies nothing, and that is said rather than faked.**
      *
-     * The other half of the operator's question — *"or none for a clear slate"*. A ref with no commits
-     * cannot be resolved, so the folder is written and left with nothing in it; `Worktrees.make` used to
-     * refuse that as "there is no branch called …", which would have made the clear-slate answer a
-     * dialog that always failed.
+     * `inherit` answers the count it copied, because a branch that wrote two empty files would look like
+     * it had a record and did not — and the sentence the person reads ("no conversation to inherit") is
+     * the difference between a fork that started empty and a fork that lost something.
      */
     @Test
-    fun `a branch with no commits gets a folder and no files`() {
-        val dir = projectWithBranch()
-        GitService.openExisting(dir)!!.use { repo ->
-            GitService.createBranch(repo, "empty", from = null).getOrThrow()
+    fun `a parent with no conversation copies nothing`() {
+        projectWithBranch()
+        GitService.openExisting(workspace.projectDir("Shopping"))!!.use { repo ->
+            GitService.createBranch(repo, "forked").getOrThrow()
         }
+        trees.make("Shopping", "forked").getOrThrow()
 
-        val tree = trees.make("Shopping", "empty").getOrThrow()
+        val kept = trees.inherit("Shopping", "forked", "main").getOrThrow()
 
-        assertTrue("the folder exists", tree.isDirectory)
-        assertTrue("and it is a worktree git knows", File(tree, ".git").isFile)
-        assertEquals(
-            "with nothing in it but the app's own links",
-            emptyList<String>(),
-            (tree.listFiles() ?: emptyArray()).map { it.name }.filter { it != "shared" },
+        assertEquals("nothing to copy", 0, kept)
+        assertFalse(
+            "and no empty file was written to look like a record",
+            File(trees.dirOf("Shopping", "forked"), "agent/${AgentLog.SESSION}").exists(),
         )
     }
 

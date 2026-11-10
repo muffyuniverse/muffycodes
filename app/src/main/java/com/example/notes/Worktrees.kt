@@ -36,6 +36,14 @@ class Worktrees(private val workspace: Workspace) {
     private val mainBranch = AgentSession.MAIN
 
     /**
+     * **The two files under `agent/` that are the conversation**, as opposed to its scratch.
+     *
+     * Named here rather than read from a folder listing, because "everything under `agent/`" would
+     * include a 100 MB download. See [inherit].
+     */
+    private val LOGS = listOf(AgentLog.SESSION, AgentLog.CONTEXT)
+
+    /**
      * The working tree of [branch] in [project].
      *
      * **Answered whether or not it exists** — it is a path, not a fact. [make] is what makes it, and
@@ -76,6 +84,56 @@ class Worktrees(private val workspace: Workspace) {
         }
 
     /**
+     * **Gives [branch]'s tree the conversation its parent was having.**
+     *
+     * The operator's rule (2026-11-10): *"agent folder stays gitignored but inherited from parent"* —
+     * so `agent/` is not in the commit (a 100 MB `fetch` tarball and every screenshot must never be in
+     * a project's history), and the fork is not left knowing nothing either.
+     *
+     * **What is copied is the two logs, and only the two logs.** `session.log` is the record — every
+     * turn, every call, what came back — and `context.log` is the exact rows the model was last sent,
+     * which is what makes the new branch's agent pick up mid-thought rather than start over. The other
+     * five things under `agent/` are scratch: a downloaded tarball, an http answer, a diff, a
+     * screenshot, a background command's output. Copying those would clone megabytes to answer a
+     * question the new branch can ask again.
+     *
+     * **The parent's tree is where it is read from**, which is the whole point: the conversation does
+     * not have to have been committed or pushed to be inherited. A branch made from a parent with
+     * uncommitted work still gets the parent's memory, because the memory is on this phone.
+     *
+     * **A parent with no conversation copies nothing and says so**, rather than writing two empty files:
+     * an `agent/` folder with a zero-byte `session.log` would be a branch that looks like it has a
+     * record and does not.
+     */
+    fun inherit(project: String, branch: String, from: String): Result<Int> {
+        val source = dirOf(project, from)
+        val target = dirOf(project, branch)
+        if (!target.isDirectory) {
+            return Result.failure(
+                IllegalStateException("$branch has no folder yet, so there is nowhere to put $from's conversation."),
+            )
+        }
+        return try {
+            val copied = LOGS.count { name ->
+                val one = File(File(source, AgentLog.DIR), name)
+                val into = File(File(target, AgentLog.DIR), name)
+                if (!one.isFile || one.length() == 0L) {
+                    false
+                } else {
+                    into.parentFile?.mkdirs()
+                    // **Byte for byte**, not parsed and rewritten: the log is the record, and a copy
+                    // that normalised a row would be a different record than the one the parent kept.
+                    one.copyTo(into, overwrite = true)
+                    true
+                }
+            }
+            Result.success(copied)
+        } catch (e: Throwable) {
+            Result.failure(IllegalStateException(Secrets.describe(e)))
+        }
+    }
+
+    /**
      * Makes the working tree of [branch] and fills it from the branch's tip.
      *
      * **Four files, then a checkout, and the order is git's.** `commondir` is the one that makes the
@@ -102,11 +160,12 @@ class Worktrees(private val workspace: Workspace) {
             } catch (e: Throwable) {
                 null
             }
-            // **A branch with no commits is a real branch, and this is the case a clear slate makes.**
-            // `createBranch(name, from = null)` writes an unborn ref, so there is nothing to resolve —
-            // and refusing here would make "from nothing" a dialog that always fails. The folder is
-            // made and left empty, which is exactly what a clear slate is; the app's own first commit
-            // fills it (see `Workspace.ensureFreshIgnore`).
+            if (tip == null) {
+                return Result.failure(
+                    IllegalStateException("There is no branch called $branch in $project."),
+                )
+            }
+
             val dir = dirOf(project, branch)
             val private = commonEntry(project, branch)
             try {
@@ -117,9 +176,7 @@ class Worktrees(private val workspace: Workspace) {
                 Beside.write(File(private, "commondir"), "../..\n")
                 Beside.write(File(private, "gitdir"), File(dir, ".git").absolutePath + "\n")
                 Beside.write(File(private, "HEAD"), "ref: refs/heads/$branch\n")
-                // **Nothing to check out, and that is not a failure.** An unborn branch has no tree,
-                // so the folder is written and left empty; the first commit is the app's.
-                if (tip != null) populate(dir, tip)
+                populate(dir, tip)
                 // **The system folder comes with the checkout** (§13f). Done here rather than waiting
                 // for the next refresh, because a person who opens a branch is about to look at it.
                 workspace.linkSystem(dir)

@@ -5490,35 +5490,26 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * **Makes a branch, from the branch the person chose or from nothing.**
+     * **Makes a branch from the branch the person chose, and gives it that branch's memory.**
      *
      * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch
-     * I am forking (or none for a clear slate), and the new branch agent keeps the memories of the
-     * initial branch."*
+     * I am forking … and the new branch agent keeps the memories of the initial branch"* — narrowed to
+     * the two controls that are actually separate things: *"only parent branch selector stays (default
+     * parent is main, no parent is not an option)"*.
      *
-     * **[from] is a branch name, or null for a clear slate.** Both are one act with one dialog, because
-     * "where does this start" is one question and its two answers are "here" and "nowhere".
+     * **[from] is the parent and is required.** There is no "start from nothing": a branch is a fork, and
+     * a fork of nothing is a second project.
      *
-     * **What a fork actually carries, stated exactly, because the operator asked.** A branch's working
-     * tree is filled from a commit, so only what is *in* the commit arrives. `agent/` is tracked now
-     * (see `Workspace.APP_IGNORES`), so a fork from `main` brings `main`'s record — the fetched answers,
-     * the diffs, the screenshots. What it does **not** bring is the live conversation:
-     * `agent/context.log` and `agent/session.log` are ignored, because they are one branch's position in
-     * a conversation rather than a fact about the work.
+     * **Two acts, in this order, because the second needs the first.** The ref is made from the parent's
+     * commit, the tree is checked out from it, and then the parent's conversation is copied into that
+     * tree — see [Worktrees.inherit] for what is copied and why it is not everything under `agent/`.
+     * Doing the copy first would write into a folder that does not exist yet, and doing it after the
+     * person's first edit would overwrite a conversation that had already moved on.
      *
-     * **Why that is the right split rather than a compromise.** If `context.log` travelled, both
-     * branches would start from the parent's identical position and the first turn in either would
-     * rewrite the same rows — two agents editing one context. And the thing a person means by "keeps the
-     * memories" is already carried: `session.log` is the *evidence*, and the branch's agent can read its
-     * record the same way it reads any file. A fork therefore starts knowing what happened, with a
-     * conversation of its own.
-     *
-     * A branch made from nothing starts with an empty tree, and its first commit is the app's.
-     *
-     * **The refusal is said, not swallowed.** A name git would reject, an existing name, a parent that
-     * is not there — all three are refusals the person has to see, or the button looks broken.
+     * **The refusal is said, not swallowed.** A name git would reject, an existing name, a parent that is
+     * not there — all three are refusals the person has to see, or the button looks broken.
      */
-    fun newBranch(name: String, from: String? = AgentSession.MAIN) {
+    fun newBranch(name: String, from: String = AgentSession.MAIN) {
         // **The tap is recorded by the window that pressed it**, because the window knows which parent
         // was chosen and a second record here would give one press two ids.
         val project = choosingBranchFor ?: return
@@ -5533,19 +5524,21 @@ class AppViewModel @JvmOverloads constructor(
         }
         message = outcome.fold(
             { made ->
-                // **The tree, so the folder exists the moment the branch does.** Without this the row
-                // appeared and opening it made the tree, which meant "made from nothing" and "made from
-                // main" were only decided when somebody looked. The checkout is where the memory
-                // arrives, so it is also where a failure has to be said rather than shown as an empty
-                // branch later.
                 val ws = workspace
                 val tree = ws?.let { Worktrees(it).make(project, made) }
-                val where = from?.let { "from $it" } ?: "from nothing"
                 val failed = tree?.exceptionOrNull()?.message
                 if (failed != null) {
-                    "Made $made $where, but its folder could not be checked out: $failed"
-                } else {
-                    "Made $made $where."
+                    return@fold "Made $made from $from, but its folder could not be checked out: $failed"
+                }
+                // **The memory, after the tree exists.** The count is what the person is told, because
+                // "inherited" with no number is a claim and "2 files" is an answer.
+                val kept = ws?.let { Worktrees(it).inherit(project, made, from) }
+                when {
+                    kept == null -> "Made $made from $from."
+                    kept.isFailure -> "Made $made from $from, but its agent's record was not copied: " +
+                        (kept.exceptionOrNull()?.message ?: "the copy failed")
+                    kept.getOrThrow() == 0 -> "Made $made from $from. $from had no conversation to inherit."
+                    else -> "Made $made from $from, with $from's conversation."
                 }
             },
             { it.message ?: "The branch could not be made." },

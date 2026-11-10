@@ -357,7 +357,6 @@ class Workspace(
         }
     }
 
-
     /**
      * The two lines that keep the app's own folders out of the project's repository.
      *
@@ -379,26 +378,8 @@ class Workspace(
         addExcludeLines(
             file,
             APP_IGNORES,
-            "# The app's own bookkeeping: the flags and the per-response log. Not shipped.\n" +
-                "# The agent's record (agent/) IS tracked — that is how a branch inherits its parent's memory.",
-        )
-    }
-
-    /**
-     * **The exclude list for a tree that has no history to inherit** — a branch started from nothing.
-     *
-     * `agent/` is tracked now, so a tree filled from a commit brings the conversation with it. A tree
-     * with no parent has no commit to bring it from, and the app still has to write the folder's own
-     * first commit; without this line that commit would hold the record of a conversation that never
-     * happened. `ensureIgnore` is not used for it because that list is the rule for a repository that
-     * already exists, and this is the one moment before it does.
-     */
-    fun ensureFreshIgnore(projectDir: File) {
-        val file = excludeFile(projectDir) ?: return
-        addExcludeLines(
-            file,
-            FRESH_IGNORES,
-            "# A branch started from nothing: there is no history to inherit yet.",
+            "# The app's own bookkeeping: the record's folder, the flags, the per-response log.\n" +
+                "# Git's own exclude list, so none of it is ever a change the person made.",
         )
     }
 
@@ -2265,37 +2246,7 @@ class Workspace(
          * `system/` matches only a directory — measured: with `system/` the link stayed untracked, with
          * `system` it was ignored. A rule written by analogy would have been a rule that did nothing.
          */
-        val APP_IGNORES = listOf(
-            // **The two files that ARE the conversation's working state**, and the reason they are not
-            // tracked while the rest of `agent/` is.
-            //
-            // A branch forks a *history*, so `agent/` travels with it and a new branch's agent starts
-            // knowing what its parent knew. But `context.log` is **the exact rows the model was last
-            // sent**, and `session.log` is the running log they are indexed from — both are one branch's
-            // live position in a conversation. If they were in the commit, a fork would carry the
-            // parent's context, so both branches would start from the parent's identical position and
-            // the first turn in either would rewrite the same rows. Ignored, a fork arrives with the
-            // record (`agent/`'s artifacts: fetched answers, diffs, screenshots) and starts its own
-            // conversation — which is the honest reading of "a branch has its own agent".
-            //
-            // **`AgentLog.open` writes `context.log` from the evidence** when it is missing, so a fork
-            // that arrives without one is not a broken branch: it is a branch whose conversation begins
-            // where it forked.
-            "agent/${AgentLog.CONTEXT}",
-            "agent/${AgentLog.SESSION}",
-            ".muffy/",
-            "requests/",
-            SYSTEM_PROJECT,
-        )
-
-        /**
-         * **What a branch's fresh tree keeps out of its first commit.**
-         *
-         * A branch made with no parent has no history to inherit, so `agent/` has to be written into
-         * its *first* commit by the app rather than arriving with a checkout. Everything else is the
-         * person's, exactly as it is on `main`.
-         */
-        val FRESH_IGNORES = APP_IGNORES
+        val APP_IGNORES = listOf("agent/", ".muffy/", "requests/", SYSTEM_PROJECT)
 
         /**
          * The folder a person keeps binaries in.

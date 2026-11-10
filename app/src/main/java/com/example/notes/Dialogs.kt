@@ -91,32 +91,32 @@ fun PromptDialog(
 }
 
 /**
- * **A new branch: its name, and where it starts.**
+ * **A new branch: its name, and the branch it forks.**
  *
  * The operator's request (2026-11-10): *"when I make a branch I can choose from what original branch I
- * am forking (or none for a clear slate), and the new branch agent keeps the memories of the initial
- * branch."*
+ * am forking … and the new branch agent keeps the memories of the initial branch"* — and then, exactly:
+ * *"only parent branch selector stays (default parent is main, no parent is not an option)"*.
  *
- * **The parent is a row of chips rather than a dropdown**, because there are two or three branches and
- * a menu for three things is a tap to open and a tap to choose where a tap would have done. **"Nothing"
- * is first and is a real answer**, not an escape: it is the clear slate, and it is what a person wants
- * when they are starting something that should not inherit an argument the old branch was having.
+ * **The parent is a row of chips rather than a dropdown**, because a project has two or three branches
+ * and a menu for three things is a tap to open and a tap to choose where a tap would have done. There is
+ * no "nothing" chip: a branch is a fork, and a fork of nothing is a second project.
  *
- * **The memory sentence is on the window.** A branch that arrives with a conversation is surprising
- * unless somebody says so, and the person choosing a parent is exactly the person who should know that
- * the parent's agent comes with it.
+ * **The memory sentence is on the window, and it is one sentence about one fact.** The new branch's
+ * agent inherits the parent's conversation — its record and the rows it was last sent — and the person
+ * choosing the parent is exactly the person who should know that before pressing Create. Nothing is
+ * being turned on or off: the memory is not a setting, it is what "fork" means here.
  */
 @Composable
 fun NewBranchDialog(
-    /** The branches this could start from, `main` first. Never empty. */
+    /** The branches this can start from, `main` first. Never empty. */
     parents: List<String>,
     onDismiss: () -> Unit,
-    onConfirm: (name: String, from: String?) -> Unit,
+    onConfirm: (name: String, from: String) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
-    // **The first parent, not "nothing".** Most branches start from the branch the person is looking
-    // at, and a window whose default answer is the unusual one teaches the unusual case as normal.
-    var from by remember(parents) { mutableStateOf(parents.firstOrNull()) }
+    // **`main` unless the list says otherwise**, per the operator. The list is `main` first, so this is
+    // also the first chip — a window whose default is the first thing on it needs no explaining.
+    var from by remember(parents) { mutableStateOf(parents.firstOrNull() ?: AgentSession.MAIN) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("New branch") },
@@ -133,14 +133,13 @@ fun NewBranchDialog(
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
                 )
-                // **A row of chips, wrapping.** Two or three branches fit on one line on any phone;
-                // more than that wraps, which is the layout a `FlowRow` would give without the
-                // dependency.
+                // **A row of chips.** Two or three branches fit on one line on any phone; a project with
+                // more wraps, which is the layout a `FlowRow` would give without the dependency.
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    for (one in listOf<String?>(null) + parents) {
+                    for (one in parents) {
                         TextButton(onClick = { from = one }) {
                             Text(
-                                text = one ?: "Nothing",
+                                text = one,
                                 color = if (from == one) {
                                     MaterialTheme.colorScheme.primary
                                 } else {
@@ -151,19 +150,11 @@ fun NewBranchDialog(
                     }
                 }
                 Text(
-                    text = if (from == null) {
-                        // **A clear slate is a tree with no history**, not a tree with no memory: there
-                        // is no parent, so there is nothing to remember. The two sentences differ
-                        // because the two answers do.
-                        "A clear slate: the folder starts empty — no files, and no history to inherit."
-                    } else {
-                        // **Said plainly, because it is surprising.** A branch arrives with everything
-                        // the parent committed, and `agent/` is committed now — so the record travels.
-                        // What does *not* travel is the live conversation: `agent/context.log` and
-                        // `agent/session.log` are per-branch, so each branch's agent has its own.
-                        "The branch's files come from $from, and so does its agent's record. The " +
-                            "conversation itself starts fresh here — a branch has its own agent."
-                    },
+                    // **One sentence, and it is the surprising half.** A branch's files come with the
+                    // parent because that is what forking is; the agent's memory coming too is the part
+                    // a person could not guess, and the part they asked for.
+                    text = "The branch starts with $from's files and $from's agent memory, so its " +
+                        "agent knows what that branch knew.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),

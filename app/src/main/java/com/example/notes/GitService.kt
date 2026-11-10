@@ -2089,7 +2089,18 @@ object GitService {
      * **Refused rather than guessed** when the name is one git would reject or when it already
      * exists: a branch made twice is a person working in the wrong one for an hour.
      */
-    fun createBranch(repo: Repository, name: String, from: String? = AgentSession.MAIN): Result<String> {
+    /**
+     * **A branch, from a branch — and the parent is not optional.**
+     *
+     * The operator's rule (2026-11-10): *"only parent branch selector stays (default parent is main, no
+     * parent is not an option)"*. So [from] has a default and no null: a branch that starts from nothing
+     * is not a thing this app makes, because a branch is a fork and a fork of nothing is a second
+     * project.
+     *
+     * **`setStartPoint` takes a String or a RevCommit, not an ObjectId** — the ref name itself is the
+     * argument, so resolving it first would only be a way to get it wrong.
+     */
+    fun createBranch(repo: Repository, name: String, from: String = AgentSession.MAIN): Result<String> {
         val problem = branchNameProblem(name)
         if (problem != null) return Result.failure(IllegalArgumentException(problem))
         return try {
@@ -2097,14 +2108,8 @@ object GitService {
                 if (git.branchList().call().any { it.name == "refs/heads/$name" }) {
                     return Result.failure(IllegalStateException("There is already a branch called $name."))
                 }
-                // **`from` may be null, and null means "from nothing".** A branch started from no parent
-                // has no commits, so its first tree is empty and its first commit is the app's — which
-                // is what "a clear slate" is, and the operator asked for both kinds in one dialog.
-                //
-                // **`setStartPoint` takes a String or a RevCommit, not an ObjectId** — the ref name
-                // itself is the argument, so resolving it first would only be a way to get it wrong.
-                val start = from?.let { "refs/heads/$it" }
-                if (start != null && repo.exactRef(start) == null) {
+                val start = "refs/heads/$from"
+                if (repo.exactRef(start) == null) {
                     return Result.failure(IllegalStateException("There is no $from to branch from."))
                 }
                 git.branchCreate().setName(name).setStartPoint(start).call()
