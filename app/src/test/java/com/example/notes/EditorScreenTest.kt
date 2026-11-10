@@ -1295,11 +1295,13 @@ class EditorScreenTest {
         // version of this file at one of those commits" about a file with history behind it - which
         // is exactly "isn't getting selected even when there is history".
         //
-        // **Two versions, and no remote at all**, which is the case that was broken: a local project
-        // never pushes, so `lastSynced` is null for ever and every diff of it was empty.
-        scene.localProject("Shopping")
-        val made = scene.made("Shopping")
-        scene.open(made)
+        // **Two versions, made the only way there is.** A version is made at a push (2026-11-10), so
+        // the fixture has a real remote — a bare repository on this phone, which is what a host's page
+        // leaves behind. The case the report was about ("no remote at all, so `lastSynced` is null for
+        // ever") is now a *fault* rather than a kind: a project with no address cannot make a version
+        // at all, which `unreachableOf` says on its own screen.
+        scene.project("Shopping")
+        scene.open("Shopping")
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.openEditor(file)
         scene.saveAsVersion("three litres")
@@ -1408,9 +1410,8 @@ class EditorScreenTest {
         //
         // One owner is the fix, so this asserts the owner moves and that nothing else can hold a
         // different answer.
-        scene.localProject("Shopping")
-        val made = scene.made("Shopping")
-        scene.open(made)
+        scene.project("Shopping")
+        scene.open("Shopping")
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.openEditor(file)
         scene.saveAsVersion("three litres")

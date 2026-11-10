@@ -488,11 +488,23 @@ class HistoryFeatureTest : FeatureTest() {
         // **The history knows the rename happened**, because `rename` sent it — the version before it
         // still has the folder under its old name with its contents, which is the half that makes a
         // version of a rename worth having.
+        //
+        // **Asserted on the trees, not on a message.** The message a sync writes names the *files* that
+        // changed (`CommitMessage.of` takes the last segment of each path), so it says `first.txt` and
+        // never `notes-2019` — an earlier version of this test asked for the folder in the text and was
+        // measuring the app's message-writing rather than the thing that makes a rename reversible.
         val versions = log()
         assertTrue("there is more than one version", versions.size >= 2)
+        val renamedVersion = versions.first()
+        val beforeVersion = versions.drop(1).first { it.id != renamedVersion.id }
         assertTrue(
-            "some version mentions the old name",
-            versions.any { it.message.contains("notes-2019") },
+            "the version before the rename still holds the old name: " +
+                "${scene.repo("work").pathsAt(beforeVersion.id)}",
+            scene.repo("work").pathsAt(beforeVersion.id).any { it.startsWith("notes-2019/") },
+        )
+        assertTrue(
+            "and the newest holds the new one: ${scene.repo("work").pathsAt(renamedVersion.id)}",
+            scene.repo("work").pathsAt(renamedVersion.id).any { it.startsWith("archive/") },
         )
     }
 

@@ -312,6 +312,30 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `three saved files are three to send, not six`() {
+        // **The double count, caught on screen.** A save stages and a push commits (2026-11-10), so
+        // `unsentPaths` compares the *index* with the last push — which is the same set `git status`
+        // calls "staged". Adding the two counted every saved file twice: three saves read "6 to send",
+        // and that is the number a person would have seen on the row.
+        //
+        // A real remote, because `unsentPaths` answers empty without one.
+        scene.project("groceries")
+        scene.open("groceries")
+        val dir = scene.workspace!!.repoOf("groceries")
+        listOf("milk.txt", "bread.txt", "eggs.txt").forEach { name ->
+            File(dir, name).writeText("first\n")
+            scene.viewModel.openEditor(File(dir, name))
+            scene.viewModel.saveEditor("second\n")
+        }
+        scene.viewModel.closeEditor()
+        scene.viewModel.refreshChanges()
+        scene.await("the row to count the three saves once each", 20_000) {
+            scene.viewModel.changesOf("groceries") == 3
+        }
+        assertEquals("three files, three to send", 3, scene.viewModel.changesOf("groceries"))
+    }
+
+    @Test
     fun `entering a project whose remote has gone says so, and asks for the right address`() {
         // **The operator's request**: *"if project's remote doent answer (there should be a check when
         // you enter the project), then notification should tell that remote no longer responds and ask
@@ -948,12 +972,12 @@ class ProjectsFeatureTest : FeatureTest() {
         }
 
         assertEquals(
-            // **The empty file it was made as is the oldest version**, and that is the app being
-            // honest: making a file is a change, so it is a version. A list that hid it would be
-            // a history the app does not have, and "go back to before I wrote anything" would
-            // have nothing to go back to.
+            // **Two versions, not three.** Making a file is no longer a version of its own: a save
+            // stages (2026-11-10), so the file's first *version* is the first time something records
+            // one — which here is the explicit `commitOutcome`. The empty version this used to expect
+            // was the app committing the creation, and that commit is gone.
             "every version is there, newest first",
-            listOf("second", "first", ""),
+            listOf("second", "first"),
             scene.versionsOf(file).map { it.second },
         )
     }

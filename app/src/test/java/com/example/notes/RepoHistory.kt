@@ -47,14 +47,17 @@ class RepoHistory(private val dir: File) {
     fun head(): String? = log(null, 1).firstOrNull()?.id
 
     /** Every path the newest version holds. */
-    fun tracked(): List<String> {
-        val newest = head() ?: return emptyList()
-        return open().use {
-            try {
-                GitService.pathsUnder(it, null, newest)
-            } catch (e: Throwable) {
-                emptyList()
-            }
+    fun tracked(): List<String> = pathsAt(head() ?: return emptyList())
+
+    /**
+     * **Every path a named version holds** — so a test can ask what the history looked like *before*
+     * a change, which is the half that makes a rename or a delete reversible.
+     */
+    fun pathsAt(revisionId: String): List<String> = open().use {
+        try {
+            GitService.pathsUnder(it, null, revisionId)
+        } catch (e: Throwable) {
+            emptyList()
         }
     }
 }

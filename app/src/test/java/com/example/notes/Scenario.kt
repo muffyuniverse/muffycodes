@@ -564,7 +564,15 @@ class Scenario(
      */
     fun sendIfWaiting(file: File): Boolean {
         val project = projectOf(file) ?: return false
-        return sendProjectIfWaiting(project)
+        if (viewModel.unreachableOf(project) != null) return false
+        val staged = try {
+            Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+        if (staged.isEmpty()) return false
+        sync(project)
+        return true
     }
 
     /**
@@ -576,14 +584,24 @@ class Scenario(
      * stand for it.
      */
     fun sendProjectIfWaiting(project: String): Boolean {
-        if (viewModel.unreachableOf(project) != null) return false
+        val why = viewModel.unreachableOf(project)
+        check(why == null) { "$project cannot be sent, so no version could be made: $why" }
         val staged = try {
             Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
         } catch (e: Exception) {
             emptyList()
         }
         if (staged.isEmpty()) return false
+        val before = projectHead(project)
         sync(project)
+        // **A send that changed nothing is not a version**, and a caller that asked for one has to be
+        // told. This was the shape of six failures at once: the send reported "Pushed" while HEAD had
+        // not moved, because `syncUnder` found nothing staged when it looked — so the test waited for
+        // a version that was never coming and blamed the app's history.
+        check(projectHead(project) != before) {
+            "$project was sent but HEAD did not move, so nothing became a version " +
+                "(staged when asked: $staged)"
+        }
         return true
     }
 
@@ -985,8 +1003,13 @@ class Scenario(
      * the history screen is showing, which is what `versionsOf` leaves open.
      */
     fun restoreAndSend(revisionId: String, file: File) {
+        val project = projectOf(file) ?: return
         restore(revisionId)
-        sendIfWaiting(file)
+        // **Waits for the stage before sending.** `restore` stages on a worker and returns first, so
+        // asking the index immediately found nothing and the send was a quiet no-op — which then read
+        // as "the restore was not recorded" when it was recorded a moment later.
+        awaitStaged(project)
+        sendProjectIfWaiting(project)
     }
 
     /** Closes the history screen. */

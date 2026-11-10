@@ -214,7 +214,22 @@ class ProjectGit(
         return repo.use {
             try {
                 val unsent = GitService.unsentPaths(it).size
-                GitService.status(it).copy(ahead = unsent)
+                // **`ahead` is the whole answer, and the index's own counts are not added to it.**
+                // Since 2026-11-10 a save stages and a push commits, so `unsentPaths` compares the
+                // *index* with the last push — which is the same set `status().staged` describes.
+                // Adding both counted every saved file twice: three saves read "6 to send", and the
+                // row said so on screen.
+                //
+                // What is left in `unstaged` and `untracked` is what a save did not take — a file
+                // written by something else, a half-written download — and it still counts, because
+                // a push catches it too (`syncUnder` unions the two lists).
+                val status = GitService.status(it)
+                GitService.Changes(
+                    staged = 0,
+                    unstaged = status.unstaged,
+                    untracked = status.untracked,
+                    ahead = unsent,
+                )
             } catch (e: Throwable) {
                 lastError = Secrets.describe(e)
                 GitService.Changes(0, 0, 0)
