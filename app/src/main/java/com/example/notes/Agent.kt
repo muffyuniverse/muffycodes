@@ -625,17 +625,6 @@ class Agent(
 
             if (reply.text.isNotBlank()) {
                 val said = log.note("agent", reply.text)
-                // **The accounting goes on the words, because the words are what it is for.**
-                // `output` is the tokens the model wrote and `thinking` the ones it spent getting
-                // there, so they belong to the message a person reads - not to the tool calls, whose
-                // own bubble would then show the same figure twice and invite adding it up.
-                //
-                // **Nothing is written when the provider said nothing.** A scripted door has no
-                // usage, and a row of zeroes would claim the request was free rather than that it
-                // was never reported.
-                if (reply.outputTokens != null || reply.thinkingTokens != null) {
-                    log.usage(said, reply.outputTokens, reply.thinkingTokens)
-                }
                 // **The reasoning is stored with the reply, because the next request has to carry
                 // it.** A thinking-mode provider answers `400 The reasoning_content in the thinking
                 // mode must be passed back to the API` if it is dropped. Written here rather than

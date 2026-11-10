@@ -169,8 +169,6 @@ object AgentChat {
         val id: Int = 0,
         val stamp: String = "",
         val forgotten: Boolean = false,
-        val thinking: Long = 0,
-        val output: Long = 0,
         /**
          * **The app's own lines, drawn under this message in red.**
          *
@@ -231,10 +229,6 @@ object AgentChat {
         val forgotten: Boolean = false,
         /** True for the agent's own words, which are drawn as markdown rather than as a line. */
         val prose: Boolean = false,
-        /** The tokens the model spent thinking, when the row knows — 0 when it does not. */
-        val thinking: Long = 0,
-        /** The tokens it wrote, when the row knows — 0 when it does not. */
-        val output: Long = 0,
     )
 
     // ---- the conversation ---------------------------------------------------
@@ -331,7 +325,6 @@ object AgentChat {
                 // names a row inside a turn; drawing it as a line would put "usage out=2400" in the
                 // conversation, which is a number the footer already shows against the words it
                 // belongs to.
-                AgentLog.USAGE -> Unit
                 AgentLog.TURN -> out.add(mutableListOf())
                 else -> {
                     // **A turn has to begin with something the turn machinery wrote.** Rows before
@@ -371,66 +364,9 @@ object AgentChat {
      * what a person wants from them is one line saying the agent is still there — which is what
      * [Box.idle] is.
      */
-    /** What one reply was charged for, as the [AgentLog.USAGE] row stores it. */
-    /**
-     * What one reply was charged for, as the [AgentLog.USAGE] row stores it.
-     *
-     * **A `data class`, not a `value class`.** Two numbers is two fields, and a value class in Kotlin
-     * has exactly one - so the inline form here would not compile, and wrapping the pair in a holder
-     * to qualify would cost an allocation to save none.
-     */
-    data class Spend(val output: Long, val thinking: Long) {
-        /**
-         * **One message can make several requests, so its figures are a sum.**
-         *
-         * A burst is what the operator asked to see as one message, and a burst may contain a
-         * request that called a tool and a request that spoke afterwards. The footer is one per
-         * message, so it reports what all of them cost rather than what the last one did.
-         */
-        operator fun plus(other: Spend) = Spend(output + other.output, thinking + other.thinking)
-    }
-
-    /**
-     * Reads `out=123 think=45`, **and tolerates either half being missing.**
-     *
-     * A provider may report the completion count and say nothing about reasoning, so the two keys
-     * are independent. A missing key becomes 0 here, which the footer reads as "not recorded" and
-     * omits - the same rule the stats screen follows with its dashes, and the reason this returns
-     * a value rather than two nullable fields: the footer's absence test is `> 0`, so a negative or
-     * absent number would be indistinguishable anyway.
-     *
-     * A row whose detail is unrecognisable yields 0/0 rather than throwing. It is app bookkeeping
-     * written by this app, but a row is still the evidence, and a reader that throws on one bad
-     * line loses the whole conversation to it.
-     */
-    fun spend(detail: String): Spend {
-        var output = 0L
-        var thinking = 0L
-        for (part in detail.split(' ')) {
-            val at = part.indexOf('=')
-            if (at <= 0) continue
-            // **A negative is not a token count** - nobody produced -5 of anything - so it is
-            // rejected rather than carried into a footer that would then hide it (`> 0` is the
-            // footer's test) while a sum somewhere else counted it.
-            val n = part.substring(at + 1).toLongOrNull()?.takeIf { it >= 0 } ?: continue
-            when (part.substring(0, at)) {
-                "out" -> output = n
-                "think" -> thinking = n
-            }
-        }
-        return Spend(output, thinking)
-    }
-
     fun bubbles(conversation: List<AgentLog.Row>): List<Bubble> {
         val out = mutableListOf<Bubble>()
         val pending = mutableMapOf<Int, AgentLog.Row>()
-        // **What each reply was charged for, by the row it accounts for.** Built up front rather
-        // than as the loop reaches it, because the usage row is written after the reply and so
-        // always sits *below* the bubble it describes - applied in place, a bubble would have been
-        // drawn before its numbers arrived.
-        val charged = conversation.mapNotNull { row ->
-            if (row.kind == AgentLog.USAGE) row.answers to spend(row.detail) else null
-        }.toMap()
         for (row in conversation) {
             if (row.broken) {
                 out.add(
@@ -507,7 +443,6 @@ object AgentChat {
                     // twice with one of them phrased as machinery.
                     "ended" -> Unit
                     "agent" -> {
-                        val cost = charged[row.id]
                         out.add(
                             Bubble(
                                 caption = "agent",
@@ -517,11 +452,6 @@ object AgentChat {
                                 stamp = row.stamp,
                                 forgotten = forgot,
                                 prose = true,
-                                // **Zero when this reply has no accounting**, which is what the
-                                // footer reads as "not recorded" - it prints nothing rather than a
-                                // zero, because a zero is a measurement.
-                                thinking = cost?.thinking ?: 0,
-                                output = cost?.output ?: 0,
                             ),
                         )
                     }
@@ -563,11 +493,6 @@ object AgentChat {
      */
     fun messages(conversation: List<AgentLog.Row>): List<Message> {
         val out = mutableListOf<Message>()
-        // **What each reply was charged for, by the row it accounts for.** Built up front because
-        // the usage row is written after the reply and so sits *below* the page it describes.
-        val charged = conversation.mapNotNull { row ->
-            if (row.kind == AgentLog.USAGE) row.answers to spend(row.detail) else null
-        }.toMap()
         // **A BURST, not a turn.** `AgentLog.TURN` is written before every request, so one request
         // is one turn - and a reply that calls a tool and then speaks is TWO turns, which grouped
         // as two messages would put the call and the words that close it in different messages. The
@@ -607,9 +532,6 @@ object AgentChat {
             if (burst.all { it.kind == AgentLog.TOLD || it.warmth }) continue
             val pages = mutableListOf<Page>()
             val pending = mutableMapOf<Int, AgentLog.Row>()
-            // **What the whole burst cost**, summed across its replies: the footer is one per
-            // message, and the message is the burst.
-            var spent = Spend(0, 0)
             for (row in burst) {
                 if (row.broken) {
                     pages.add(
@@ -695,9 +617,6 @@ object AgentChat {
                                     prose = true,
                                 ),
                             )
-                            // **Summed, because the footer is one per message.** A burst can make
-                            // several requests, and the message reports what all of them cost.
-                            charged[row.id]?.let { spent = spent + it }
                         }
                         // **A notice is not a page.** It used to be drawn as one, which put the app's
                         // own sentence in the same column as the agent's work and gave it a pager
@@ -758,11 +677,6 @@ object AgentChat {
                         pages = group,
                         id = first?.id ?: notices.first().id,
                         stamp = first?.stamp ?: "",
-                        // **The cost belongs to the bubble the person is reading**, which is where
-                        // the footer is: every bubble of the turn reports what the whole turn cost,
-                        // because splitting a turn into three bubbles did not make it three turns.
-                        thinking = spent.thinking,
-                        output = spent.output,
                         notices = if (last) notices else emptyList(),
                     ),
                 )

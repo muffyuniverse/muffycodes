@@ -148,7 +148,6 @@ class AgentLog private constructor(
          * **Session only, like [TURN].** It is the app's own accounting, the model has no use for
          * it, and sending it would change the request between polls for no gain.
          */
-        const val USAGE = "USAGE"
 
         const val CALL = "CALL"
         const val GOT = "GOT"
@@ -167,7 +166,6 @@ class AgentLog private constructor(
          * is written by [thinking] and read by two classes that cannot name each other's constants.
          */
         const val THINKING_NAME = "thinking"
-
 
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
@@ -775,33 +773,6 @@ class AgentLog private constructor(
         // the `agent` note's id, which is the row the reply was written as.
         "reply=$of ${text.replace('\n', ' ')}",
         ctx = APP,
-    )
-
-    /**
-     * Records what a request was charged for, **against the row it was charged for.**
-     *
-     * Written after the reply, because the numbers arrive with the end of the stream and the row
-     * they describe was written before it. [of] is that row's id.
-     *
-     * **Both figures are required and neither may be guessed.** A provider that sent no `usage`
-     * block has nothing to record, and the caller passes nothing rather than writing zeroes: a zero
-     * is a measurement and "not reported" is a different fact, which is the same rule the stats
-     * screen follows with its dashes.
-     *
-     * The detail is two `key=value` tokens so a reader needs no column widths: `out=123 think=45`.
-     */
-    fun usage(of: Int, output: Int?, thinking: Int?): Int = record(
-        USAGE,
-        "usage",
-        // **Absent keys are absent, not zero.** `out=123` alone means the provider reported output
-        // and said nothing about reasoning; `out=0` would mean it thought nothing, which is a claim
-        // nobody made. The reader parses only the keys it finds.
-        listOfNotNull(
-            output?.let { "out=$it" },
-            thinking?.let { "think=$it" },
-        ).joinToString(" "),
-        ctx = APP,
-        answers = of,
     )
 
     /**
