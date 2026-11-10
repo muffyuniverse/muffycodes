@@ -881,7 +881,7 @@ class Scenario(
         // held its text was racing the second one — which is exactly how `BranchFeatureTest` saw an
         // empty index for a save that had happened.
         val project = workspace?.projectOf(file) ?: return
-        await("${file.name} to be staged") {
+        await("${file.name} to be staged holding \"$text\"") {
             try {
                 // **The tree the file is actually in**, not the project's root. A file saved inside a
                 // branch lives in `.muffy/worktrees/<project>/<branch>/`, and its path from there is the
@@ -891,7 +891,18 @@ class Scenario(
                 val tree = workspace!!.treeOf(project, workspace!!.branchOf(file))
                 Git.open(tree).use { git ->
                     val relative = file.relativeTo(tree).invariantSeparatorsPath
-                    GitService.stagedPaths(git.repository).any { it == relative }
+                    // **The text, not merely the path.** Asking only "is this path staged" answered yes
+                    // the moment the *previous* save had staged it, so three saves in a row each found
+                    // the index already carrying something and the last one read as done while the
+                    // worker was still on the first. Measured: the index held "two" after ten saves
+                    // asked for "three".
+                    //
+                    // **The path alone when there is no text to compare** — `stagedText` answers null for
+                    // a picture, and a save of one is still a save. The caller's own assertion is what
+                    // checks the bytes.
+                    val staged = GitService.stagedText(git.repository, relative)
+                    if (staged != null) staged == text
+                    else GitService.stagedPaths(git.repository).any { it == relative }
                 }
             } catch (e: Exception) {
                 false
