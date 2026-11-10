@@ -1046,29 +1046,6 @@ class ScenariosTest {
     }
 
     @Test
-    fun `the window that makes a new project`() {
-        scenario(
-            compose, "20-a-window-making-a-project",
-            "A window making a new project.",
-            "a name, and nothing else to decide.",
-            screen = {
-                window {
-                    NewProjectDialog(onDismiss = {}, onCreate = {})
-                }
-            },
-        ) {
-            before()
-            then("Nothing is created.") {}
-            after()
-            result(
-                "The name is the whole question, because a project on this phone is a folder with " +
-                    "its own history - the licence belongs where the repository is made, on the " +
-                    "host's own page, where visibility and description are asked in the same breath.",
-            )
-        }
-    }
-
-    @Test
     fun `the window that asks for a key`() {
         scenario(
             compose, "21-a-window-asking-for-a-key",
@@ -1149,37 +1126,6 @@ class ScenariosTest {
                     "a mistyped path is a sentence rather than a project that claims to be " +
                     "published. It also says the folder takes the address's last segment - the " +
                     "consequence a person cannot see in a text field.",
-            )
-        }
-    }
-
-    @Test
-    fun `the window that keeps a synced project on this phone`() {
-        // **The opposite direction, and it promises nothing it does not do.** The repository stays
-        // on GitHub; what stops is the sending. Pictured because the sentence that says so is the
-        // whole dialog - a person deciding whether to do this needs to know their history survives.
-        scenario(
-            compose, "30-a-window-keeping-local",
-            "A window keeping a synced project on this phone only.",
-            "the promise that nothing is deleted, and where the repository still is.",
-            screen = {
-                window {
-                    KeepLocalDialog(
-                        project = "groceries",
-                        address = "https://gitlab.com/owner/groceries.git",
-                        onDismiss = {},
-                        onKeepLocal = {},
-                    )
-                }
-            },
-        ) {
-            before()
-            then("Nothing is kept local: the window explains before it acts.") {}
-            after()
-            result(
-                "It says what stays (every version, here) and what happens to the remote (nothing " +
-                    "it keeps what was pushed) and names the address it is still at, because " +
-                    "'still on GitHub' was only ever true for projects that were on GitHub.",
             )
         }
     }

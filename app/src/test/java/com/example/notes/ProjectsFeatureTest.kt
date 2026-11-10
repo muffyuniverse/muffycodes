@@ -311,6 +311,87 @@ class ProjectsFeatureTest : FeatureTest() {
         )
     }
 
+    @Test
+    fun `entering a project whose remote has gone says so, and asks for the right address`() {
+        // **The operator's request**: *"if project's remote doent answer (there should be a check when
+        // you enter the project), then notification should tell that remote no longer responds and ask
+        // to set up the correct url."*
+        //
+        // The repository is a bare folder on this phone, so the check is the real `ls-remote` against
+        // the real address — and then the folder is deleted, which is exactly what a host does when a
+        // repository is renamed or removed. Nothing about the local project changes, and its files
+        // stay readable: that is the point of checking on entry rather than refusing to open.
+        val remote = File(scene.root, "vanishing-remote")
+        GitService.initOrOpen(remote, GitAuthor("Test", "test@example.com")).use { repo ->
+            File(remote, "README.md").writeText("# Groceries\n")
+            GitService.commitAll(repo, "readme", GitAuthor("Test", "test@example.com"))
+        }
+        scene.viewModel.addProjectFromUrl(remote.absolutePath, "groceries")
+        scene.await("the project to arrive", 30_000) {
+            scene.viewModel.projectNames.contains("groceries") && !scene.viewModel.busy
+        }
+        // **Healthy first**, or "it says the remote is gone" would be true of a check that never ran.
+        scene.await("the first check to answer", 30_000) {
+            scene.viewModel.unreachableOf("groceries") == null
+        }
+
+        remote.deleteRecursively()
+
+        // Entering is what asks again.
+        scene.openBranches("groceries")
+        scene.enterBranch(AgentSession.MAIN)
+        scene.await("the host to be asked again", 30_000) {
+            scene.viewModel.unreachableOf("groceries") != null
+        }
+
+        val said = scene.viewModel.unreachableOf("groceries").orEmpty()
+        assertTrue("it says the remote did not answer: $said", said.contains("did not answer"))
+        assertTrue("and names the address: $said", said.contains(remote.absolutePath))
+        // **The project still opens**, because its files are here and are not the problem.
+        assertEquals("the project is open", "groceries", scene.viewModel.currentProject)
+        assertTrue(
+            "and its files are still there",
+            File(scene.workspace!!.projectDir("groceries"), "README.md").isFile,
+        )
+    }
+
+    @Test
+    fun `setting a working address clears the fault, without cloning over the work`() {
+        // **The operator's rule for a *change* of address** (2026-11-10): *"when you change the address
+        // you keep the history and collisions are resolved by the agent on push. no extra dialogue
+        // needed."* So this is not a clone: the project keeps every version it has, and the notice goes
+        // the moment the new address answers.
+        scene.localProject("groceries")
+        val dir = scene.workspace!!.projectDir("groceries")
+        File(dir, "milk.txt").writeText("two litres\n")
+        // **A project with no address is already a fault**, so the premise is that notice.
+        assertTrue(
+            "it starts with no connection",
+            scene.viewModel.unreachableOf("groceries").orEmpty().contains("No address"),
+        )
+
+        val remote = File(scene.root, "new-home")
+        GitService.initOrOpen(remote, GitAuthor("Test", "test@example.com")).use { repo ->
+            File(remote, "README.md").writeText("# Groceries\n")
+            GitService.commitAll(repo, "readme", GitAuthor("Test", "test@example.com"))
+        }
+        scene.setAddress("groceries", remote.absolutePath)
+        scene.await("the address to answer", 30_000) {
+            scene.viewModel.unreachableOf("groceries") == null
+        }
+
+        assertEquals("the address is the one given", remote.absolutePath, scene.viewModel.remoteUrlOf("groceries"))
+        assertEquals(
+            "and the work here is untouched, because this is not a clone",
+            "two litres\n",
+            File(dir, "milk.txt").readText(),
+        )
+        assertFalse(
+            "nor was the remote's file pulled in",
+            File(dir, "README.md").exists(),
+        )
+    }
+
     // ---- a local project: a project with no remote ---------------------------
 
     @Test
@@ -332,7 +413,15 @@ class ProjectsFeatureTest : FeatureTest() {
             File(dir, ".git/info/exclude").readText().contains("agent/") &&
                 !File(dir, ".gitignore").exists(),
         )
-        assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
+        // **No address, and the app says what that costs** — the operator's sentence: *"user can set
+        // no remote url, but then his agent will not be able to push changes, and project should
+        // display that there is no connection."* This is the one answer the row, the strip and the
+        // push refusal all read.
+        assertEquals(
+            "and the project says it has no connection",
+            "No address is set, so nothing can be sent from this project.",
+            scene.viewModel.unreachableOf("scratch"),
+        )
         assertEquals("its name is the one typed", listOf("scratch"), scene.viewModel.projectNames)
     }
 
@@ -465,21 +554,22 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `sync on a local project says why it cannot, rather than doing nothing`() {
-        // The button is not offered, and the act refuses in words if it is asked anyway — a press
+    fun `sync on a project with no address says why it cannot, rather than doing nothing`() {
+        // The strip is not offered, and the act refuses in words if it is asked anyway — a press
         // that silently does nothing is the failure this app keeps fixing.
-        scene.viewModel.createProject("scratch")
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
+        //
+        // **The reason is now the host's answer rather than a category.** There is one question,
+        // `unreachableOf`, and the sync refusal repeats its words: no address and an address nobody
+        // answers are different faults, and a person can only act on the second if the sentence says
+        // which one it is.
+        scene.localProject("scratch")
 
         scene.viewModel.sync("scratch")
-        scene.await("the refusal", 5_000) { scene.viewModel.message?.contains("no address") == true }
+        scene.await("the refusal", 5_000) { scene.viewModel.message?.contains("cannot be sent") == true }
 
-        assertTrue(
-            "and it says where the project lives: ${scene.viewModel.message}",
-            scene.viewModel.message.orEmpty().contains("this phone"),
-        )
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("and it says there is no address: $said", said.contains("No address is set"))
+        assertTrue("and that nothing can leave it: $said", said.contains("nothing can be sent"))
     }
 
     @Test

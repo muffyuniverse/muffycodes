@@ -115,7 +115,6 @@ private sealed interface Pending {
     data object AddHostAccount : Pending
     data object ModelKey : Pending
     data object AddProject : Pending
-    data object NewProject : Pending
     /** **Which account**, because the list shows several and the row that was tapped decides. */
     data class RemoveAccount(val login: String) : Pending
     /** A new branch in the project whose branches are on screen (§13d). */
@@ -138,7 +137,6 @@ private sealed interface Pending {
     data class DeleteProject(val project: String) : Pending
     data class Release(val project: String) : Pending
     /** Synced -> local: the remote goes, every version stays. */
-    data class KeepLocal(val project: String) : Pending
     /** A project going to another account (§3.9): `copy` says whether it stays here. */
     data class TransferProject(val project: String, val copy: Boolean) : Pending
     data class RenameEntry(val entry: Entry) : Pending
@@ -613,7 +611,6 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowChat = { project -> viewModel.openChat(project) },
                 onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
-                onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
                 // **A project's own move, and it is offered only where it can go somewhere** (§3.9):
                 // with one account on the phone the window would list nothing.
                 onRowTransfer = { project, copy ->
@@ -719,7 +716,6 @@ private fun AppRoot(viewModel: AppViewModel) {
         // **A window that opens another window.** The account door is a choice between two dialogs,
         // so the choice has to be able to replace what is on screen — `dismiss` only closes.
         show = { pending = it },
-        newProject = { pending = Pending.NewProject },
     )
 }
 
@@ -730,7 +726,6 @@ private fun Dialogs(
     pending: Pending,
     dismiss: () -> Unit,
     show: (Pending) -> Unit,
-    newProject: () -> Unit,
 ) {
     // **This composable's own context**, for the two places that leave the app: the OpenRouter
     // sign-in and a link in a document. The parent has one too, and they are different scopes —
@@ -891,20 +886,17 @@ private fun Dialogs(
 
         Pending.AddProject -> AddProjectDialog(
             onDismiss = dismiss,
-            onNewProject = {
-                dismiss()
-                newProject()
-            },
             onAddUrl = { url, name ->
                 // **The address is never traced**: it may name a private repository, and a trace is a
                 // file a person shares. The name is the identity, and the name is enough.
-                tap("add from address", name)
+                tap(if (url.isBlank()) "new project" else "add from address", name)
                 dismiss()
-                viewModel.addProjectFromUrl(url, name)
+                // **One act either way.** With an address it clones; without one it makes a folder
+                // with its own history that cannot send — the same call, because the two are one
+                // window with one optional field, not two kinds of project.
+                viewModel.createProject(name, url)
             },
         )
-
-        Pending.NewProject -> NewProjectUI(viewModel, dismiss)
 
         is Pending.TransferProject -> TransferProjectDialog(
             project = pending.project,
@@ -942,16 +934,6 @@ private fun Dialogs(
             onRelease = { version, note ->
                 Trace.tap("confirm publish release", version)
                 viewModel.tagRelease(version, note)
-            },
-        )
-
-        is Pending.KeepLocal -> KeepLocalDialog(
-            project = pending.project,
-            address = viewModel.remoteUrlOf(pending.project),
-            onDismiss = dismiss,
-            onKeepLocal = {
-                Trace.tap("confirm keep local", pending.project)
-                viewModel.keepProjectLocal(pending.project)
             },
         )
 
@@ -1248,22 +1230,6 @@ private fun RestoreDeletedDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/** Creates a project: a name, and nothing else. */
-@Composable
-private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
-    NewProjectDialog(
-        onDismiss = dismiss,
-        onCreate = { name ->
-            tap("new project", name)
-            // **A project on this phone**, which is what a project is: a folder with its own history.
-            // Making one used to require a GitHub account, because making one meant making a
-            // repository — and that is the coupling this plan removes. An address can be added
-            // whenever the person wants it to live somewhere else as well.
-            viewModel.createProject(name)
-        },
     )
 }
 

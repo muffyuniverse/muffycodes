@@ -815,15 +815,24 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a local project's history has no remote, and needs no key`() {
-        // The merged shape makes this a statement about a **local project**: its folder is a
-        // repository, its versions are real, and there is nowhere to push to and no key involved.
-        scene.viewModel.createProject("scratch")
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
+    fun `a project with no address is a repository, and needs no key to be one`() {
+        // The merged shape makes this a statement about a **project with no address**: its folder is
+        // a repository, its versions are real, and there is nowhere to push to and no key involved.
+        //
+        // **The version is made deliberately**, because a save no longer commits (2026-11-10) — it
+        // stages, and the commit is made at a push. A project with no address never pushes, so the
+        // version here comes from `commitOutcome`, which is what the scaffold and the app's own
+        // writes use. That is the honest shape: a project that cannot send still records versions
+        // when something decides to record one.
+        scene.localProject("scratch")
         scene.open("scratch")
         scene.file("note.txt", "mine")
+        val dir = scene.workspace!!.projectDir("scratch")
+        ProjectGit(
+            scene.workspace!!,
+            { null },
+            { GitAuthor("Muffy", "muffy@example.com") },
+        ).commitOutcome("scratch", "a version decided on")
         scene.await("a commit") { log().isNotEmpty() }
 
         val repo = scene.workspace!!.projectDir("scratch")

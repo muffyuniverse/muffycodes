@@ -432,10 +432,9 @@ fun BrowserScreen(
      * items beside it, so it takes the same road rather than reaching into a dialog of its own.
      */
     onRelease: (String) -> Unit = {},
+    /** Opens "Set the address…" for [project] — the row's menu and a dead remote's notice. */
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
-    /** Synced -> local. Asks first, because the repository stays where it is. */
-    onRowKeepLocal: (String) -> Unit = {},
     /**
      * **A project going to another account** (§3.9) — `(project, copy)`.
      *
@@ -556,7 +555,7 @@ fun BrowserScreen(
                 // **The account root *is* the list of projects**, so the button that makes one
                 // lives here — there is no `projects/` row to open first.
                 FloatingActionButton(onClick = onAddProject) {
-                    Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
+                    Icon(Icons.Filled.Add, contentDescription = "Add a project")
                 }
             } else if (viewModel.workspace?.isAppHeld(viewModel.path.joinToString("/")) == true) {
                 // **Nothing can be made in the app's held paths**, so the button is not offered.
@@ -650,6 +649,11 @@ fun BrowserScreen(
                     onRelease = viewModel.currentProject
                         ?.takeIf { viewModel.canPublish }
                         ?.let { project -> { onRelease(project) } },
+                    // **The door out of the fault**, from the notice the strip becomes when the host
+                    // cannot be reached: the same "Set the address…" window the row's menu opens.
+                    onSetAddress = viewModel.currentProject?.let { project ->
+                        { onRowRename(project) }
+                    },
                 )
 
                 // What can be done with what is chosen. It appears only when
@@ -696,7 +700,7 @@ fun BrowserScreen(
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowKeepLocal, onRowModel, onRowGit, onRowTransfer,
+                        onRowModel, onRowGit, onRowTransfer,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -966,8 +970,6 @@ private fun ProjectList(
     onChat: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
-    /** Synced -> local: take the remote away, keeping every version here. */
-    onKeepLocal: (String) -> Unit,
     /** A project's own credentials, from its row's menu — see [BrowserScreen]'s parameters. */
     onModel: (String) -> Unit,
     onGit: (String) -> Unit,
@@ -1026,11 +1028,14 @@ private fun ProjectList(
                         // **How much is unsent, on one line.** It used to lead with the project's
                         // type; with types gone the count is the whole of it, which is the one fact
                         // this screen exists to show at a glance.
-                        val sending = if (viewModel.isLocalProject(name)) {
-                            null
-                        } else {
-                            viewModel.changesOf(name).let { if (it > 0) "$it to send" else "up to date" }
-                        }
+                        // **A project that cannot reach its host says so instead of counting.** The
+                        // operator: *"user can set no remote url, but then his agent will not be able
+                        // to push changes, and project should display that there is no connection."*
+                        // A count beside a dead remote is a number nobody can act on, so the fault
+                        // replaces it — and it is the same `unreachableOf` the sync refusal and
+                        // `canPublish` read, not a second opinion.
+                        val sending = viewModel.unreachableOf(name)?.let { "no connection" }
+                            ?: viewModel.changesOf(name).let { if (it > 0) "$it to send" else "up to date" }
                         // **And what will never be sent.** An ignored path is not a change and not
                         // unsent: it is a file on the phone that stays on the phone until somebody
                         // tracks it. Without this a project holding a 40 MB video and one note says
@@ -1103,24 +1108,6 @@ private fun ProjectList(
                                     onGit(name)
                                 },
                             )
-                            // **The way back, for a project that has one.** A local project has no
-                            // remote, so this could only say no — the rule a locked file's Rename
-                            // already follows. What it cannot do is delete the repository: that is
-                            // the host's page too, and the window says so.
-                            if (!viewModel.isLocalProject(name)) {
-                                // **No "Sync" here either.** The row lost its button and the menu
-                                // would have been the same act with a different door — the
-                                // operator moved this decision to the agent, and a second door
-                                // would make the removal look like a layout change.
-                                DropdownMenuItem(
-                                    text = { Text("Go local…") },
-                                    onClick = {
-                                        menu = false
-                                        onKeepLocal(name)
-                                    },
-                                )
-                            }
-
                             // **A project is a folder, and a folder can go to another account** (§3.9).
                             // Two items rather than one with a switch, because they make different
                             // promises — a move ends the project here, a copy does not — and a person
@@ -1650,30 +1637,32 @@ private fun EmptyState(title: String, text: String, action: (@Composable () -> U
  * there is exactly one place that can be wrong.
  */
 @Composable
-fun ProjectSlimRow(viewModel: AppViewModel, onRelease: (() -> Unit)? = null) {
+fun ProjectSlimRow(
+    viewModel: AppViewModel,
+    onRelease: (() -> Unit)? = null,
+    /** The way out of a dead remote: opens "Set the address…" — see the notice below. */
+    onSetAddress: (() -> Unit)? = null,
+) {
     // **Only inside the repo.** The row carries Sync, and Sync sends what is in
     // the worktree — offering it one level above, where nothing of the project is
     // on screen, raises a question the screen cannot answer.
     if (!viewModel.inWorktree) return
     val project = viewModel.currentProject ?: return
-    // **A local project has no strip at all**, and the operator was right that hiding only the
-    // button was the wrong half: "local projects shoudnt show sync row - hide it for them".
+    // **A project that cannot reach its host has no strip.** Every part of the row is a claim about a
+    // remote: `changes` counts what a push would send, and "up to date" is a statement about a host.
+    // A host nobody can reach makes both of those meaningless, so the strip is not drawn and the
+    // notice below says why instead. The strip and the changes window come back the moment the
+    // address answers again — the strip's whole content is derived from the repository, so there is
+    // nothing to restore.
     //
-    // Every part of the row is a claim about a remote. `changes` is `unsentPaths`, which returns
-    // empty when there is no `origin` — so the count would be zero and the strip would say **"up to
-    // date" for ever**, which is a statement about a GitHub repository that does not exist. A row
-    // that can only be wrong should not be drawn.
-    //
-    // **And the strip was the only door to the changes window, which is fine, because that window
-    // would be empty.** `openChanges` reads `unsentPaths` too — so for a local project it opens a
-    // window with nothing in it and a caption claiming no changes. Nothing is lost by removing the
-    // door to a room that cannot have anything in it.
-    //
-    // **The act that gives a local project all of this back is publishing it.** The ⋮ menu offers
-    // "Put on GitHub…", and once there is a remote the strip returns with a real count and a real
-    // Sync. That is the right order: the row describes a relationship with a remote, so it exists
-    // once there is one.
-    if (viewModel.isLocalProject(project)) return
+    // `unreachableOf` is the same answer the row's count, the sync refusal and `canPublish` read.
+    viewModel.unreachableOf(project)?.let { why ->
+        // **The fault, said on the screen it belongs to**, and the door to fixing it beside it. The
+        // operator asked for exactly this: the project opens, and the notice asks for the right
+        // address rather than refusing to open a folder whose files are perfectly readable.
+        NoConnectionNotice(why) { onSetAddress?.invoke() }
+        return
+    }
     SlimRow(
         account = viewModel.account?.login ?: "",
         project = project,
@@ -1683,6 +1672,44 @@ fun ProjectSlimRow(viewModel: AppViewModel, onRelease: (() -> Unit)? = null) {
         onSeeChanges = { viewModel.openChanges(project) },
         onRelease = onRelease,
     )
+    HorizontalDivider()
+}
+
+/**
+ * **A project that cannot reach its host, said on the project's own screen.**
+ *
+ * The operator asked for the check on entry and for the notice to say what to do: a remote that has
+ * been renamed, deleted or moved is otherwise indistinguishable from a healthy one until a push
+ * fails much later with a sentence about refs. So the sentence is here, at the moment a person is
+ * looking at the project, with the one act that fixes it beside it.
+ *
+ * **The project still opens.** Its files are on this phone and are perfectly readable; refusing to
+ * open a folder because a server is unreachable would take a person's own work away from them for a
+ * reason that is not about the work. What the notice stops is the *claim* — the strip and its
+ * "up to date" — not the folder.
+ *
+ * The words come from `ls-remote` through `unreachableOf`, so they name the actual reason rather
+ * than a category this screen invented.
+ */
+@Composable
+private fun NoConnectionNotice(why: String, onSetAddress: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = why,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onSetAddress) { Text("Set the address…") }
+        }
+    }
     HorizontalDivider()
 }
 

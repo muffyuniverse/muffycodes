@@ -279,14 +279,16 @@ class ProjectGit(
         }
 
     /**
-     * **Stages everything — and, for a project with nowhere to push, commits it.**
+     * **Stages everything. Nothing is committed here.**
      *
-     * The operator's rule is that a save stages and a push commits (2026-11-10): a commit is a version a
-     * person decided on, and ten saves are one version. **But a local project has no push.** It stays on
-     * this phone by design, so if a save only staged, its history would never grow at all — and "go back
-     * to how it was" would be unavailable on exactly the projects nobody can recover from anywhere else.
-     * So the rule reads: *the commit happens where the version is decided*, and for a local project that
-     * is the save, because there is no later moment.
+     * The operator's rule (2026-11-10): *"we dont commit on save, we commit on push, on save changes
+     * are only staged."* A commit is a version a person decided on, and ten saves are one version —
+     * so the commit happens at the push, which is the moment somebody says "this is the version".
+     *
+     * **There is no exception for a project with nowhere to push**, because there is no such project
+     * any more: every project has a remote, and a project whose remote has gone quiet is repointed
+     * rather than demoted. That was the only reason this function ever committed, and removing local
+     * projects removed it.
      *
      * The same hold and the same `inFlight = false` reasoning as [commitOutcome], because it is the same
      * write to the same index. Answers false when the index could not be written, so a save whose work
@@ -295,21 +297,7 @@ class ProjectGit(
     fun stage(project: String): Boolean =
         RepoLocks.hold(repoDir(project), "stage") {
             val repo = open(project) ?: return@hold false
-            repo.use {
-                val staged = GitService.stageAll(it, inFlight = false)
-                // **A local project commits here, because it has no push.** See this function's doc:
-                // the version is made where a person decides it, and for a project that never leaves
-                // the phone that decision is the save.
-                //
-                // **The repository we already hold, not `isLocal(project)`** — that opens the same
-                // repository again, and `RepoLocks` is a reentrant lock per directory, so the second
-                // open inside this hold is a second handle on a repository whose index is being
-                // written. The question is the config's own: an `origin` with no url is no address.
-                if (staged && remoteUrlOf(it).isNullOrBlank()) {
-                    GitService.commitEverything(it, CommitMessage.SAVE, authorProvider(), inFlight = false)
-                }
-                staged
-            }
+            repo.use { GitService.stageAll(it, inFlight = false) }
         }
 
     @JvmOverloads
@@ -753,15 +741,15 @@ class ProjectGit(
         return result
     }
 
-    /** The remote of the project, or null. */
     /**
-     * Gives a local project somewhere to push — **local → synced.**
+     * **Points the project at [url]** — the one act that gives a project an address.
      *
-     * The other half of the cycle. A local project is one with no remote, so syncing it is a matter
-     * of creating the repository on GitHub and pointing at it; the history that is already on the
-     * phone goes up with the first sync.
+     * There is no opposite any more (2026-11-10): every project has a remote, so the app has no
+     * "go local" and no "keep local", and `GitService.removeRemote` has no caller. A project whose
+     * host has moved is repointed by this same call, which is why the screen says "Set the
+     * address…" rather than "Publish".
      */
-    fun makeRemote(project: String, url: String): Boolean {
+    fun setRemote(project: String, url: String): Boolean {
         val repo = open(project) ?: return false
         return try {
             repo.use { GitService.setRemoteUrl(it, url) }
@@ -772,38 +760,11 @@ class ProjectGit(
         }
     }
 
-    /**
-     * Takes a project's remote away — **synced → local.**
-     *
-     * Every commit stays: the history is in this phone's repository, and removing the remote only
-     * stops there being somewhere to send it. What is already on GitHub stays there, which is why
-     * the screen asks before doing this.
-     */
-    fun makeLocal(project: String): Boolean {
-        val repo = open(project) ?: return false
-        return try {
-            repo.use { GitService.removeRemote(it) }
-            true
-        } catch (e: Throwable) {
-            lastError = Secrets.describe(e)
-            false
-        }
-    }
-
+    /** The project's remote, or null when it has none — which is now a fault, not a state. */
     fun remoteUrl(project: String): String? {
         val repo = open(project) ?: return null
         return repo.use { GitService.remoteUrl(it) }
     }
-
-    /**
-     * True when this project has nowhere to push — **a local project**.
-     *
-     * A local project is a project like any other: its own folder, its own repository, its own
-     * versions, its own agent. What it does not have is a remote, so Sync is not a thing it can do
-     * and the row says `local` rather than `up to date`. That distinction matters: "up to date" is a
-     * claim about GitHub, and a folder that has never been to GitHub is not up to date with it.
-     */
-    fun isLocal(project: String): Boolean = remoteUrl(project).isNullOrBlank()
 
     /** The commits that touched a path inside the worktree, newest first. */
     fun log(

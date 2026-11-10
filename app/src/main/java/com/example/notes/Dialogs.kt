@@ -477,10 +477,22 @@ private fun RadioLine(
  *
  * **The name is a prefill, not an answer**: the address may be `team/repo` and a slash cannot be a folder.
  */
+/**
+ * **The one door a project comes through** — a name and, optionally, an address.
+ *
+ * The operator's decision (2026-11-10): *"when you add the address you clone from remote"* and *"user
+ * can set no remote url, but then his agent will not be able to push changes, and project should
+ * display that there is no connection."* So there is no "New project" beside "Add from an address":
+ * both were the same window with the same two fields, and the second one already accepted an empty
+ * address as a project that cannot send.
+ *
+ * The window does not explain the consequences of leaving it blank beyond one line, because the
+ * project's own row says **no connection** from then on — the sentence belongs where the state is,
+ * not in a paragraph somebody reads once.
+ */
 @Composable
 fun AddProjectDialog(
     onDismiss: () -> Unit,
-    onNewProject: () -> Unit,
     onAddUrl: (url: String, name: String) -> Unit,
 ) {
     var address by remember { mutableStateOf("") }
@@ -495,16 +507,6 @@ fun AddProjectDialog(
         title = { Text("Add a project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onNewProject)
-                        .padding(vertical = 12.dp),
-                ) {
-                    Text("＋ New project…", style = MaterialTheme.typography.bodyLarge)
-                }
-                HorizontalDivider()
-                Text("Or from an address", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = address,
                     onValueChange = {
@@ -516,7 +518,8 @@ fun AddProjectDialog(
                     supportingText = {
                         Text(
                             "https://host/owner/repository.git — checked with ls-remote before " +
-                                "anything is cloned.",
+                                "anything is cloned. Left empty, the project starts here and cannot " +
+                                "send anything until an address is set.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     },
@@ -530,11 +533,13 @@ fun AddProjectDialog(
                     label = { Text("Name on this phone") },
                     singleLine = true,
                 )
+                // **Enabled on the name alone**, because an address is now optional: a person who
+                // wants a folder on this phone and nothing else is making a project, not a mistake.
                 TextButton(
-                    enabled = address.isNotBlank() && name.isNotBlank(),
+                    enabled = name.isNotBlank(),
                     onClick = { onAddUrl(address, name) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Add it") }
+                ) { Text(if (address.isBlank()) "Make it here" else "Add it") }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -669,85 +674,6 @@ fun SetAddressDialog(
                     onDismiss()
                 },
             ) { Text("Set") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
- * **Keeping a synced project on this phone only.**
- *
- * Asked because it cannot be undone from here and because the repository stays on GitHub: removing
- * the remote is a statement about this phone, not about the server, and a person who expected the
- * copy to disappear would be wrong in a way that matters. Deleting the repository is the other act.
- */
-@Composable
-fun KeepLocalDialog(
-    project: String,
-    address: String?,
-    onDismiss: () -> Unit,
-    onKeepLocal: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Keep $project only on this phone") },
-        text = {
-            Text(
-                "Every version stays here and the project stops being sent anywhere.\n\n" +
-                    // **The host named, and the address shown**, because this sentence is what
-                    // decides whether a person believes a copy still exists somewhere else. It said
-                    // "on GitHub" for every project, which was true only while every project had one.
-                    (address?.let { "Its repository is still at $it, with everything already pushed " +
-                        "to it. Nothing here deletes it — that is the host's own page." }
-                        ?: "It had no address, so there is nowhere else it could be."),
-            )
-        },
-        confirmButton = { TextButton(onClick = { onKeepLocal(); onDismiss() }) { Text("Keep local") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
- * **A name, and nothing else** — the project is made on this phone, with no repository behind it.
- *
- * The licence used to be asked here, because making a project meant making a repository on GitHub and
- * seeding it. A local project has nowhere to seed it, and a project that gains a remote later gets one
- * on the host's own page — where the licence question also has consequences a checkbox in this app
- * cannot: visibility, the repository's description, who can find it.
- */
-@Composable
-fun NewProjectDialog(
-    onDismiss: () -> Unit,
-    onCreate: (name: String) -> Unit,
-) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New project") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    singleLine = true,
-                )
-                Text(
-                    "It starts here, with its own history. An address can be added whenever you " +
-                        "want it to live somewhere else as well.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = {
-                    onCreate(name.trim())
-                    onDismiss()
-                },
-            ) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

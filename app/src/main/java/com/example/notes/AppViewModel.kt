@@ -1745,14 +1745,75 @@ class AppViewModel @JvmOverloads constructor(
     fun ignoredOf(project: String): Int = ignoredByProject[project] ?: 0
 
     /**
-     * True when [project] has nowhere to push.
+     * **The last thing each project's host said, when what it said was "no".**
      *
-     * Asked by the row and by the sync button. A local project's row says `local`, not `up to date`,
-     * and pressing Sync on one says why it cannot — a button that refuses without saying why is the
-     * failure this app keeps fixing.
+     * Only failures are held, so absence means *nothing is wrong* — either the host answered or
+     * nobody has asked yet, and both are drawn the same way: the ordinary count. Reachability is a
+     * fact about *now*, so a remembered "it answered" from ten minutes ago would be the exact lie
+     * this check exists to stop; a remembered failure is worth keeping until something retries,
+     * because it is what the person needs to see.
+     *
+     * **This is not a second status system.** [unreachableOf] is the one question "can this project
+     * talk to its host, and if not why", and the row, the strip, `canPublish` and the push refusal
+     * all read it. It replaced `isLocalProject`, which answered "no address" and nothing else and
+     * would have been a second, competing answer to the same question.
      */
-    fun isLocalProject(project: String): Boolean = git?.isLocal(project) ?: true
+    var hostSaidNo: Map<String, String> by mutableStateOf(emptyMap())
+        private set
 
+    /**
+     * **Why [project] cannot reach its host, or null when nothing is wrong.**
+     *
+     * Two cases, and the cheap one is answered without a network call:
+     *
+     * - **No address.** Asked of the repository's config, so the list can say it for every project
+     *   without touching the network. The operator: *"user can set no remote url, but then his agent
+     *   will not be able to push changes, and project should display that there is no connection."*
+     * - **An address the host did not answer.** Remembered by [checkReach] from the last time
+     *   somebody asked — on entering a project, and after the address changes.
+     */
+    fun unreachableOf(project: String): String? =
+        hostSaidNo[project]
+            ?: if (remoteUrlOf(project).isNullOrBlank()) {
+                "No address is set, so nothing can be sent from this project."
+            } else {
+                null
+            }
+
+    /**
+     * **Asks the project's host whether it is there** — on entry, and after an address changes.
+     *
+     * `ls-remote` is the protocol's own answer to "is this address real, and may this key read it",
+     * and the operator asked for the check at the moment a person enters a project: a project whose
+     * remote has been deleted, renamed or moved is otherwise indistinguishable from a healthy one
+     * until a push fails much later, with a sentence about refs.
+     *
+     * **A refusal is a sentence, not a flag.** `ls-remote` answers with the reason in words a person
+     * can act on, and those words are what the notice shows.
+     */
+    fun checkReach(project: String) {
+        val g = git ?: return
+        val address = g.remoteUrl(project)
+        if (address.isNullOrBlank()) {
+            // Nothing to ask. `unreachableOf` already answers this from the config, so there is
+            // nothing to record — and recording it would be a second copy of the same fact.
+            return
+        }
+        onWorker {
+            val answer = try {
+                g.checkRemote(project, address)
+            } catch (t: Throwable) {
+                GitService.RemoteAnswer.Refused(Secrets.describe(t))
+            }
+            main.post {
+                hostSaidNo = when (answer) {
+                    is GitService.RemoteAnswer.Branches -> hostSaidNo - project
+                    is GitService.RemoteAnswer.Refused ->
+                        hostSaidNo + (project to "The remote at $address did not answer. ${answer.why}")
+                }
+            }
+        }
+    }
     /**
      * The remote a project pushes to, or null when it has none.
      *
@@ -3376,11 +3437,12 @@ class AppViewModel @JvmOverloads constructor(
     @JvmOverloads
     fun sync(project: String, note: String? = null) {
         val g = git ?: return
-        if (g.isLocal(project)) {
-            // **Said, not silently ignored.** A local project has no remote by design, and a person
-            // who presses Sync on one deserves the sentence rather than a spinner that ends.
-            Trace.failure("sync", "local")
-            message = "$project stays on this phone: it has no address to send to"
+        // **Said, not silently ignored**, and said with the *reason* rather than a category: no
+        // address and an address the host does not answer are different faults and a person can only
+        // act on the second one if the words say which it is. `unreachableOf` is that one answer.
+        unreachableOf(project)?.let { why ->
+            Trace.failure("sync", why)
+            message = "$project cannot be sent: $why"
             return
         }
         busy = true
@@ -3405,22 +3467,26 @@ class AppViewModel @JvmOverloads constructor(
         private set
 
     /**
-     * **Makes a project in the open account**: a folder with a repository of its own, and no address.
+     * **Makes a project in the open account, from an address** — the one door in.
      *
-     * Every project starts this way. It has versions, an agent and a row in the same list — the row
-     * says `local` rather than a count, because "up to date" is a claim about a host and this folder
-     * has never been to one. Giving it an address (`setAddress`) is what publishes it, and that is
-     * the one act that makes it a remote repository too.
+     * The operator's rule (2026-11-10): *"when you add the address you clone from remote."* There is
+     * no project-without-a-remote to make first and no repository to create on a host — creating one
+     * is a host's own API call, not git protocol, and this app speaks only the protocol. So a project
+     * arrives by cloning, which is also what makes its history the host's history rather than a
+     * second, unrelated one.
      *
-     * **It used to be called `createProject`**, from when "local" meant a whole account with no
-     * host. The account is gone (§3.11) and the property stayed: being on this phone and nowhere else
-     * is a fact about a project, not about the identity that owns it.
+     * **An empty address is allowed, and it is a fault state rather than a kind.** The operator:
+     * *"user can set no remote url, but then his agent will not be able to push changes, and project
+     * should display that there is no connection."* A folder with its own repository is still a
+     * project — its versions are real and it can be worked in — but nothing can leave it, so the row
+     * and the project's own screen say **no connection** instead of pretending to be up to date.
      *
-     * The name is checked with [Workspace.nameProblem], unlike a cloned project's: this one is a
-     * folder the person typed, not a repository whose name a host already accepted.
+     * The name is checked with [Workspace.nameProblem], unlike a cloned project's: this one may be a
+     * folder the person typed rather than a repository whose name a host already accepted.
      */
     fun createProject(
         name: String,
+        address: String = "",
         onDone: (Boolean) -> Unit = {},
     ) {
         val ws = workspace ?: run {
@@ -3428,12 +3494,28 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
+        val url = address.trim()
+        // **The clone is the whole of it.** `addProjectFromUrl` already owns "check an address with
+        // `ls-remote`, then fill a folder from it" — every refusal, every sentence — so with an
+        // address this is that act with the name already chosen. Calling it here rather than inside
+        // the worker below is deliberate: it starts a worker of its own.
+        //
+        // **Nothing is validated twice.** A name is checked in one place and an address in another,
+        // and both of those places are the functions that act on them.
+        if (url.isNotEmpty()) {
+            addProjectFromUrl(url, name, onDone)
+            return
+        }
         // **As typed, and only blank falls back.** The app no longer rewrites names — see
         // `Workspace.nameProblem` for the measurement that removed it.
-        val clean = name.trim().ifBlank { "local" }
-        val problem = Workspace.nameProblem(clean)
-        if (problem != null) {
-            message = problem
+        val clean = name.trim()
+        if (clean.isEmpty()) {
+            message = "A project needs a name"
+            onDone(false)
+            return
+        }
+        Workspace.nameProblem(clean)?.let {
+            message = it
             onDone(false)
             return
         }
@@ -3454,7 +3536,9 @@ class AppViewModel @JvmOverloads constructor(
                 return@onWorker
             }
             // **A repository, with no remote.** The history is what makes it a project rather than
-            // a folder: every save is a version, and a version can be gone back to.
+            // a folder: every save is a version, and a version can be gone back to. It has no
+            // address, which is a state the screen shows as **no connection** — see this function's
+            // doc.
             val git = ProjectGit(
                 ws,
                 { null },
@@ -3487,7 +3571,8 @@ class AppViewModel @JvmOverloads constructor(
                 // deleting a project shows the change only after you exit and enter the project
                 // menue again".
                 message = if (made.isSuccess) {
-                    "Made \"$clean\". It stays on this phone until you give it an address."
+                    "Made \"$clean\". It has no address, so nothing can be sent from it until you " +
+                        "set one."
                 } else {
                     "Made the folder, but its history could not be started"
                 }
@@ -3553,19 +3638,21 @@ class AppViewModel @JvmOverloads constructor(
         }
         if (clean == project) {
             // **Nothing to rename.** The address is the whole of this press.
-            val wasLocal = isLocalProject(project)
-            val pointed = git?.makeRemote(project, address) ?: false
-            message = if (pointed) {
-                if (wasLocal) "$project now has an address: $address" else "The address of $project is $address"
-            } else {
+            //
+            // **No question about keeping or cloning.** The operator (2026-11-10): *"when you add the
+            // address you clone from remote, when you change the address you keep the history and
+            // collisions are resolved by the agent on push. no extra dialogue needed."* So the
+            // address is written and nothing else is decided here — the next push carries this
+            // phone's history to the new host, and if the two histories disagree the agent resolves
+            // it where a person can see it happening.
+            val pointed = git?.setRemote(project, address) ?: false
+            message = if (pointed) "The address of $project is $address" else
                 "$project could not be pointed at $address"
-            }
             if (pointed) {
+                // **The new address is asked about at once**, so a typo is a notice now rather than
+                // a failed push later.
+                checkReach(project)
                 refresh()
-                // **A local project that just gained an address is sent**, because a project that
-                // says "synced" while the host holds an empty repository is the worst of both states
-                // — the same reason publishing used to sync in the same press.
-                if (wasLocal) sync(project)
             }
             onDone(pointed)
             return
@@ -3584,7 +3671,6 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        val wasLocal = isLocalProject(project)
         busy = true
         onWorker {
             val checked = git?.checkRemote(project, address)
@@ -3596,7 +3682,7 @@ class AppViewModel @JvmOverloads constructor(
                 }
                 return@onWorker
             }
-            val pointed = git?.makeRemote(project, address) ?: false
+            val pointed = git?.setRemote(project, address) ?: false
             if (!pointed) {
                 main.post {
                     busy = false
@@ -3633,10 +3719,10 @@ class AppViewModel @JvmOverloads constructor(
                     path = listOf(clean) + path.drop(1)
                 }
                 onDone(true)
+                // **The new address is asked about**, for the same reason as above: the notice on
+                // the project's own screen is what makes a moved repository visible.
+                checkReach(clean)
                 refresh()
-                // **The first send, for a project that had nowhere to send to.** It is what makes
-                // "synced" true rather than claimed.
-                if (wasLocal) sync(clean)
             }
         }
     }
@@ -3756,43 +3842,6 @@ class AppViewModel @JvmOverloads constructor(
                 refresh()
             }
         }
-    }
-
-    /**
-     * **Go local** — synced → local, and every version stays.
-     *
-     * The universal half of "remove on remote": `git remote remove origin` is the whole of it, it is
-     * reversible, and the repository on the host is untouched because the app has no way to delete one
-     * and no business doing so. The sentence names where the repository still is, because "keep local"
-     * that quietly left a copy somewhere would be a promise the app could not keep.
-     */
-    fun keepProjectLocal(project: String, onDone: (Boolean) -> Unit = {}) {
-        if (Workspace.isSystem(project)) {
-            message = "\"$project\" is where this account's settings live, so it stays"
-            onDone(false)
-            return
-        }
-        if (isLocalProject(project)) {
-            message = "$project is already only on this phone"
-            onDone(false)
-            return
-        }
-        val hadRemote = git?.remoteUrl(project)
-        val ok = git?.makeLocal(project) ?: false
-        Trace.tap("keep local", project)
-        // **The host, named from the address rather than assumed.** This sentence said "on GitHub"
-        // for every project, which was true only while every project had a GitHub repository - and it
-        // is the sentence that decides whether a person believes their copy is still somewhere else.
-        val where = hadRemote?.let { Secrets.hostOf(it) }?.takeIf { it.isNotBlank() }
-        message = if (ok) {
-            "$project is local now. Everything it holds is still here" +
-                (where?.let { ", and its repository is still at $it" } ?: "") +
-                (hadRemote?.let { " ($it)" } ?: "")
-        } else {
-            "$project could not be made local"
-        }
-        refresh()
-        onDone(ok)
     }
 
     /**
@@ -5338,6 +5387,11 @@ class AppViewModel @JvmOverloads constructor(
         // screen opened a branch still showing main's number — "up to date" beside five unsent files,
         // which is the same wrong sentence the strip had before, one tap earlier.
         refreshChanges()
+        // **And the host is asked whether it is still there.** The operator asked for the check at the
+        // moment a project is entered: a remote that has been renamed, deleted or moved is otherwise
+        // indistinguishable from a healthy one until a push fails much later with a sentence about
+        // refs. Off the main thread, so entering a project never waits for a network.
+        checkReach(project)
         Trace.note("branch-enter", "$project · $branch · $tree")
     }
 
@@ -5364,7 +5418,7 @@ class AppViewModel @JvmOverloads constructor(
     val canPublish: Boolean
         get() {
             val project = currentProject ?: return false
-            return activeBranch == AgentSession.MAIN && !isLocalProject(project)
+            return activeBranch == AgentSession.MAIN && unreachableOf(project) == null
         }
 
     /**

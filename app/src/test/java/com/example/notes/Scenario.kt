@@ -453,6 +453,33 @@ class Scenario(
     }
 
     /**
+     * **Enters a project the way a person does** — the branches screen, then a branch.
+     *
+     * A project is entered through its branches (§13d), and that is where the app asks the host
+     * whether it is still there — so a test about reachability has to go through this door rather
+     * than `open`, which skips the question.
+     */
+    fun openBranches(project: String): Scenario {
+        viewModel.openBranches(project)
+        await("the branches of $project") { viewModel.choosingBranchFor == project }
+        return this
+    }
+
+    fun enterBranch(branch: String): Scenario {
+        viewModel.enterBranch(branch)
+        await("$branch to be entered") { viewModel.choosingBranchFor == null }
+        return this
+    }
+
+    /** **Sets a project's address**, the act the notice's button opens. */
+    fun setAddress(project: String, url: String): Scenario {
+        var answered: Boolean? = null
+        viewModel.setAddress(project, url) { answered = it }
+        await("the address of $project to be set") { answered != null }
+        return this
+    }
+
+    /**
      * Opens a folder **inside the project that is open**, however deep.
      *
      * [open] takes a path from the account root, which every history test would otherwise have to
@@ -530,14 +557,14 @@ class Scenario(
      *
      * - **Nothing staged is nothing to do.** A sync on a clean tree is a round trip for an answer that
      *   is already "up to date", and in a wait loop it would be one per poll.
-     * - **A local project is not synced.** It has no address by design, `sync` says so and leaves the
-     *   change count alone, so waiting for the count to fall would wait for ever.
+     * - **A project that cannot reach its host is not synced.** `sync` refuses with a sentence and
+     *   leaves the change count alone, so waiting for the count to fall would wait for ever.
      *
      * Returns true when it actually pressed Sync, so a caller can say so if it wants.
      */
     fun sendIfWaiting(file: File): Boolean {
         val project = projectOf(file) ?: return false
-        if (viewModel.isLocalProject(project)) return false
+        if (viewModel.unreachableOf(project) != null) return false
         val staged = try {
             Git.open(workspace!!.repoOf(project)).use { GitService.stagedPaths(it.repository) }
         } catch (e: Exception) {

@@ -1828,36 +1828,6 @@ object GitService {
     fun remoteUrl(repo: Repository): String? =
         repo.config.getString("remote", "origin", "url")
 
-    /**
-     * Takes the remote away, **leaving every commit where it is.**
-     *
-     * This is the synced -> local direction of the cycle the operator asked about. It removes the
-     * `origin` remote, and touches nothing else: the history is in the local repository, so the
-     * project keeps every version it has and simply stops having somewhere to send them.
-     *
-     * **What is on GitHub stays on GitHub.** Removing the remote is a statement about this phone,
-     * not about the server - the repository is still there and anybody with access can still read
-     * it. The caller says so, because "keep as local" that quietly left a public copy behind would
-     * be a promise the app could not keep.
-     */
-    fun removeRemote(repo: Repository) {
-        val config = repo.config
-        // **`unsetSection` takes the section and the subsection only**, and it drops every key in
-        // that subsection - which is what removing a remote is: the url, the fetch refspec and the
-        // push refspec all go together. The branch's own tracking settings are cleared separately,
-        // because a branch pointing at a remote that no longer exists is a branch whose next pull
-        // has nowhere to go.
-        val branch = currentBranch(repo)
-        config.unsetSection("remote", "origin")
-        if (branch != null) {
-            // `unset`, not `setString(…, null)`: JGit's three-argument `unset` removes one key, and
-            // passing a null value would write the string "null" into a config file git reads.
-            config.unset("branch", branch, "remote")
-            config.unset("branch", branch, "merge")
-        }
-        config.save()
-    }
-
     /** Sets (or replaces) the URL of the "origin" remote. */
     fun setRemoteUrl(repo: Repository, url: String) {
         val config = repo.config

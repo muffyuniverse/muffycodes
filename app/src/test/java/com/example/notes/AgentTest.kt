@@ -248,9 +248,15 @@ class AgentTest {
         agent(door).burst("make it three litres")
 
         assertEquals("the file", "three litres", File(ws.repoOf("shopping"), "milk.txt").readText())
-        // **Staged, not committed** (2026-11-10: a save records the work and a push makes the version).
-        // So the assertion moved from the history to the index, and the history assertion that used to
-        // live here became a fact about the push — see `a push makes the version a save staged`.
+        // **Staged, not committed** (2026-11-10: a save stages and a push makes the version). The
+        // assertion moved from the history to the index, and the history assertion that used to live
+        // here became a fact about the push — see `push refuses staged work with no message, and says
+        // which work`, which is where the commit's message is the thing being tested.
+        //
+        // **Nothing is committed here.** There was briefly a rule that a project with no address
+        // committed on save, because its history would otherwise never grow — that rule existed only
+        // for local projects as a kind, and they are gone. A project with no address is now a fault
+        // state, not a different way of recording.
         assertEquals(
             "the work is in the index, which is where a push reads it",
             listOf("milk.txt"),
@@ -2974,9 +2980,18 @@ class AgentTest {
         // version without one is refused rather than given a name the app invented.
         //
         // The operator's rule (2026-11-10): *"we dont commit on save, we commit on push, on save
-        // changes are only staged. and add a commit message arg to push tool."* A save now leaves the
-        // work in the index, so this is the ordinary case rather than an edge one: an agent that saves
-        // and then pushes has to say what it did.
+        // changes are only staged. and add a commit message arg to push tool."*
+        //
+        // **A project with a remote, made by hand.** A *local* project commits on save (it has no push
+        // to commit at — see `ProjectGit.stage`), so nothing would ever be staged in it and this test
+        // would be asking about a state that cannot happen there. A bare repository on disk is enough:
+        // `origin` existing is all the question asks about.
+        val bare = File(File(account, "remote"), "shopping.git")
+        org.eclipse.jgit.api.Git.init().setBare(true).setDirectory(bare).call().close()
+        org.eclipse.jgit.api.Git.open(ws.repoOf("shopping")).use { git ->
+            git.repository.config.setString("remote", "origin", "url", bare.absolutePath)
+            git.repository.config.save()
+        }
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "three litres")
         // **Staged, the way a save leaves it.** `ws.write` is a bare write; the index is what the tool
@@ -2988,10 +3003,9 @@ class AgentTest {
         assertTrue("and names the file it would have sent: $said", said.contains("milk.txt"))
         assertTrue("and asks for the message: $said", said.contains("message"))
 
-        // **With a message the refusal is gone**, and what happens next is the remote's business —
-        // this fixture's project has no `origin`, so the push answers that instead. Asserting "it
-        // succeeds" would be asserting a remote into existence; what this test is about is the rule
-        // that a version needs a reason.
+        // **With a message the refusal is gone.** What happens next is the remote's business — this
+        // bare repository has no branch to fast-forward from, so the push may well fail, and that is
+        // not what this test is about.
         val told = call("push", JSONObject().put("message", "three litres instead of two"))
         assertFalse("the message is no longer what stops it: $told", told.contains("give `message`"))
     }

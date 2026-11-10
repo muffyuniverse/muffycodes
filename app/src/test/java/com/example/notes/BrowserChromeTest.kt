@@ -231,16 +231,20 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a local project has no sync strip at all`() {
+    fun `a project with no address shows the fault instead of a sync strip`() {
         // **The operator's report, from the live log**: "local projects shoudnt show sync row - hide
         // it for them". My first attempt hid only the Sync *button* and kept the rest of the row,
         // and the operator corrected me: "it doesnt, that is why I asked to hide the strip and not
         // just the button".
         //
-        // They were right, and the reason is in `unsentPaths`: it returns empty when the repository
-        // has no `origin`. So on a local project the count is always zero and the strip says **"up
-        // to date" for ever** - a claim about a GitHub repository that does not exist. Every part of
-        // that row is a statement about a remote, so a project without one gets no row.
+        // **The reason survived the removal of local projects as a kind.** A project may still have
+        // no address (2026-11-10, the operator: *"user can set no remote url, but then his agent will
+        // not be able to push changes, and project should display that there is no connection"*), and
+        // `unsentPaths` returns empty when there is no `origin` — so the count would be zero and the
+        // strip would say **"up to date" for ever**, a claim about a host that does not exist.
+        //
+        // **The strip becomes the notice**, which is the operator's own shape: the project still
+        // opens, and what it cannot do is said where the strip used to be.
         scene.signedIn()
         scene.localProject("Shopping")
         val made = scene.made("Shopping")
@@ -266,6 +270,12 @@ class BrowserChromeTest {
         // **"up to date" is the claim that was actually false**, so it is the one worth asserting
         // against by name: a local project has no remote to be up to date *with*.
         assertFalse("and no claim to be up to date with", there("up to date"))
+        // **And the fault is said**, rather than the strip simply vanishing — a screen that showed
+        // nothing where a count used to be would leave a person guessing.
+        assertTrue(
+            "the notice says there is no address",
+            there("No address is set, so nothing can be sent from this project."),
+        )
     }
 
     @Test
@@ -733,32 +743,4 @@ class BrowserChromeTest {
             addressNameSaid("groceries", ""),
         )
     }
-
-    @Test
-    fun `the keep-local window promises that nothing is deleted`() {
-        // **The sentence that makes the choice safe.** A person deciding to stop syncing needs to
-        // know their history survives and their repository is still there; a window that only said
-        // "keep local" would read as "delete the remote".
-        compose.setContent {
-            MaterialTheme {
-                KeepLocalDialog(
-                    project = "groceries",
-                    address = "https://gitlab.com/owner/groceries.git",
-                    onDismiss = {},
-                    onKeepLocal = {},
-                )
-            }
-        }
-
-        compose.waitForIdle()
-        assertTrue("it names the project", there("groceries"))
-        assertTrue("and says nothing is removed", there("stays here"))
-        // **The address, not a host's name.** This sentence said "on GitHub" for every project,
-        // which was true only while every project had a GitHub repository.
-        assertTrue("including the repository", there("still at https://gitlab.com/owner/groceries.git"))
-        assertTrue("and that deleting it is the host's page", there("Nothing here deletes it"))
-        assertFalse("and it is not the address window", there("Set the address of groceries"))
-    }
-
-
 }
