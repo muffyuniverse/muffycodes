@@ -571,10 +571,14 @@ class AgentChatScreenTest {
     }
 
     @Test
-    fun `the footer draws what the reply cost`() {
-        // **The screen is the claim.** `AgentChatTest` proves the box carries the numbers and
-        // `AgentLogTest` proves they survive a reopen; this one proves the last inch, that they
-        // reach the glass - a footer that rendered nothing would satisfy both of the others.
+    fun `the footer draws no token count, because cost lives in the request log`() {
+        // **The screen is the claim, and it now claims the opposite.** Cost left the chat on
+        // 2026-11-10: `RequestDb` holds the same numbers with the model, the project and the finish
+        // reason attached, and the footer existed only to join a figure to a row id.
+        //
+        // The door still reports a full usage block, so this fails if anything on the screen starts
+        // showing it again — which is the whole point of asserting the absence rather than deleting
+        // the test.
         val door = ScriptedDoor(
             Reply(
                 text = "There is one file.",
@@ -588,10 +592,10 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(1)
 
-        // **Both counts, as the footer words them.** 9100 rounds to 9k through the same helper the
-        // footer uses, so this asserts the rendering rather than re-deriving the format here.
-        compose.onNodeWithText("thinking 9k", substring = true).assertExists()
-        compose.onNodeWithText("output 2k", substring = true).assertExists()
+        compose.onNodeWithText("thinking 9k", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("output 2k", substring = true).assertDoesNotExist()
+        // The words are still there: this asserts what left, not that the message vanished.
+        compose.onNodeWithText("There is one file.", substring = true).assertExists()
     }
 
     @Test

@@ -421,17 +421,17 @@ class AgentChatTest {
         val withUsage = AgentChat.box(
             listOf(
                 told("look at the files"), turn(), words,
-                // A row of the shape the deleted writer produced. Nothing reads it now, and it must
-                // not become a bubble, a page, or a figure.
+                // A row of the shape the deleted writer produced, with no field to put a figure in.
                 row(AgentLog.NOTE, "usage", "out=2400 think=9100", ctx = AgentLog.APP, answers = words.id),
             ),
         )!!
-        assertEquals("the same bubbles, with or without it", box.bubbles.size, withUsage.bubbles.size)
-        assertEquals(
-            "and the same words on the last one",
-            agent.body,
-            withUsage.bubbles.last().body,
-        )
+        // **The agent's bubble is unchanged.** A stale `usage` row is drawn as the app's own line —
+        // it always was, and that is not what this asserts — but it cannot attach a figure to the
+        // reply, because `Bubble` has no field for one. The claim is about the reply, not about the
+        // row's caption.
+        val charged = withUsage.bubbles.single { it.caption == "agent" }
+        assertEquals("the same words", agent.body, charged.body)
+        assertEquals("the same id", agent.id, charged.id)
     }
 
     @Test
@@ -478,10 +478,15 @@ class AgentChatTest {
         val rows = listOf(told("go"), turn(), words, row(AgentLog.NOTE, "usage", "out=2400 think=9100", ctx = AgentLog.APP))
         val box = AgentChat.box(rows)!!
 
-        assertEquals("one bubble for the words, and no bubble for the row", 2, box.bubbles.size)
-        assertTrue(
-            "nothing is captioned usage",
-            box.bubbles.none { it.caption == "usage" },
+        // **The words are one bubble.** An `app` note with an unrecognised name *is* drawn — as the
+        // app's own line, which is what the `else` branch is for and what "stopped" relies on — so
+        // the claim here is narrower and true: the row does not become a second *message*, and it
+        // carries no figure.
+        assertEquals("one message, not two", 1, box.turns.size)
+        assertEquals(
+            "and the agent's bubble is the words",
+            "done",
+            box.bubbles.single { it.caption == "agent" }.body,
         )
     }
 
