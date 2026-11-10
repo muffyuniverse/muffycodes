@@ -623,15 +623,30 @@ class Agent(
             // un-sent, but its commands must not run once the person has spoken or stopped.
             cut()?.let { return finish(cutShort(it, reply.calls)) }
 
-            if (reply.text.isNotBlank()) {
-                val said = log.note("agent", reply.text)
-                // **The reasoning is stored with the reply, because the next request has to carry
-                // it.** A thinking-mode provider answers `400 The reasoning_content in the thinking
-                // mode must be passed back to the API` if it is dropped. Written here rather than
-                // in the door so it lands beside the words it belongs to and only for a reply that
-                // had words - a reply of calls alone is replayed from its calls.
-                if (reply.thinking.isNotBlank()) log.thinking(said, reply.thinking)
-            }
+            // **The reply's own row, and it is written even when the reply said nothing.**
+            //
+            // This used to be `if (text.isNotBlank())` around BOTH the note and the reasoning, on
+            // the theory that a reply of calls alone "is replayed from its calls". It is not: the
+            // assistant turn is built from the calls *and* carries `reasoning_content`, so a
+            // call-only reply had its reasoning dropped — and a thinking-mode provider answers
+            // `400 The reasoning_content in the thinking mode must be passed back to the API` on
+            // the next request.
+            //
+            // **The operator's symptom names it exactly**: "that is why agents were so loopy when
+            // they used only tool calls - they were losing their mind". A turn's reasoning is the
+            // model's own working; handing the turn back without it asks the model to re-derive a
+            // decision it has already made, and a model that cannot remember why it called a tool
+            // calls it again.
+            //
+            // **The anchor is the reply's first row, whatever that row is.** A reply with words
+            // anchors on the `agent` note; a reply of calls alone anchors on its first `CALL`,
+            // which is recorded here rather than in `work` so the reasoning has something to name.
+            // The replay takes whichever row opens the turn, so neither shape is a special case
+            // there.
+            var anchor = 0
+            if (reply.text.isNotBlank()) anchor = log.note("agent", reply.text)
+            if (anchor == 0 && reply.calls.isNotEmpty()) anchor = log.call(reply.calls.first().tool, reply.calls.first().args)
+            if (anchor != 0 && reply.thinking.isNotBlank()) log.thinking(anchor, reply.thinking)
 
             // **Words and no calls is the ending**, and it is the only one. There used to be a
             // second: `ask` and `conclude` were tools the model called to end a turn, with a rule
@@ -640,7 +655,7 @@ class Agent(
             // the agent saying something and calling nothing.
             if (reply.calls.isEmpty()) return finish(wordsWithoutCalls(reply))
 
-            val moved = work(reply.calls)
+            val moved = work(reply.calls, firstAlreadyRecorded = if (reply.text.isBlank()) anchor else 0)
             if (moved) idle = 0 else idle++
             progress()
         }
@@ -745,11 +760,15 @@ class Agent(
     }
 
     /** Runs a reply's calls, and says whether any of them changed the project. */
-    private fun work(calls: List<Call>): Boolean {
+    private fun work(calls: List<Call>, firstAlreadyRecorded: Int = 0): Boolean {
         val before = changedFiles()
         var changed = false
-        for (call in calls) {
-            val id = log.call(call.tool, call.args)
+        for ((index, call) in calls.withIndex()) {
+            // **The first call may already be on the record**, because it is what the reply's
+            // reasoning was anchored to when the reply had no words. Recording it again would put
+            // two rows for one call and the replay would send two calls for one answer.
+            val id = if (index == 0 && firstAlreadyRecorded != 0) firstAlreadyRecorded
+                     else log.call(call.tool, call.args)
             Trace.note("agent", "$project call ${call.tool} #$id")
             // **Published before the tool runs**, so a slow call is visible while it is slow.
             onPage(Live(id = id, tool = call.tool, asked = call.args))
@@ -1218,7 +1237,13 @@ class Agent(
                 // message calls a tool with no answer is refused by every endpoint. Their
                 // words are the ASK/CONCLUDE row, which is added below as the agent's own
                 // message; that is the seam an answer needs.
-                AgentLog.CALL -> calls.add(Call(callId(row.id), row.name, row.body))
+                AgentLog.CALL -> {
+                    // **A reply of calls alone has no `agent` note to anchor its reasoning to**, so
+                    // its first call is the turn's opening row. Only the first: the rest belong to
+                    // the same turn and must not take the id back.
+                    if (calls.isEmpty()) replyId = row.id
+                    calls.add(Call(callId(row.id), row.name, row.body))
+                }
                 AgentLog.GOT -> {
                     flush()
                     // **The result says which call it answers.** It used to be inferred: a queue of

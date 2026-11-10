@@ -455,6 +455,12 @@ object AgentChat {
                             ),
                         )
                     }
+                    // **The two markers that say why the conversation got shorter.** They are in
+                    // the context now, because the model has to know its own compaction happened,
+                    // but they are a fact *about* the conversation rather than a message in it —
+                    // drawing them as bubbles would put the app's bookkeeping in the same column as
+                    // the agent's work, which is what the notices were moved out of.
+                    "trimmed", "forgot" -> Unit
                     // Anything else the app or the agent noted: "stopped" and its reason, most of
                     // all. It is the only thing a failed turn has to say, so it is drawn.
                     else -> out.add(
@@ -596,6 +602,10 @@ object AgentChat {
                         // answer it belongs to. A person reads what the agent said; the reasoning is
                         // sent back to the provider and belongs in the footer's token count.
                         AgentLog.THINKING_NAME -> Unit
+                        // **Why the conversation got shorter, in the context but not on the page.**
+                        // Same rule as the bubble path above: the model has to know, a reader of
+                        // the chat does not need a page for it.
+                        "trimmed", "forgot" -> Unit
                         "agent" -> {
                             // **Every thing the agent said is a page, not just the last one.**
                             //

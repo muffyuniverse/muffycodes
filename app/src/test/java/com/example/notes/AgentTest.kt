@@ -879,6 +879,43 @@ class AgentTest {
     }
 
     @Test
+    fun `a reply of calls alone still carries its reasoning back`() {
+        // **THE LOOPY-AGENT BUG.** The operator: "that is why agents were so loopy when they used
+        // only tool calls - they were losing their mind".
+        //
+        // `log.thinking` used to sit inside `if (reply.text.isNotBlank())`, on the theory that a
+        // reply of calls alone "is replayed from its calls". It is not: the assistant turn is built
+        // from the calls AND carries `reasoning_content`, so a call-only reply's reasoning was
+        // dropped. The model then got its own decision back with the working erased and re-derived
+        // it - which is what a loop looks like from outside.
+        //
+        // **The falsifier is the second request, not the row.** A test that only checked the row
+        // existed would pass with the replay still broken; this asserts what the provider is sent.
+        val door = ScriptedDoor(
+            // No words at all, one call, and the reasoning that produced it.
+            Reply(
+                text = "",
+                calls = listOf(call("read", """{"path":"milk.txt"}""")),
+                thinking = "I need to see what is in the file before I change it.",
+            ),
+            Reply("it says two litres"),
+        )
+        val agent = agent(door)
+        agent.burst("check the milk")
+
+        val second = door.asked.getOrNull(1) ?: error("the agent never made a second request")
+        val opening = second.messages.firstOrNull { it.role == "assistant" && it.calls.isNotEmpty() }
+        assertNotNull("the call-only turn is in the second request", opening)
+        assertEquals(
+            "and it carries the reasoning that made it",
+            "I need to see what is in the file before I change it.",
+            opening!!.thinking,
+        )
+        assertEquals("with no words invented for it", "", opening.text)
+        assertEquals("and the call it made", 1, opening.calls.size)
+    }
+
+    @Test
     fun `the reasoning goes back on the assistant turn, and never as words`() {
         // **The 400 in the operator's trace**: "The `reasoning_content` in the thinking mode must be
         // passed back to the API". The app used to keep the reasoning out of the conversation on
@@ -4255,11 +4292,14 @@ class AgentTest {
     // them in; this one goes reply -> loop -> file -> bubble, which is the path a real turn takes.
 
     @Test
-    fun `a reply is charged to the row its words were written to`() {
-        // **The numbers arrive with the end of the stream and the row was written before it**, so
-        // the accounting is a second row naming the first. Fails if the usage is dropped between the
-        // door and the record - which is the state this replaced: `Bubble.output` declared, drawn,
-        // and set by nobody.
+    fun `a door that reports usage writes no accounting row, because the request log has it`() {
+        // **Cost left the chat on 2026-11-10.** `RequestDb.requests` holds `prompt`, `cached`,
+        // `completion`, `reasoning`, `said`, `thinking`, the model, the project and the finish
+        // reason; the record's `usage` row held two of those and none of the context.
+        //
+        // It existed only because the footer is keyed by a row id and the request log is keyed by
+        // an instant. The footer is gone, so the row is gone, and this asserts the record stays
+        // free of it even when the door reports a full usage block.
         val door = ScriptedDoor(
             Reply(
                 text = "the file says four.",
@@ -4270,62 +4310,47 @@ class AgentTest {
         )
         agent(door).burst("how many litres?")
 
-        val said = rows().single { it.kind == AgentLog.NOTE && it.name == "agent" }
-        val usage = rows().single { it.kind == AgentLog.USAGE }
-        assertEquals("the words are the row it accounts for", said.id, usage.answers)
-
-        // **And the footer would draw them after a reopen**, which is the point of persisting them:
-        // the bubble is rebuilt from the file with the reply long gone from memory.
-        val bubble = AgentChat.box(rows())!!.bubbles.single { it.caption == "agent" }
-        assertEquals("output", 2400L, bubble.output)
-        assertEquals("thinking", 9100L, bubble.thinking)
-    }
-
-    @Test
-    fun `a door that reports no usage writes no accounting row`() {
-        // **A row of zeroes would claim the request was free.** A scripted door, a provider that sent
-        // no `usage` block, and every log written before this existed all look like this.
-        agent(ScriptedDoor(Reply("nothing to do."))).burst("look")
-
         assertTrue(
-            "no accounting rather than a zero",
-            rows().none { it.kind == AgentLog.USAGE },
+            "the words are on the record",
+            rows().any { it.kind == AgentLog.NOTE && it.name == "agent" },
         )
-        val bubble = AgentChat.box(rows())!!.bubbles.single { it.caption == "agent" }
-        assertEquals("and the footer draws no count", 0L, bubble.output)
-        assertEquals("for either", 0L, bubble.thinking)
+        assertTrue(
+            // **Not "no accounting yet" but "no accounting here"** - the numbers went to SQL, which
+            // is where a question about cost is asked.
+            "and no accounting row beside them",
+            rows().none { it.name == "usage" },
+        )
     }
 
     @Test
-    fun `a call-only reply writes no accounting, because it said nothing`() {
-        // The numbers ride on the words. A reply that only calls tools has no words, so nothing is
-        // charged to a bubble — the alternative would be inventing a row for a call, and then the
-        // same figure would appear on two bubbles of one turn.
+    fun `a call-only reply keeps its reasoning, which is what the loop was`() {
+        // **The record, not the request.** The request-side falsifier is in `messages()`'s own
+        // test; this one is the half that would still pass if the replay were fixed by inventing
+        // the reasoning rather than reading it.
+        //
+        // The operator's diagnosis: "that is why agents were so loopy when they used only tool
+        // calls - they were losing their mind". A call-only reply anchors its reasoning on its
+        // first `CALL` row, because it has no `agent` note to anchor on.
         val door = ScriptedDoor(
-            // **A reply with no words**, so there is nothing for the numbers to ride on. The tool
-            // is a real one: a name the suite does not know would be a refusal, and a refused call
-            // is a different test.
             Reply(
                 text = "",
                 calls = listOf(call("search", "{}", "c1")),
-                usage = JSONObject("""{"completion_tokens":900}"""),
+                thinking = "the folder listing will tell me which file to open.",
             ),
-            // **And a second reply that does speak, with its own numbers.** Without them this test
-            // would pass for the wrong reason: nothing would be written by either reply, and "no
-            // row" would be indistinguishable from "the call-only reply was correctly skipped".
-            Reply(
-                text = "done.",
-                usage = JSONObject("""{"completion_tokens":700}"""),
-            ),
+            Reply("nothing there."),
         )
         agent(door).burst("what is in the folder?")
 
-        val usage = rows().filter { it.kind == AgentLog.USAGE }
-        assertEquals("one accounting, for the reply that spoke", 1, usage.size)
-        val agent = AgentChat.box(rows())!!.bubbles.filter { it.caption == "agent" }
-        // **700, not 900.** The call-only reply was charged 900 and had nowhere to put it, so the
-        // figure on the words is the speaking reply's own - which is the whole claim.
-        assertEquals("the words carry their own reply's numbers", 700L, agent.single().output)
+        val reasoning = rows().single { it.name == AgentLog.THINKING_NAME }
+        assertTrue(
+            "the reasoning is on the record: ${reasoning.body}",
+            reasoning.body.contains("which file to open"),
+        )
+        val call = rows().first { it.kind == AgentLog.CALL }
+        assertTrue(
+            "and it names the call that opened the turn: ${reasoning.body}",
+            reasoning.body.contains("reply=${call.id}"),
+        )
     }
 
 

@@ -738,8 +738,13 @@ class AgentLogTest {
             log.contextRows().none { it.body == "task 1" || it.body == "task 2" || it.body == "task 3" },
         )
         assertEquals(
-            "with one marker per trim, and none of them in the context: a marker is the app's row",
-            0,
+            // **In the context, so the model knows its conversation was shortened.** This asserted
+            // the opposite until 2026-11-10: the marker was `app`, the model was told nothing, and
+            // rows vanished between one request and the next with no explanation - which is how an
+            // agent comes to re-read a file it has already read. One marker per trim, and it is
+            // the only row that survives to say so.
+            "one marker per trim, and it is in the context",
+            1,
             log.contextRows().count { it.name == "trimmed" },
         )
         assertEquals(
@@ -879,10 +884,11 @@ class AgentLogTest {
             log.contextRows().filter { it.kind == AgentLog.TOLD }.map { it.body },
         )
         assertTrue(
-            // The marker is the app's own row, so the model is not told about it: what the model
-            // sees is simply a shorter context, which is the truth.
-            "the marker says how many, and is the app's",
-            log.rows().any { it.name == "trimmed" && it.ctx == AgentLog.APP },
+            // **The model is told.** The operator's rule: "trim context should be visible, same as
+            // with when model does the compaction". It was `app` and therefore invisible, which
+            // made the app's own compaction indistinguishable from the model having misremembered.
+            "the marker says how many, and the model is sent it",
+            log.rows().any { it.name == "trimmed" && it.ctx == AgentLog.IN },
         )
         assertEquals(
             "while the evidence keeps them all",

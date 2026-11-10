@@ -582,11 +582,22 @@ class AgentLog private constructor(
             // those rows again on every trim. Each row reports its own act; the total is the sum,
             // computed wherever it is wanted.
             val said = "$dropped rows: the context was over its limit"
-            val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "trimmed", said)
+            // **The marker is `in`, and that is a reversal.** It was `app` on the theory that the
+            // model should not be told about bookkeeping — which made the app's own compaction
+            // **invisible to the model**: rows vanished from its context between one request and
+            // the next, with nothing saying so, and an agent whose conversation silently shortened
+            // would re-read files it had already read and repeat calls it had already made.
+            //
+            // **The operator's ruling**: "trim context should be visible, same as with when model
+            // does the compaction". A model's own `forget` writes a `forgot` marker for the same
+            // reason — the record should say why the conversation got shorter.
+            //
+            // **It costs one row against the limit it reports on**, which is the honest trade: a
+            // budget that cannot afford its own accounting is a budget that was already exceeded.
+            val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, IN, 0, "trimmed", said)
             // **Taken out, not taken away.** The rows the app trims stay in the record, marked
             // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
-            // never be read as something the model decided. And the marker is `app` too, so it does
-            // not count against the limit it is reporting on.
+            // never be read as something the model decided.
             val keptIds = keptRows.map { it.id }.toSet()
             val ids = inContext.filter { it.id !in keptIds }.map { it.id }.toSet()
             // **Every row, not just the context's.** The file is the record: rewriting it from the
@@ -843,7 +854,13 @@ class AgentLog private constructor(
         val rows = rows()
         if (forgetProblem(rows, ids) != null) return 0
         val said = ids.sorted().joinToString(",")
-        val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "forgot", said)
+        // **`in`, so the model sees its own compaction.** It was `app`, which meant the agent was
+        // asked to clear up, did it, and was then sent a context whose rows had vanished with
+        // nothing saying why — so the next turn could re-read what it had just removed. The
+        // operator's rule for both trims and this one: the record should say why the conversation
+        // got shorter. The marker names the ids, which is the same handle the model used to name
+        // them.
+        val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, IN, 0, "forgot", said)
         val changed = rows.map { if (it.id in ids) it.flipped(OUT) else it }
         store(changed, marker)
         ids.size
