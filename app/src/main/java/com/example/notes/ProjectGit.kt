@@ -350,7 +350,7 @@ class ProjectGit(
                     // now would send a tree that is missing exactly the work the person
                     // was trying to save, and report the sync as done.
                     if (!made.ok) {
-                        return GitService.RemoteResult(
+                        return@use GitService.RemoteResult(
                             "Nothing was pushed, because the changes could not be committed: " +
                                 made.error,
                             false,
@@ -377,7 +377,10 @@ class ProjectGit(
                 // credential for is a sentence, not a server's 401 about a key never offered.
                 val remote = remoteUrlOf(it)
                 val (token, user) = when (val answer = credentialFor(project, remote)) {
-                    is GitCredentials.Answer.Say -> return GitService.RemoteResult(answer.why, false)
+                    // **`return@use`**, because this is inside `repo.use { }` — a bare `return` here
+                    // is a non-local return from `syncUnder`, which Kotlin refuses: the lambda is not
+                    // inline. CI found this one; it is the same shape as the two above.
+                    is GitCredentials.Answer.Say -> return@use GitService.RemoteResult(answer.why, false)
                     is GitCredentials.Answer.Use -> answer.token to userOf(answer)
                     GitCredentials.Answer.None -> null to gitUser()
                 }
@@ -443,7 +446,10 @@ class ProjectGit(
                         // send a tree missing exactly the work the person was trying to save, and
                         // report the push as done.
                         if (!made.ok) {
-                            return GitService.RemoteResult(
+                            // **`return@use`, not `return`.** This block is a lambda argument to
+                            // `repo.use`, and a bare `return` inside it is not allowed — the same trap
+                            // that makes a `return@hold` inside `RepoLocks.hold` necessary.
+                            return@use GitService.RemoteResult(
                                 "Nothing was pushed, because the changes could not be committed: " +
                                     made.error,
                                 false,
