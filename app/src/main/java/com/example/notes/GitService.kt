@@ -632,6 +632,19 @@ object GitService {
             emptyList()
         }
 
+    /**
+     * Every path git ignores, as repository-relative paths.
+     *
+     * **One status call for the whole project**, because the row asks about every entry on screen and
+     * a call per row would walk the working tree once per file. The caller maps them onto the files
+     * it is drawing.
+     */
+    fun ignoredPaths(repo: Repository): List<String> = try {
+        Git(repo).use { git -> git.status().call().ignoredNotInIndex.map { it.trimEnd('/') } }
+    } catch (t: Throwable) {
+        emptyList()
+    }
+
     fun isIgnored(repo: Repository, path: String): Boolean = try {
         Git(repo).use { git ->
             // **`ignoredNotInIndex`, not "ignored".** JGit has no plain `ignored` set; this one is
