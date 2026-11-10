@@ -97,6 +97,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.workspace!!.projectDir(project).mkdirs()
         scene.viewModel.chatDoor = { door }
         scene.viewModel.openChat(project)
+        // **And a form, because a chat with none refuses to send** (2026-11-10). The model, the effort
+        // and the three context numbers used to come from `wiredFor`'s per-scope chain; they are the
+        // form's fields now, so a test that expects a request has to say which form makes it. The
+        // shipped one is the honest choice: it is what a fresh install has.
+        scene.viewModel.chooseForm(Schemas.UNIT.substringBeforeLast('.'))
     }
 
     private fun record(project: String): AgentLog =

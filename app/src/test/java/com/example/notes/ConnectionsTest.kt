@@ -194,6 +194,11 @@ class ConnectionsTest {
      * The lookup, **keyed by scope and kind** — because that is what a stored row is: a row's kind is
      * in its key and nowhere else. A fake that ignored the kind would have hidden the bug this class
      * is about, which is exactly what the suite is for.
+     *
+     * **A name that is not a kind answers null here, exactly as `spendable` does.** A fallback to
+     * `ConnKind.GIT` made this helper answer for `auth: llm`, which is the name `ConnKind.LLM` took with
+     * it — so the test asserting that `llm` is nobody's passed only because the *fake* was more
+     * permissive than the app. That is the shape of a test that proves its own bug.
      */
     private fun named(
         name: String,
@@ -201,14 +206,17 @@ class ConnectionsTest {
         rows: Map<Pair<SecretScope, ConnKind>, Connection>,
         project: String? = "acme",
         branch: String? = "feature",
-    ): Connection? = namedConnection(
-        name = name,
-        host = host,
-        kind = kindFor(name) ?: ConnKind.GIT,
-        project = project,
-        branch = branch,
-        at = { scope, kind -> rows[scope to kind] },
-    )
+    ): Connection? {
+        val kind = kindFor(name) ?: return null
+        return namedConnection(
+            name = name,
+            host = host,
+            kind = kind,
+            project = project,
+            branch = branch,
+            at = { scope, of -> rows[scope to of] },
+        )
+    }
 
     @Test
     fun `a connection is invisible to auth unless the checkmark is on`() {
