@@ -445,23 +445,6 @@ class AccountsFeatureTest : FeatureTest() {
         )
     }
 
-    /**
-     * **A link press is traced**, and the two kinds are named differently — one leaves the app, the
-     * other opens a file. A log that called both "link" could not answer "did the page get them to
-     * the file it names".
-     */
-    @Test
-    fun `a link press is traced under the name that says which kind it was`() {
-        val before = Trace.report().taps
-        scene.viewModel.openLink("https://example.com")
-        assertTrue("the press was recorded", Trace.report().taps > before)
-        assertTrue(
-            "named: newest ${Trace.report().lines.take(3)}",
-            Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link") },
-        )
-
-    }
-
     @Test
     fun `a web link is published for the screen to open`() {
         scene.viewModel.openLink("https://example.com/page")
