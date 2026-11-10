@@ -494,7 +494,15 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.project("Shopping")
         scene.open("Shopping")
-        scene.file("notes.txt", "unsent\n")
+        // **Written, not `scene.file`** — that helper ends by pressing Sync (a version is what most
+        // callers want), and a synced file is exactly what this test must *not* have. What is being
+        // tested is the guard over unsent work, so the work is left unsent on purpose.
+        val file = File(scene.workspace!!.repoOf("Shopping"), "notes.txt")
+        // **Through the editor**, because that is the door a save goes through — a bare write is a
+        // file on disk with nothing staged, which is a different row and not this guard's question.
+        scene.openEditor(file)
+        scene.saveEditor("unsent\n")
+        scene.closeEditor()
         scene.viewModel.message = null
 
         scene.viewModel.tagRelease("1.5")
@@ -648,8 +656,14 @@ class ProjectsFeatureTest : FeatureTest() {
         )
 
         scene.viewModel.ignoreInGit(file)
-        scene.await("the ignore to be committed", 30_000) {
-            !scene.repo("groceries").tracked().contains("secret.txt")
+        // **"Out of the repository" is a question about the index now**, because the untrack stages and
+        // the commit happens at a push (2026-11-10). Asking the newest commit would wait for a commit
+        // that is not coming — and worse, would keep saying "still tracked" for work the app had
+        // already done.
+        scene.await("the ignore to take it out of the index", 30_000) {
+            org.eclipse.jgit.api.Git.open(ws.repoOf("groceries")).use { git ->
+                git.repository.readDirCache().getEntry("secret.txt") == null
+            }
         }
 
         // And now the edit that used to sneak in.
@@ -760,14 +774,20 @@ class ProjectsFeatureTest : FeatureTest() {
         git.commitOutcome("groceries", "a save")
 
         scene.viewModel.ignoreInGit(file)
-        scene.await("the ignore to be committed", 30_000) {
-            !scene.repo("groceries").tracked().contains("notes.txt")
+        // **The index, not the newest commit**: the untrack is staged and the commit is made at a push
+        // (2026-11-10), so asking the history would wait for a commit that is not coming.
+        scene.await("the ignore to take it out of the index", 30_000) {
+            org.eclipse.jgit.api.Git.open(ws.repoOf("groceries")).use { git ->
+                git.repository.readDirCache().getEntry("notes.txt") == null
+            }
         }
 
         // The same button, pressed again, because the state is what decides the direction.
         scene.viewModel.ignoreInGit(file)
         scene.await("the path to be tracked again", 30_000) {
-            scene.repo("groceries").tracked().contains("notes.txt")
+            org.eclipse.jgit.api.Git.open(ws.repoOf("groceries")).use { git ->
+                git.repository.readDirCache().getEntry("notes.txt") != null
+            }
         }
 
         val said = scene.viewModel.message.orEmpty()

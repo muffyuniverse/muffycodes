@@ -47,7 +47,7 @@ class HistoryFeatureTest : FeatureTest() {
      * rather than recording anything — which is the rule these tests are not about.
      */
     private fun delete(file: File) {
-        delete(file)
+        scene.viewModel.delete(file)
         scene.sendIfWaiting(file)
     }
 

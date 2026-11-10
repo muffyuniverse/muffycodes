@@ -4114,7 +4114,13 @@ class AppViewModel @JvmOverloads constructor(
     fun chooseForm(name: String) {
         val ws = workspaceFor("chosen") ?: return
         val project = chatProject ?: return
-        val path = Schemas.unitPath(ShapeKind.CHAT, name)
+        // **The label is the name without its extension; the file has it.** `chatForms` strips
+        // `.jsonc` so the picker reads "deepseek-1017" rather than a file name, so the name that comes
+        // back here is a *label* — and appending it to a path unchanged looked for a file that does not
+        // exist. A form that is already named with its extension is left alone, so a caller that passed
+        // the file name still works.
+        val file = if (name.endsWith(".jsonc")) name else "$name.jsonc"
+        val path = Schemas.unitPath(ShapeKind.CHAT, file)
         if (Schemas.read(ws, path, ShapeKind.CHAT).isFailure) {
             message = "There is no request form called \"$name\" in ${Schemas.REQUESTS}/" +
                 "${ShapeKind.CHAT.folder}/."
@@ -4122,7 +4128,7 @@ class AppViewModel @JvmOverloads constructor(
         }
         Trace.tap("choose form", name)
         Schemas.setPointer(ws.accountDir, project, chatBranch, path)
-        message = "This chat asks with $name."
+        message = "This chat asks with $file."
         refresh()
     }
 

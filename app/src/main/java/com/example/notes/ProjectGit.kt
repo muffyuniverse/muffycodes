@@ -279,16 +279,37 @@ class ProjectGit(
         }
 
     /**
-     * **Stages everything, and commits nothing** — what a save does now.
+     * **Stages everything — and, for a project with nowhere to push, commits it.**
      *
-     * The same hold and the same `inFlight = false` reasoning as [commitOutcome], because it is the
-     * same write to the same index. Answers false when the index could not be written, so a save whose
-     * work is on disk but not staged says so rather than reporting a clean save.
+     * The operator's rule is that a save stages and a push commits (2026-11-10): a commit is a version a
+     * person decided on, and ten saves are one version. **But a local project has no push.** It stays on
+     * this phone by design, so if a save only staged, its history would never grow at all — and "go back
+     * to how it was" would be unavailable on exactly the projects nobody can recover from anywhere else.
+     * So the rule reads: *the commit happens where the version is decided*, and for a local project that
+     * is the save, because there is no later moment.
+     *
+     * The same hold and the same `inFlight = false` reasoning as [commitOutcome], because it is the same
+     * write to the same index. Answers false when the index could not be written, so a save whose work
+     * is on disk but not staged says so rather than reporting a clean save.
      */
     fun stage(project: String): Boolean =
         RepoLocks.hold(repoDir(project), "stage") {
             val repo = open(project) ?: return@hold false
-            repo.use { GitService.stageAll(it, inFlight = false) }
+            repo.use {
+                val staged = GitService.stageAll(it, inFlight = false)
+                // **A local project commits here, because it has no push.** See this function's doc:
+                // the version is made where a person decides it, and for a project that never leaves
+                // the phone that decision is the save.
+                //
+                // **The repository we already hold, not `isLocal(project)`** — that opens the same
+                // repository again, and `RepoLocks` is a reentrant lock per directory, so the second
+                // open inside this hold is a second handle on a repository whose index is being
+                // written. The question is the config's own: an `origin` with no url is no address.
+                if (staged && remoteUrlOf(it).isNullOrBlank()) {
+                    GitService.commitEverything(it, CommitMessage.SAVE, authorProvider(), inFlight = false)
+                }
+                staged
+            }
         }
 
     @JvmOverloads
