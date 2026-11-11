@@ -265,297 +265,21 @@ fun SettingsScreen(
             // the app trimming, and it is off unless somebody asks for it: an app that cuts a
             // conversation on its own loses the thing the person was working on, and the agent is
             // the one supposed to be choosing what to forget.
+            // **A heading with one sentence under it, because the numbers it used to hold left.**
+            // Compaction is a property of a chat — which model, what effort, how much context — so
+            // the three limits live in the request form beside the model. What stays here is the one
+            // thing true of every count on this screen: they are estimates.
             Text("Context", style = MaterialTheme.typography.titleMedium)
-            // **One line, on the operator's instruction**: "on token calculation explanation just
-            // write that 'token counts are approximate' - no need for lengthy paragraphs". The
-            // paragraph explained the app's own arithmetic to a person who wanted to set a limit;
-            // the one thing that changes how they read every number below is that the numbers are
-            // estimates, and that is now the whole sentence.
             Text(
                 "Token counts are approximate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // **Three numbers: one destination, two triggers.** The operator's correction
-            // (2026-10-29): "both forget and trim compactions should have same target but different
-            // triggers (so that forget triggers much earlier)". The target is where the context
-            // should END UP; the two triggers are where each hand starts working. One destination
-            // means whichever acts, the context lands in the same place.
-            //
-            // **Forget first, trim second, and the target below them** - written in the order the
-            // two hands act, and **not an order the app enforces any more**. The numbers are used
-            // as they are typed; a target above a trigger asks for something the trigger already
-            // passed, and the app keeps asking until the context is under the trigger. A trim set
-            // BELOW the forget point is a mode rather than a mistake: the agent is never asked, so
-            // the app does all the compacting, which is what somebody who would rather the app
-            // decide is choosing.
-            // **The three context numbers left this screen, and the sentence that explained them
-            // went with them.** A compaction limit is a property of a *chat* — which model is asked,
-            // with what effort, and how much context it may carry — so it lives in the request form
-            // beside the model and the effort. Keeping a copy here would be the second answer to one
-            // question that N6 spent a commit deleting elsewhere.
-            //
-            // The warning that read "the app trims before the agent is ever asked" was a comparison
-            // of two numbers a person typed. Those numbers are now two fields of a file, and the
-            // form is read where it is written; a screen comparing them from a different file could
-            // only ever be describing a file it does not own.
-
-
-            // **The fate lines are gone, on the operator's instruction**: "settings context
-            // block: remove what has happened to the context element and its fields - not needed".
-            //
-            // They answered a question the limits above do not raise: a person setting a limit
-            // wants to know where it is, not the history of the last time it fired. What a
-            // compaction did is in the record, with a timestamp, which is where a person checking
-            // it will look anyway - the screen was offering a summary of a file they can read.
             RowDivider()
 
-            // ---- the two clocks: work on this phone, and the wait for the model ----
-            //
-            // **Two groups, because they measure two different things and one label each was not
-            // enough.** Reported from the live log: "how wait for the model is different from stop
-            // command after? is it how long it takes to produce first response?" - which is what
-            // three timeouts in a row, in two units, with "wait" and "stop" used for both, will
-            // always produce. The answer is not a sentence in a description: it is that these numbers
-            // bound different machines, and the screen has to say which is which before it says how
-            // long.
-            //
-            // **Everything is seconds now.** The model wait was in minutes and the command limits in
-            // seconds, eight lines apart, with nothing saying they were different scales - so "4" and
-            // "180" looked like the same kind of number.
-            // **Named for what it bounds, in the operator's words.** Report: "rename while this app
-            // works on this phone into command execution timeouts. fields: foreground command
-            // timout, background command timeout". The old heading described the phone rather than
-            // the thing being limited, which is why it needed a paragraph to say what it meant.
-            Text("Command execution timeouts", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "How long work on this phone may take. Blank means no limit.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Foreground command timeout (seconds)",
-                value = settings.foregroundSeconds,
-                placeholder = "no limit",
-                onValueChange = { settings.keepForeground(it) },
-            )
-            Text(
-                text = if (settings.foregroundSeconds <= 0) {
-                    "Now: the turn waits for every command to finish."
-                } else {
-                    // **This sentence used to say "nothing half-written is kept", and it stopped
-                    // being true the moment a slow command was handed to the background.** The
-                    // report that changed it: "when command takes more than the timeout, agent gets a
-                    // result that tells that this command takes longer than the timeout allows and
-                    // will be returned on one of the next turns". A setting screen that describes the
-                    // old behaviour is worse than one that describes none.
-                    "Now: past ${settings.foregroundSeconds} s it carries on in the background and " +
-                        "its result arrives with a later turn."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Background command timeout (seconds)",
-                value = settings.backgroundSeconds,
-                placeholder = "never",
-                onValueChange = { settings.keepBackground(it) },
-            )
-            Text(
-                text = if (settings.backgroundSeconds <= 0) {
-                    "Now: a background command runs until it finishes."
-                } else {
-                    // **This one really does stop**, and the difference from the row above is the
-                    // whole reason both exist: a command that already left the conversation has
-                    // nowhere further to be handed to, so past this it dies and says why.
-                    "Now: past ${settings.backgroundSeconds} s it is stopped for good, and the file " +
-                        "it was writing says so."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            RowDivider()
+            ClocksSection(settings)
 
-            // ---- the other clock: the wait for the model ----
-            // **Named for the thing that is slow, not for what the app is doing meanwhile.** Report:
-            // "while it talks to the model rename to model response timeouts", and then the three
-            // fields by name: "connection timeout, stalling timeout, reconnect timeout".
-            Text("Model response timeouts", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "How long the app waits for the model. Blank means the default.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // **Two fields, not three, because two clocks became one.** The operator merged the
-            // connection wait and the stalling wait: "lets merge connection and stalling timeouts
-            // into a single response timeout that tracks time between request and first response
-            // packet" - and, asked what then bounds a model that dies mid-answer, "one number that
-            // also restarts per packet".
-            //
-            // So this is an idle timeout in the strict sense, and the sentence under it says the one
-            // thing a person needs to know about that: it restarts on every packet, so a slow answer
-            // is safe and a dead one is not.
-            LengthField(
-                label = "Response timeout (seconds)",
-                value = settings.responseSeconds,
-                placeholder = "${SettingsStore.DEFAULT_RESPONSE_SECONDS}",
-                onValueChange = { settings.keepResponse(it) },
-            )
-            Text(
-                text = "Now: ${settings.responseSeconds} s of silence ends the request - before the " +
-                    "first packet or between any two. A steady answer is never cut off.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            // **The other half of the same question**, and it is a different number: the two above
-            // bound a single request, and this bounds how long a *failure* is retried before the
-            // agent stops and asks for help. A dropped request is not a stopped agent — the ladder
-            // at one, two and four seconds exists so a tunnel does not end a session — so the
-            // window is how long that is allowed to go on.
-            LengthField(
-                label = "Reconnect timeout (seconds)",
-                value = settings.reconnectSeconds,
-                placeholder = "${SettingsStore.DEFAULT_RECONNECT_SECONDS}",
-                onValueChange = { settings.keepReconnect(it) },
-            )
-            // **Said to the point, on the operator's instruction**: "in reconnect 'now' description
-            // write that it is about handling error responses - make this description to the point".
-            // The old sentence explained what an idle agent is, which is a different subject; this
-            // one says what the number is for.
-            Text(
-                text = "Now: error responses are retried for ${settings.reconnectSeconds / 60} min " +
-                    "before the agent stops and asks for help. An account-level error such as an " +
-                    "empty balance is retried here, not on another provider.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            // **The sentence that used to be here is gone, and its going is the point.** It said a
-            // dropped request and a model thinking hard look the same from here, because the
-            // provider said nothing until the answer was complete. That was true of a non-streamed
-            // request and it is not true now: the answer arrives as it is written, so the two are
-            // different silences with a clock each, and leaving the paragraph behind would be the
-            // screen apologising for a limitation the app no longer has.
-            LengthField(
-                label = "One result may carry (tokens)",
-                value = settings.maxResult,
-                placeholder = "6000",
-                onValueChange = { settings.keepMaxResult(it) },
-            )
-            // **No clamp line any more.** A result bigger than the model's window used to be
-            // reduced to that window and said so; the number is now used as written, and a server
-            // that will not take it says so itself at the request that carries it.
-            RowDivider()
-
-            // ---- how much of the record is kept ----
-            // **The other half of Context, and it is a different act.** Clearing up takes a row out
-            // of the conversation and leaves it in the record; this is where the record itself stops,
-            // and what it drops is dropped for good. Two numbers were reported as one confusion —
-            // "where is max session log size? because context trim just switches row out of context,
-            // and session log limit removes them altogether" — so they are named apart here.
-            // ---- keepalive, which is about money rather than a bound ----
-            //
-            // **Its own section, because it is not a timeout.** The two groups above bound how long
-            // something may take; this one decides whether the app spends requests at all. A waiting
-            // conversation is re-sent so the provider's cache stays warm, and the person pays for
-            // that in requests and battery, so the switch, the interval and the ceiling are theirs.
-            //
-            // **"Keepalive", because that is what it does.** The agent used to say `wait` and the app
-            // came back to ask again; the name described the model's act and hid the person's bill.
-            // Reported from the live log: "what is agent pace description? I totally dont understand
-            // what those words mean".
-            // ---- the browser, which is a capability rather than a bound ----
-            //
-            // **Its own section, because the switch is not a limit.** Everything above says how much
-            // or how long; this says *where the agent may go*, and the default is the public
-            // internet. A page that could steer the agent at `192.168.1.1` has reached the router
-            // without either of them asking, so the private ranges are granted by a person rather
-            // than assumed by the app.
-            //
-            // **The agent browses with the phone's own Chromium**, which costs nothing to ship and
-            // is updated by the Play Store independently. There is no switch for that: a phone
-            // without a WebView gets a sentence saying so, and one with it can read the web.
-            Text("The web", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "The agent can read a web page and photograph it, using the browser this phone " +
-                    "already has. Its answers are saved under agent/browser/.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.keepBrowsePrivate(!settings.browsePrivate) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Let it read this phone's network", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Off, it may read the public web and nothing else. On, it may also read " +
-                            "this phone (127.0.0.1) and addresses on your home network — a NAS, a " +
-                            "router, a server. Turn it on only if you want that.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.browsePrivate,
-                    onCheckedChange = { settings.keepBrowsePrivate(it) },
-                )
-            }
-            LengthField(
-                label = "A page may take (seconds)",
-                value = settings.browseSeconds,
-                placeholder = "${SettingsStore.DEFAULT_BROWSE_SECONDS}",
-                onValueChange = { settings.keepBrowseSeconds(it) },
-            )
-            Text(
-                text = "Now: ${settings.browseSeconds} s per page. Past that the page is reported " +
-                    "as too slow rather than left hanging.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            // **The download cap, next to the other network limits** because it is the same kind of
-            // number: a bound the person sets and the app enforces. It was a constant until the
-            // operator asked for it to be theirs — "a hundred" refused archives that were genuinely
-            // a dependency, and a cap nobody can change is the tool's opinion rather than the
-            // person's.
-            LengthField(
-                label = "One download may be (MB)",
-                value = settings.fetchMegabytes,
-                placeholder = "${SettingsStore.DEFAULT_FETCH_MB}",
-                onValueChange = { settings.keepFetchMegabytes(it) },
-            )
-            Text(
-                text = "Now: ${settings.fetchMegabytes} MB per download, between " +
-                    "${SettingsStore.MIN_FETCH_MB} and ${SettingsStore.MAX_FETCH_MB}. Larger is " +
-                    "refused with the size named rather than cut short, so a half-file never " +
-                    "arrives looking whole.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.keepHttp(!settings.httpAllowed) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Let it use the network", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "On, the agent can send a request to an address and keep the answer in " +
-                            "agent/http/ — a dependency tarball, a release asset, an API call, " +
-                            "anything a person gives it a link to. Off, the tool is not offered at " +
-                            "all rather than offered and refused. Reading a page is a different " +
-                            "tool, and is unaffected.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.httpAllowed,
-                    onCheckedChange = { settings.keepHttp(it) },
-                )
-            }
+            WebSection(settings)
             Text("Secrets the agent may use", style = MaterialTheme.typography.titleMedium)
             Text(
                 // **The rule that makes everything else true**, and it is the app's own now rather
@@ -576,369 +300,21 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Text("Keepalive", style = MaterialTheme.typography.titleMedium)
-            Row(
-                // **The whole row is the switch.** The words are the explanation and the switch is
-                // the act, and a person who tapped the words has said what they meant.
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { settings.keepWarm(!settings.keepAlive) },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Keep the conversation warm", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "While it waits for you the app re-sends the same conversation with a " +
-                            "one-token answer: nothing is written down, the agent does not act, and " +
-                            "your next sentence costs a cache read instead of a fresh prompt.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.keepAlive,
-                    onCheckedChange = { settings.keepWarm(it) },
-                )
-            }
-            if (settings.keepAlive) {
-                LengthField(
-                    label = "Warm it every (seconds)",
-                    value = settings.pollSeconds,
-                    placeholder = "240",
-                    onValueChange = { settings.keepPoll(it) },
-                )
-                Text(
-                    text = "Now: every ${settings.pollMs / 1000} s, and at most " +
-                        "${SettingsStore.MAX_POLL_SECONDS} s — past that the cache has already gone.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                LengthField(
-                    label = "For at most (minutes, blank = until you speak)",
-                    value = settings.warmMinutes,
-                    placeholder = "until you speak",
-                    onValueChange = { settings.keepWarmFor(it) },
-                )
-                Text(
-                    text = "Now: " + if (settings.warmMinutes <= 0) {
-                        "until you speak."
-                    } else {
-                        "for ${settings.warmMinutes} min. An hour is about where keeping it warm " +
-                            "stops being cheaper than letting it go cold."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-
-            // **The other ceiling, and it is outside the keepalive block on purpose.** That one
-            // decides how long the app pays to keep a conversation warm; this decides how long the
-            // session exists at all. A person may want an agent reachable all day and spend nothing
-            // keeping it warm, so a field inside `if (keepAlive)` would make one switch mean two.
-            LengthField(
-                label = "Switch off after waiting (minutes, blank = never)",
-                value = settings.waitMinutes,
-                placeholder = "never",
-                onValueChange = { settings.waitFor(it) },
-            )
-            Text(
-                text = "Now: " + if (settings.waitMinutes <= 0) {
-                    "an idle agent waits until you speak or stop it."
-                } else {
-                    "an agent that waits ${settings.waitMinutes} min switches itself off. " +
-                        "It says so in the strip, and nothing is lost: the record is on disk."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            KeepaliveSection(settings)
             RowDivider()
 
-            // **"Session log", not "The record".** The operator asked directly: "if 'the record'
-            // block means session log, then call it so". It does, and `agent/session.log` is the
-            // file's own name, so the label and the file now agree.
-            Text("Session log", style = MaterialTheme.typography.titleMedium)
-            // **Precise, on the operator's instruction**: "session log description is unreadable -
-            // make it precise: defines max session log size in tokens, removes oldest messages
-            // until session is under limit".
-            //
-            // The paragraph it replaces explained the *unit* and the difference from clearing up,
-            // which is background rather than the thing the field does. What a person needs before
-            // typing a number is the rule: what it bounds, and what it deletes.
-            Text(
-                "The most the session log may hold, in tokens. Over the limit, the oldest messages " +
-                    "are deleted until it is under it. Blank keeps everything.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Keep the session log under (tokens, blank = everything)",
-                value = settings.sessionTokens,
-                placeholder = "everything",
-                onValueChange = { settings.keepSession(it) },
-            )
-            RowDivider()
+            LogAndTraceSection(settings, viewModel, onOpenTrace)
 
-            // ---- how often a thing that needs a person says so ----
-            // The poll is the agent working; this is the app asking somebody to look at it. It
-            // stops the moment the thing is dealt with, which is why the number is an interval and
-            // not a count: a reminder that arrives while the question is still the newest thing on
-            // the screen is noise.
-            Text("Reminders", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "When it needs you — it asked something, or it stopped on its own — it says so, " +
-                    "and repeats at this interval until you deal with it. Empty says it once.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Repeat every (minutes)",
-                value = settings.remindMinutes,
-                placeholder = "once",
-                onValueChange = { settings.keepRemind(it) },
-            )
-            // **One rule, not two.** This block used to end with a `RowDivider()` and then the
-            // section rule - a faint line, a gap, then a heavier one, which reads as a mistake
-            // rather than as an ending. The section rule already ends the block, so the row rule
-            // is gone. Report: "reminders and running blocks have 2 horizontal lines under them".
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            ChatSection(settings)
 
-            // ---- what the app did ----
-            //
-            // Here rather than behind a long press, because the moment a person wants
-            // it is the moment something did not work, and hunting for the screen that
-            // explains it is the last thing they should have to do.
-            // **The report exists in every build, and it writes a file in only one of them.**
-            //
-            // The operator's confusion, and it was earned: *"why then release version has trace
-            // logging at all... confusing"*. A release build drew this button and a ring of events,
-            // and wrote nothing anywhere — so pressing Report produced a paste with no file behind
-            // it, on the build that cannot produce a file. Two different things called the same name.
-            //
-            // **Both stay, and the words say which is which.** The ring is a person's own account of
-            // what just happened, and it is worth having on any build. The file is the thing that
-            // makes a report *checkable*, and only a debug build has it.
-            TextButton(onClick = onOpenTrace) { Text("What the app did") }
-            Text(
-                if (BuildConfig.DEBUG) {
-                    "Every tap, what answered it, and anything that never got an answer. " +
-                        "This build also writes it to Downloads as it happens."
-                } else {
-                    "Every tap, what answered it, and anything that never got an answer — this " +
-                        "session only. A release build keeps no file: share it now if you want it kept."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // **No switch.** The operator's question: *"why is there a switch? dev version is for
-            // debugging - trace log should be on by default."* A debug build writes; a release build
-            // does not; there is nothing here to decide.
-            //
-            // The switch cost a week. Every session where it was off produced a paste that looked
-            // like a healthy session with no file behind it — and the person then had to *remember*
-            // it was off, which is the thing nobody remembers.
-            //
-            // **The line stays, and it is the useful half.** It says where the log actually went,
-            // and when it went somewhere other than promised, why. That sentence is what a person
-            // needs; the switch was never what they needed.
-            if (viewModel.settings.liveTrace) {
-                // **The path is reported, not promised.** This used to read "at
-                // Download/MuffyCodes log/trace.log" — a sentence true of the intention and false of
-                // the phone, because a write can fall back to the app's own folder. A line naming
-                // where the file really is turns "I cannot find the log" into a path.
-                Text(
-                    traceWhere(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-            // ---- the agent chat, as a block of its own ----
-            //
-            // **It has a heading and a rule of its own, on the operator's instruction**: "maximum
-            // displayed message height somehow ended up in session log block but it need a new
-            // separate agent chat block". It began in the session block, which is about how much of
-            // the record is *kept* - and this bounds something else entirely: how much of one
-            // message is *drawn*. Two different questions in one block made a reading preference
-            // look like a limit on the evidence.
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            Text("Chat", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "How the conversation is drawn. Nothing here changes what is kept or what the " +
-                    "agent is sent.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // **In lines, because that is what a person reads in.** A cap expressed as a fraction of
-            // the window would be a statement about the phone; a cap in lines is a statement about
-            // the message. Zero means no cap, which is the honest default on a screen that scrolls.
-            LengthField(
-                label = "A message may be this many lines (blank = no limit)",
-                value = settings.bubbleLines,
-                placeholder = "no limit",
-                onValueChange = { settings.keepBubbleLines(it) },
-            )
-
-            // ---- the appearance (§10) ----
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Theme", style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f))
-                Text("Light", style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.width(6.dp))
-                Switch(
-                    checked = settings.useDark,
-                    onCheckedChange = { settings.selectDarkVariant(it) },
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("Dark", style = MaterialTheme.typography.labelSmall)
-            }
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(AppTheme.entries) { theme ->
-                    Swatch(
-                        theme = theme,
-                        selected = theme == settings.theme,
-                        onClick = { settings.selectTheme(theme) },
-                    )
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-            // ---- how much change history is kept ----
-            //
-            // **There is no history length, and the sentence says why rather than vanishing.**
-            //
-            // A setting that shortened the history existed because a phone cannot hold every version
-            // of everything. That is still true of pictures, and it is answered by keeping exactly one
-            // version of each rather than by a number a person has to choose — so the choice moved
-            // from this screen into the file's kind. Text is unbounded because text compresses 120x,
-            // and squashing a history is git's job rather than a note-taking app's.
-            Text("Change history", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Every version of every file is kept, text and pictures alike. A picture is stored " +
-                    "once by its content, so an unchanged picture costs nothing the second time.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            // ---- how much of the request log is kept ----
-            //
-            // **Its own field, not part of the history limit.** They are different files with
-            // different shapes: the history is versions of the person's work, and the log is what
-            // the model cost. One number for both would make a person choose between keeping their
-            // files and keeping their bill.
-            Text(
-                "Request log",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            Text(
-                "Every response the agent receives, with what it cost. Empty keeps all of them.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Days kept",
-                value = settings.requestDays,
-                placeholder = "all of them",
-                onValueChange = { settings.keepRequests(it) },
-            )
+            HistorySection(settings)
 
             // ---- back to what the app shipped with ----
             //
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-            // ---- every one on this phone, and one switch ----
-            // The box has a Stop per project, and the strip says how many are on — but a person
-            // who wants them all off should not have to open each project to do it.
-            Text("Running", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    AgentSession.strip(viewModel.agentSessions).ifEmpty { "Nothing is running." },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                // **Both directions, because the waiting ceiling stops sessions on its own.** A
-                // person who comes back to an agent that switched itself off an hour ago needs the
-                // way back on, and opening each project to type something is not that.
-                TextButton(
-                    onClick = { viewModel.startAllAgents() },
-                    enabled = viewModel.agentSessions.any { !it.running },
-                ) { Text("Start all") }
-                TextButton(
-                    onClick = { viewModel.stopAllAgents() },
-                    enabled = viewModel.agentSessions.any { it.running },
-                ) { Text("Stop all") }
-            }
-            // **One rule here too.** Same defect as Reminders, found in the same report.
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-            // ---- what Android does to it in a pocket ----
-            // One button, because nothing in the app can work around Doze and only the person can
-            // exempt it. Here rather than on launch: an app that opens with a permissions dialog
-            // teaches people to dismiss permissions dialogs.
-            Text("Background", style = MaterialTheme.typography.titleMedium)
-            // **One sentence, saying what it is for.** The old one explained Doze, the absence of
-            // a fallback provider and what a stopped poll means — three true things, and a person
-            // deciding whether to press a button needs one.
-            Text(
-                "So it keeps working with the screen off.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (exemptNow) "Exempt · it can poll" else "Not exempt · polls may fail",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (exemptNow) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                // Offered only while it is needed: a button that goes on asking after the answer
-                // is yes teaches people to dismiss the dialog.
-                if (!exemptNow) {
-                    TextButton(onClick = onAskBattery) { Text("Ask Android") }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-            // ---- whether a reminder can reach the tray at all ----
-            // The battery exemption decides whether a poll can go out; this decides whether the
-            // answer can be seen. From Android 13 a declared permission that was never granted
-            // means a notification posted and silently dropped — a session that looks healthy.
-            Text(
-                "So you know when it needs you, without opening the app.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (noticesNow) "On · a reminder reaches you" else "Off · nothing is shown",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (noticesNow) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                if (!noticesNow) {
-                    TextButton(onClick = onAskNotices) { Text("Allow") }
-                }
-            }
+            RunningSection(viewModel)
+            BackgroundSection(exemptNow, onAskBattery, noticesNow, onAskNotices)
 
             // **The last thing on the screen, the operator's own correction**: "back to defaults
             // should be the last element on the settings list". It was above Running and Background,
@@ -947,43 +323,582 @@ fun SettingsScreen(
             //
             // **Asked before it happens**, because it is a single press that discards a screen of
             // preferences and there is no undo for one.
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            Text("Back to defaults", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Every setting on this screen returns to what the app shipped with. Files, " +
-                    "projects and the record are not touched.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            var confirmingReset by remember { mutableStateOf(false) }
-            TextButton(onClick = { confirmingReset = true }) {
-                Text("Reset settings", color = MaterialTheme.colorScheme.error)
-            }
-            if (confirmingReset) {
-                AlertDialog(
-                    onDismissRequest = { confirmingReset = false },
-                    title = { Text("Reset every setting?") },
-                    text = {
-                        Text(
-                            "The themes, the limits, the timeouts and the agent's settings all go " +
-                                "back to what the app shipped with. Nothing you have written is " +
-                                "touched.",
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirmingReset = false
-                            settings.reset()
-                        }) { Text("Reset") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirmingReset = false }) { Text("Cancel") }
-                    },
-                )
-            }
+            ResetSettings(settings)
         }
     }
 
+}
+
+/**
+ * **The two groups of clocks: work on this phone, and the wait for the model.**
+ *
+ * Two groups because they bound two different machines, and one heading each was not enough: three
+ * timeouts in a row, in two units, with "wait" and "stop" used for both, is what made them read as one
+ * subject. Everything is seconds, and each group is named for what it bounds.
+ */
+@Composable
+private fun ClocksSection(settings: SettingsStore) {
+    Text("Command execution timeouts", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "How long work on this phone may take. Blank means no limit.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LengthField(
+        label = "Foreground command timeout (seconds)",
+        value = settings.foregroundSeconds,
+        placeholder = "no limit",
+        onValueChange = { settings.keepForeground(it) },
+    )
+    Text(
+        text = if (settings.foregroundSeconds <= 0) {
+            "Now: the turn waits for every command to finish."
+        } else {
+            "Now: past ${settings.foregroundSeconds} s it carries on in the background and " +
+                "its result arrives with a later turn."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LengthField(
+        label = "Background command timeout (seconds)",
+        value = settings.backgroundSeconds,
+        placeholder = "never",
+        onValueChange = { settings.keepBackground(it) },
+    )
+    Text(
+        text = if (settings.backgroundSeconds <= 0) {
+            "Now: a background command runs until it finishes."
+        } else {
+            "Now: past ${settings.backgroundSeconds} s it is stopped for good, and the file " +
+                "it was writing says so."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RowDivider()
+
+    Text("Model response timeouts", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "How long the app waits for the model. Blank means the default.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    // **An idle timeout in the strict sense**, and the sentence under it says the one thing a person
+    // needs to know about that: it restarts on every packet, so a slow answer is safe and a dead one
+    // is not.
+    LengthField(
+        label = "Response timeout (seconds)",
+        value = settings.responseSeconds,
+        placeholder = "${SettingsStore.DEFAULT_RESPONSE_SECONDS}",
+        onValueChange = { settings.keepResponse(it) },
+    )
+    Text(
+        text = "Now: ${settings.responseSeconds} s of silence ends the request - before the " +
+            "first packet or between any two. A steady answer is never cut off.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    // **A different number from the two above**: they bound a single request, and this bounds how long
+    // a *failure* is retried before the agent stops and asks for help. A dropped request is not a
+    // stopped agent, so the window is how long the ladder may go on.
+    LengthField(
+        label = "Reconnect timeout (seconds)",
+        value = settings.reconnectSeconds,
+        placeholder = "${SettingsStore.DEFAULT_RECONNECT_SECONDS}",
+        onValueChange = { settings.keepReconnect(it) },
+    )
+    Text(
+        text = "Now: error responses are retried for ${settings.reconnectSeconds / 60} min " +
+            "before the agent stops and asks for help. An account-level error such as an " +
+            "empty balance is retried here, not on another provider.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    LengthField(
+        label = "One result may carry (tokens)",
+        value = settings.maxResult,
+        placeholder = "6000",
+        onValueChange = { settings.keepMaxResult(it) },
+    )
+    RowDivider()
+}
+
+/**
+ * **How the conversation is drawn**, which is a reading preference and not a limit on the evidence.
+ *
+ * Its own block because it began inside the session-log section, and that made a display choice look
+ * like a bound on what is kept. Nothing here changes what is stored or what the agent is sent.
+ */
+@Composable
+private fun ChatSection(settings: SettingsStore) {
+    Text("Chat", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "How the conversation is drawn. Nothing here changes what is kept or what the " +
+            "agent is sent.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    // **In lines, because that is what a person reads in.** A cap expressed as a fraction of the
+    // window would be a statement about the phone; a cap in lines is a statement about the message.
+    LengthField(
+        label = "A message may be this many lines (blank = no limit)",
+        value = settings.bubbleLines,
+        placeholder = "no limit",
+        onValueChange = { settings.keepBubbleLines(it) },
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Theme", style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f))
+        Text("Light", style = MaterialTheme.typography.labelSmall)
+        Spacer(Modifier.width(6.dp))
+        Switch(
+            checked = settings.useDark,
+            onCheckedChange = { settings.selectDarkVariant(it) },
+        )
+        Spacer(Modifier.width(6.dp))
+        Text("Dark", style = MaterialTheme.typography.labelSmall)
+    }
+    LazyRow(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(AppTheme.entries) { theme ->
+            Swatch(
+                theme = theme,
+                selected = theme == settings.theme,
+                onClick = { settings.selectTheme(theme) },
+            )
+        }
+    }
+
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+}
+
+/**
+ * **How much change history is kept, and how much of the request log.**
+ *
+ * Two fields and not one, because they are different files with different shapes: the history is
+ * versions of the person's work, and the log is what the model cost. One number for both would make a
+ * person choose between keeping their files and keeping their bill.
+ */
+@Composable
+private fun HistorySection(settings: SettingsStore) {
+    Text("Change history", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Every version of every file is kept, text and pictures alike. A picture is stored " +
+            "once by its content, so an unchanged picture costs nothing the second time.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Text(
+        "Request log",
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(top = 12.dp),
+    )
+    Text(
+        "Every response the agent receives, with what it cost. Empty keeps all of them.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LengthField(
+        label = "Days kept",
+        value = settings.requestDays,
+        placeholder = "all of them",
+        onValueChange = { settings.keepRequests(it) },
+    )
+}
+
+/**
+ * **How much of the record is kept, and the way to the account of what the app did.**
+ *
+ * The two are one block because they answer one question — "what is there to look at afterwards" —
+ * and because the trace button belongs where a person who is already wondering why something
+ * happened will find it.
+ */
+@Composable
+private fun LogAndTraceSection(
+    settings: SettingsStore,
+    viewModel: AppViewModel,
+    onOpenTrace: () -> Unit,
+) {
+    Text("Session log", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "The most the session log may hold, in tokens. Over the limit, the oldest messages " +
+            "are deleted until it is under it. Blank keeps everything.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LengthField(
+        label = "Keep the session log under (tokens, blank = everything)",
+        value = settings.sessionTokens,
+        placeholder = "everything",
+        onValueChange = { settings.keepSession(it) },
+    )
+    RowDivider()
+
+    Text("Reminders", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "When it needs you — it asked something, or it stopped on its own — it says so, " +
+            "and repeats at this interval until you deal with it. Empty says it once.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    LengthField(
+        label = "Repeat every (minutes)",
+        value = settings.remindMinutes,
+        placeholder = "once",
+        onValueChange = { settings.keepRemind(it) },
+    )
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+    // **The report exists in every build, and writes a file in only one of them.** The ring is a
+    // person's own account of what just happened and is worth having anywhere; the file is what
+    // makes a report checkable, and only a debug build has it. The words say which is which,
+    // because two different things called the same name is what confused the operator.
+    TextButton(onClick = onOpenTrace) { Text("What the app did") }
+    Text(
+        if (BuildConfig.DEBUG) {
+            "Every tap, what answered it, and anything that never got an answer. " +
+                "This build also writes it to Downloads as it happens."
+        } else {
+            "Every tap, what answered it, and anything that never got an answer — this " +
+                "session only. A release build keeps no file: share it now if you want it kept."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    // **No switch.** A debug build writes, a release build does not, and there is nothing here to
+    // decide. The switch cost a week: every session where it was off produced a paste that looked
+    // healthy with no file behind it, and the person had to remember it was off.
+    if (viewModel.settings.liveTrace) {
+        // **The path is reported, not promised** — a write can fall back to the app's own folder,
+        // and a line naming where the file really is turns "I cannot find the log" into a path.
+        Text(
+            traceWhere(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+}
+
+/**
+ * **What the app spends to keep a conversation warm, and how long the session exists at all.**
+ *
+ * Two ceilings, and they are separate on purpose. The first decides how long the app pays to keep the
+ * context cached; the second decides when the agent switches itself off. A person may want an agent
+ * reachable all day and pay nothing to keep it warm, so the second is deliberately **outside** the
+ * `if (keepAlive)` block — a field inside it would make one switch mean two things.
+ */
+@Composable
+private fun KeepaliveSection(settings: SettingsStore) {
+    Text("Keepalive", style = MaterialTheme.typography.titleMedium)
+    Row(
+        // **The whole row is the switch.** The words are the explanation and the switch is the act,
+        // and a person who tapped the words has said what they meant.
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { settings.keepWarm(!settings.keepAlive) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Keep the conversation warm", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "While it waits for you the app re-sends the same conversation with a " +
+                    "one-token answer: nothing is written down, the agent does not act, and " +
+                    "your next sentence costs a cache read instead of a fresh prompt.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = settings.keepAlive,
+            onCheckedChange = { settings.keepWarm(it) },
+        )
+    }
+    if (settings.keepAlive) {
+        LengthField(
+            label = "Warm it every (seconds)",
+            value = settings.pollSeconds,
+            placeholder = "240",
+            onValueChange = { settings.keepPoll(it) },
+        )
+        Text(
+            text = "Now: every ${settings.pollMs / 1000} s, and at most " +
+                "${SettingsStore.MAX_POLL_SECONDS} s — past that the cache has already gone.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        LengthField(
+            label = "For at most (minutes, blank = until you speak)",
+            value = settings.warmMinutes,
+            placeholder = "until you speak",
+            onValueChange = { settings.keepWarmFor(it) },
+        )
+        Text(
+            text = "Now: " + if (settings.warmMinutes <= 0) {
+                "until you speak."
+            } else {
+                "for ${settings.warmMinutes} min. An hour is about where keeping it warm " +
+                    "stops being cheaper than letting it go cold."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+
+    LengthField(
+        label = "Switch off after waiting (minutes, blank = never)",
+        value = settings.waitMinutes,
+        placeholder = "never",
+        onValueChange = { settings.waitFor(it) },
+    )
+    Text(
+        text = "Now: " + if (settings.waitMinutes <= 0) {
+            "an idle agent waits until you speak or stop it."
+        } else {
+            "an agent that waits ${settings.waitMinutes} min switches itself off. " +
+                "It says so in the strip, and nothing is lost: the record is on disk."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+/**
+ * **Where the agent may go, and how far.** Everything above this bounds how much or how long; these
+ * say what it may reach — and the default is the public internet only.
+ *
+ * **The private-network switch is off by default, deliberately.** A page that steers the agent at
+ * `192.168.1.1` has reached the router without either of them asking, so a home network is granted by
+ * a person rather than assumed by the app.
+ *
+ * **The browser is the phone's own Chromium**, which costs nothing to ship and the Play Store updates
+ * on its own. There is no switch for that: a phone without a WebView gets a sentence saying so.
+ */
+@Composable
+private fun WebSection(settings: SettingsStore) {
+    Text("The web", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "The agent can read a web page and photograph it, using the browser this phone " +
+            "already has. Its answers are saved under agent/browser/.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { settings.keepBrowsePrivate(!settings.browsePrivate) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Let it read this phone's network", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Off, it may read the public web and nothing else. On, it may also read " +
+                    "this phone (127.0.0.1) and addresses on your home network — a NAS, a " +
+                    "router, a server. Turn it on only if you want that.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = settings.browsePrivate,
+            onCheckedChange = { settings.keepBrowsePrivate(it) },
+        )
+    }
+    LengthField(
+        label = "A page may take (seconds)",
+        value = settings.browseSeconds,
+        placeholder = "${SettingsStore.DEFAULT_BROWSE_SECONDS}",
+        onValueChange = { settings.keepBrowseSeconds(it) },
+    )
+    Text(
+        text = "Now: ${settings.browseSeconds} s per page. Past that the page is reported " +
+            "as too slow rather than left hanging.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    // **The download cap sits with the other network limits** because it is the same kind of number:
+    // a bound the person sets and the app enforces. It was a constant, and a cap nobody can change is
+    // the tool's opinion rather than the person's.
+    LengthField(
+        label = "One download may be (MB)",
+        value = settings.fetchMegabytes,
+        placeholder = "${SettingsStore.DEFAULT_FETCH_MB}",
+        onValueChange = { settings.keepFetchMegabytes(it) },
+    )
+    Text(
+        text = "Now: ${settings.fetchMegabytes} MB per download, between " +
+            "${SettingsStore.MIN_FETCH_MB} and ${SettingsStore.MAX_FETCH_MB}. Larger is " +
+            "refused with the size named rather than cut short, so a half-file never " +
+            "arrives looking whole.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { settings.keepHttp(!settings.httpAllowed) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Let it use the network", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "On, the agent can send a request to an address and keep the answer in " +
+                    "agent/http/ — a dependency tarball, a release asset, an API call, " +
+                    "anything a person gives it a link to. Off, the tool is not offered at " +
+                    "all rather than offered and refused. Reading a page is a different " +
+                    "tool, and is unaffected.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = settings.httpAllowed,
+            onCheckedChange = { settings.keepHttp(it) },
+        )
+    }
+}
+
+/**
+ * **Every agent on this phone, and the two switches for all of them.**
+ *
+ * The box has a Stop per project and the strip says how many are on, but a person who wants them all
+ * off should not have to open each project to do it. Both directions, because the waiting ceiling
+ * stops sessions on its own: somebody coming back to an agent that switched itself off an hour ago
+ * needs the way back on, and opening each project to type something is not that.
+ */
+@Composable
+private fun RunningSection(viewModel: AppViewModel) {
+    Text("Running", style = MaterialTheme.typography.titleMedium)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            AgentSession.strip(viewModel.agentSessions).ifEmpty { "Nothing is running." },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            onClick = { viewModel.startAllAgents() },
+            enabled = viewModel.agentSessions.any { !it.running },
+        ) { Text("Start all") }
+        TextButton(
+            onClick = { viewModel.stopAllAgents() },
+            enabled = viewModel.agentSessions.any { it.running },
+        ) { Text("Stop all") }
+    }
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+}
+
+/**
+ * **The two things Android decides and the app cannot**: whether a poll may run with the screen off,
+ * and whether a reminder can reach the tray.
+ *
+ * Both are one button, offered only while it is needed — a control that goes on asking after the
+ * answer is yes teaches people to dismiss the dialog. Nothing here works around Doze; only the person
+ * can exempt the app, and only they can grant the notification permission.
+ */
+@Composable
+private fun BackgroundSection(
+    exemptNow: Boolean,
+    onAskBattery: () -> Unit,
+    noticesNow: Boolean,
+    onAskNotices: () -> Unit,
+) {
+    Text("Background", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "So it keeps working with the screen off.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (exemptNow) "Exempt · it can poll" else "Not exempt · polls may fail",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (exemptNow) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+            modifier = Modifier.weight(1f),
+        )
+        if (!exemptNow) {
+            TextButton(onClick = onAskBattery) { Text("Ask Android") }
+        }
+    }
+
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+    Text(
+        "So you know when it needs you, without opening the app.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 12.dp),
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (noticesNow) "On · a reminder reaches you" else "Off · nothing is shown",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (noticesNow) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+            modifier = Modifier.weight(1f),
+        )
+        if (!noticesNow) {
+            TextButton(onClick = onAskNotices) { Text("Allow") }
+        }
+    }
+}
+
+/**
+ * **Every setting back to what the app shipped with** — the one act on this screen that discards
+ * things, so it is the one that asks first.
+ */
+@Composable
+private fun ResetSettings(settings: SettingsStore) {
+    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+    Text("Back to defaults", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "Every setting on this screen returns to what the app shipped with. Files, " +
+            "projects and the record are not touched.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    var confirming by remember { mutableStateOf(false) }
+    TextButton(onClick = { confirming = true }) {
+        Text("Reset settings", color = MaterialTheme.colorScheme.error)
+    }
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Reset every setting?") },
+            text = {
+                Text(
+                    "The themes, the limits, the timeouts and the agent's settings all go " +
+                        "back to what the app shipped with. Nothing you have written is " +
+                        "touched.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    settings.reset()
+                }) { Text("Reset") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 /** One swatch of the theme row: tap to select, framed when selected. */
