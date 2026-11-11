@@ -116,6 +116,59 @@ class ProjectActions(
     val onReport: () -> Unit = {},
 )
 
+/**
+ * **What the folder screen asks the app to do about projects and the toolbar**, as opposed to what it
+ * asks about a row ([BrowserActions]).
+ *
+ * **Two objects rather than one, and the split is not stylistic.** The row actions are what a *file*
+ * can be asked to do; these are project-level and toolbar acts. The two sets do not intersect at all
+ * — checked, not assumed — so merging them would produce one object whose members have nothing in
+ * common beyond being callbacks. The reason both exist is the same: a screen takes three parameters
+ * instead of twenty-one, and a test can build one.
+ *
+ * Every member defaults to doing nothing, so a test that cares about one act names only it.
+ */
+class ProjectActions(
+    /** Opens the app's settings screen. */
+    val onOpenSettings: () -> Unit = {},
+    /** The add-project window, from the bar and from an empty folder. */
+    val onAddProject: () -> Unit = {},
+    /** Opens [project]'s conversation. */
+    val onRowChat: (String) -> Unit = {},
+    /**
+     * **A project's own git credential**, from its row's ⋮.
+     *
+     * The branch is passed so `main`'s row sets the *project*, and a branch row sets that branch. The
+     * row that opens the window decides the scope, which is the only way "where does this go" can be
+     * answered without a second scope picker inside the window.
+     */
+    val onRowGit: (String) -> Unit = {},
+    /** Opens the window that publishes a release of [project] (§13b.7). */
+    val onRelease: (String) -> Unit = {},
+    /** Opens "Set the address…" for [project] — the row's menu and a dead remote's notice. */
+    val onRowRename: (String) -> Unit = {},
+    val onRowDelete: (String) -> Unit = {},
+    /**
+     * **A project going to another account** (§3.9) — `(project, copy)`.
+     *
+     * Offered only when this phone has a second account, because the window's list would otherwise
+     * be empty: a move needs somewhere to go.
+     */
+    val onRowTransfer: (String, Boolean) -> Unit = { _, _ -> },
+    val onCreateFile: () -> Unit = {},
+    val onCreateFolder: () -> Unit = {},
+    /** A blank picture, which needs a size as well as a name. */
+    val onCreateImage: () -> Unit = {},
+    val onUploadFiles: () -> Unit = {},
+    val onUploadFolder: () -> Unit = {},
+    val onRestoreDeleted: () -> Unit = {},
+    val onMoveSelected: () -> Unit = {},
+    val onCopySelected: () -> Unit = {},
+    val onDeleteSelected: () -> Unit = {},
+    /** The report window. A report is a report wherever it is noticed. */
+    val onReport: () -> Unit = {},
+)
+
 /** What the browser asks the app to do, so the screen stays free of state. */
 class BrowserActions(
     val onOpen: (Entry) -> Unit,

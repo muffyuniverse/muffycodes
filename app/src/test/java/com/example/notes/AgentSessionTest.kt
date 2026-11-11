@@ -93,10 +93,16 @@ class AgentSessionTest {
     fun `a poll does not restart the wait`() {
         // The bug this is here for: `lastPollAt` moves every interval, so a ceiling counted from it
         // would never arrive — an agent polled every four minutes would wait for ever.
+        //
+        // **The wait starts at a real time, not at zero.** `warmFrom` is a persisted field whose
+        // zero means "written before the keepalive existed", so a session concluded at `at = 0` is
+        // one the fallback reads as *unset* — a test that used zero would be testing the fallback
+        // rather than the rule.
+        val began = 1_000_000L
         val hour = 60 * 60_000L
-        val s = session().concluded(at = 0).polled(30 * 60_000L)
+        val s = session().concluded(at = began).polled(began + 30 * 60_000L)
 
-        assertTrue("half an hour of polls later, the hour still ends it", s.waitedOut(hour, hour))
+        assertTrue("half an hour of polls later, the hour still ends it", s.waitedOut(began + hour, hour))
     }
 
     @Test

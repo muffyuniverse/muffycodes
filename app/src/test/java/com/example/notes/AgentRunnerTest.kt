@@ -115,7 +115,15 @@ class AgentRunnerTest {
 
     private fun on(project: String, now: Long) {
         AgentSessions(ws.accountDir).put(
-            AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = now),
+            AgentSession(
+                project = project,
+                state = AgentSession.State.IDLE,
+                lastPollAt = now,
+                // **The wait begins when the session does**, which is what `startAgent` writes. A
+                // fixture without it would leave `warmSince` falling back to `lastPollAt`, and the
+                // ceiling tests would be measuring the fallback rather than the rule.
+                warmFrom = now,
+            ),
         )
     }
 

@@ -4335,6 +4335,10 @@ class AppViewModel @JvmOverloads constructor(
                 branch = branch,
                 state = AgentSession.State.IDLE,
                 lastPollAt = now,
+                // **The wait begins at the moment it was switched on.** `warmFrom` at zero makes
+                // `warmSince` fall back to `lastPollAt`, and a poll moves that — so the waiting
+                // ceiling would be pushed along by every poll and never arrive.
+                warmFrom = now,
             )
                 // **The interval in force when it started.** A tick reads this copy, so a session
                 // written now keeps answering after a reboot without the settings file in hand.

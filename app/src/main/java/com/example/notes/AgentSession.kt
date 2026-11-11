@@ -447,7 +447,11 @@ data class AgentSession(
         askedAt = 0,
         reminders = 0,
         lastPollAt = at,
-        warmFrom = 0,
+        // **The wait begins now**, which is the moment the person switched it back on. Leaving this
+        // at zero made `warmSince` fall back to `lastPollAt`, and a poll moves that every interval —
+        // so a session that was resumed and then polled would have its waiting ceiling pushed along
+        // for ever and never arrive.
+        warmFrom = at,
         lastWords = "",
     )
 
