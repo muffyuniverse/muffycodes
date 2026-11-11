@@ -161,40 +161,26 @@ class AgentRunnerTest {
 
     @Test
     fun `a session that waited past the ceiling is stopped, and says why`() {
-        // **The end the app had no way of reaching.** An agent that concluded stayed idle and
-        // polled for ever; only a person who remembered to press Stop ever ended one. The ceiling
-        // is a setting, and this is the tick obeying it.
+        // **The end the app had no way of reaching.** An agent that concluded stayed idle and polled
+        // for ever; only a person who remembered to press Stop ever ended one.
+        //
+        // **Only time is asked.** Two ticks, an hour apart, with no attempt to model what the phone
+        // was doing in between — that is the whole rule.
         settings.waitFor(60)
         on("shopping", now = 1_000)
-        val door = PingDoor()
-        val runner = runner(door)
-        val minute = 60_000L
+        val runner = runner()
 
-        // **Polled through the hour, at the poll's own interval.** Ticking every minute would be a
-        // *gap* every fourteen minutes — the app not running for longer than three intervals — and a
-        // gap restarts the wait by design, so the session would still be on for a reason that has
-        // nothing to do with the ceiling.
-        var at = 1_000L
-        // **Four minutes short of the hour**, which is a poll interval, so the last tick before the
-        // ceiling is a real poll rather than a gap.
-        while (at < 1_000L + 56 * minute) {
-            at += AgentSession.POLL_MS
-            runner.tick(at)
-            settle(runner)
-        }
-        assertTrue("still on, four minutes short of the hour", runner.sessions().single().running)
+        runner.tick(1_000 + 59 * 60_000L)
+        settle(runner)
+        assertTrue("still on, a minute short", runner.sessions().single().running)
 
-        runner.tick(1_000 + 60 * minute)
+        runner.tick(1_000 + 60 * 60_000L)
         settle(runner)
 
         val after = runner.sessions().single()
         assertFalse("switched itself off", after.running)
         assertEquals("and says why", AgentSession.StopReason.WAITED_OUT, after.reason)
-        // **Pings were sent, and that is right**: the session was kept warm through the hour, which
-        // is a different setting from the ceiling and does not depend on it.
-        assertFalse("it was warmed while it waited", door.pings.isEmpty())
-        // **Silent**, because the person set the number. A notification about a rule they chose is
-        // the app arguing with them.
+        // **Silent**, because the person set the number.
         assertTrue("and nobody was told", notices.isEmpty())
     }
 
@@ -204,14 +190,8 @@ class AgentRunnerTest {
         on("shopping", now = 1_000)
         val runner = runner()
 
-        // **Polled through at the poll's own interval**, for the same reason: an hourly tick is a gap
-        // every time, and a gap restarts the wait.
-        var at = 1_000L
-        while (at < 1_000L + 24 * 60 * 60_000L) {
-            at += AgentSession.POLL_MS
-            runner.tick(at)
-            settle(runner)
-        }
+        runner.tick(1_000 + 24 * 60 * 60_000L)
+        settle(runner)
 
         assertTrue("still on a day later", runner.sessions().single().running)
     }

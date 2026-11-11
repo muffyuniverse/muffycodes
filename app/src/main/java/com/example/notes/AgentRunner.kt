@@ -244,31 +244,24 @@ class AgentRunner(
                 Trace.note("agent-reminder", current.notice() ?: "")
                 notify(current)
             }
-            // **A gap is its own event, and it does not need a request to be worth writing.**
-            // The phone being off is a fact about the phone; the keepalive's ceiling is a fact
-            // about the bill, and a session that has been asleep for three hours has also passed
-            // its ceiling — so reading the gap inside the ping would have lost the one row that
-            // makes the hole visible. The wait restarts from the wake: the cache was lost hours
-            // ago, and a ping now would buy four minutes of warmth for someone who is not here.
-            // **A gap is measured before the ceiling, and the order is the meaning.** A gap is the
-            // phone not running the app; the ceiling is the person not coming back. A phone that was
-            // off for a day has both, and the gap is the one that explains the other — so the wait
-            // restarts from the wake, and the ceiling is then measured from there. Counting the
-            // ceiling first would report "waited out" about a session that had spent the time in a
-            // pocket.
+            // **A gap is written first, and only so the log has an explanation.** The phone being
+            // off is a fact about the phone; the ceiling is a fact about the time. A session that
+            // was asleep for three hours has both, and if the ceiling ran first the hole in the log
+            // would have nothing in it. The row records and moves `lastPollAt` — it does not move
+            // the clock the ceiling reads.
             val missed = current.missedBy(now, pollMs)
             if (missed > 0) {
                 noteGap(current.project, missed, current.branch)
                 current = current.polled(now)
                 put(current, speak = false)
             }
-            // **The waiting ceiling.** An agent that concluded, or asked something nobody answered,
-            // used to stay idle and keep polling for ever — nothing but a person who remembered to
-            // press Stop would end it. It is asked of the session rather than of the ping: a session
-            // can wait a day and be kept warm for an hour, or the other way round.
+            // **The waiting ceiling, and it is only a clock.** An agent that concluded, or asked
+            // something nobody answered, used to stay idle and poll for ever — nothing but a person
+            // who remembered to press Stop would end it. The question is `now - startedAt`: the
+            // person set a number of minutes, and the minutes passed. Why the app was not running is
+            // not part of it.
             //
-            // **A stopped session is left alone** by `waitedOut` itself, and a reconnecting one is
-            // not counted: its ladder is the next check rather than a wait on the person.
+            // Checked before anything is spent, so a session that has waited out costs no request.
             if (current.waitedOut(now, waitMs)) {
                 Trace.note("agent-waited-out", AgentSession.keyOf(current.project, current.branch))
                 put(current.stopped(AgentSession.StopReason.WAITED_OUT), speak = false)

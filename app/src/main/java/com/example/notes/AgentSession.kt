@@ -308,27 +308,22 @@ data class AgentSession(
     val warmSince: Long get() = if (warmFrom > 0) warmFrom else lastPollAt
 
     /**
-     * True when this session has been waiting on the person for longer than [forMs].
+     * True when this session has been waiting for longer than [forMs].
      *
-     * **The same clock as the keepalive's ceiling, and a different question.** [warmDue] asks
-     * "should I spend money keeping this warm" and stops the *pings*; this asks "should this session
-     * still exist" and stops the *session*. They are separate numbers because they answer separate
-     * things: a person may want an agent to stay reachable for a day and pay nothing to keep it
-     * warm, or to go quiet in ten minutes.
+     * **A plain clock, and nothing else.** [warmSince] is set when the session starts waiting and
+     * moved only when it starts waiting again — by a conclusion, a question, or a resume. Polls do
+     * not touch it, gaps do not touch it, and reconnecting does not touch it: none of those is the
+     * person coming back, and none of them is the person staying away.
      *
-     * **Only a session that is waiting counts.** One that is `STOPPED` has already ended, and one
-     * that is reconnecting is not waiting on anybody — its ladder is the next check.
+     * **A different question from [warmDue].** That asks "should I spend money keeping this warm"
+     * and stops the *pings*; this asks "should this session still exist" and stops the *session*.
+     * Two numbers because a person may want an agent reachable all day and pay nothing to keep it
+     * warm.
      *
-     * `forMs` of zero is no ceiling, which is what a phone that has never set the field gets.
+     * `forMs` of zero is no ceiling.
      */
-    fun waitedOut(at: Long, forMs: Long): Boolean {
-        if (forMs <= 0L) return false
-        if (state == State.STOPPED) return false
-        if (sub == Sub.RECONNECTING) return false
-        // **From the moment the wait began**, not the last poll: a poll moves `lastPollAt` every
-        // interval, so a ceiling counted from it would never arrive.
-        return at - warmSince >= forMs
-    }
+    fun waitedOut(at: Long, forMs: Long): Boolean =
+        forMs > 0L && state != State.STOPPED && at - warmSince >= forMs
 
     /**
      * True when the conversation should be kept warm at [at].
@@ -401,17 +396,7 @@ data class AgentSession(
      * that refused for ever would be retried every second for ever. Only a turn that *succeeds*
      * clears the ladder, which is what `waited` and `asked` do.
      */
-    fun polled(at: Long): AgentSession = copy(
-        lastPollAt = at,
-        // **A gap restarts the wait.** The phone being off is not the person not coming back, and a
-        // session that spent three hours in a pocket must not be switched off the moment it wakes —
-        // the ceiling is measured from when somebody could have answered, and nobody could while the
-        // app was not running.
-        //
-        // `warmed` does *not* do this: a ping is a poll that succeeded while the app was running, and
-        // it is evidence the person is still being waited for.
-        warmFrom = if (warmFrom > 0) at else 0,
-    )
+    fun polled(at: Long): AgentSession = copy(lastPollAt = at)
 
     /**
      * A ping was sent at [at].

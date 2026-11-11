@@ -74,15 +74,12 @@ class AgentSessionTest {
         )
     }
 
-    // ---- the waiting ceiling, which is the other question from the keepalive's ---------------
+    // ---- the waiting ceiling, which is a plain clock --------------------------
 
     @Test
     fun `an agent that waits past the ceiling has waited out`() {
-        // **The number the operator asked for.** An agent that concluded used to stay idle and poll
-        // for ever; nothing but a person who remembered to press Stop would end it. The ceiling is
-        // measured from when the wait began, so a poll every four minutes cannot push it along.
-        val s = session().concluded(at = 1_000)
         val hour = 60 * 60_000L
+        val s = session().concluded(at = 1_000)
 
         assertFalse("not yet", s.waitedOut(1_000 + hour - 1, hour))
         assertTrue("and at the hour exactly", s.waitedOut(1_000 + hour, hour))
@@ -90,26 +87,15 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `a ping does not restart the wait, but a gap does`() {
-        // **Two different clocks, and the difference is what happened to the app.**
-        //
-        // A ping is a poll that succeeded while the app was running: the person is still being
-        // waited for, so the wait goes on from when it began. A *gap* is the phone not running the
-        // app at all — nobody could have answered — so the wait restarts from the wake.
-        //
-        // A ceiling counted from `lastPollAt` would never arrive either way, because a poll moves
-        // that every interval.
-        val began = 1_000_000L
+    fun `polls do not move the clock`() {
+        // **The one thing that had to be true.** `lastPollAt` moves every interval, so a ceiling
+        // counted from it would never arrive — an agent polled every four minutes would wait for
+        // ever. The clock is `warmSince`, and a poll does not touch it.
         val hour = 60 * 60_000L
-        val warmed = session().concluded(at = began).warmed(began + 30 * 60_000L)
+        val began = 1_000_000L
+        val polled = session().concluded(at = began).polled(began + 30 * 60_000L)
 
-        assertTrue("a ping does not push the ceiling along", warmed.waitedOut(began + hour, hour))
-
-        val gap = session().concluded(at = began).polled(began + 3 * hour)
-        assertFalse(
-            "a gap restarts it: nobody could answer while the app was not running",
-            gap.waitedOut(began + 3 * hour + 30 * 60_000L, hour),
-        )
+        assertTrue("half an hour of polls later, the hour still ends it", polled.waitedOut(began + hour, hour))
     }
 
     @Test
@@ -121,20 +107,7 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `a reconnecting session is not waiting on the person`() {
-        // Its ladder *is* the next check. Counting a reconnect as waiting would switch off an agent
-        // in the middle of recovering from a dropped packet.
-        val hour = 60 * 60_000L
-        val retrying = session().failed(0, forMs = hour * 2)
-
-        assertFalse("the ladder is the next check", retrying.waitedOut(hour * 2, hour))
-    }
-
-    @Test
     fun `waiting out is silent, because the person set the number`() {
-        // The whole notification policy in one assertion: a session that stopped because its own
-        // ceiling arrived is the app doing what it was told, and telling somebody about it is an
-        // argument with a rule they chose.
         val done = session().stopped(AgentSession.StopReason.WAITED_OUT)
 
         assertFalse("it does not need a person", done.needsYou)
