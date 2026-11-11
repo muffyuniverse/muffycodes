@@ -1,5 +1,6 @@
 package com.example.notes
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -94,11 +95,24 @@ class ContextBudgetTest {
 
     @Test
     fun `a session log with no number keeps everything`() {
-        // Zero is the default and it means the evidence is not deleted: the app used to drop the
-        // oldest turns at four megabytes without anybody asking.
-        // **The session limit is in tokens now, and it is a plain number.** It used to be megabytes
-        // converted here; the operator asked for one field in the unit the model is billed in, so
-        // there is nothing to convert and nothing for this test to get wrong.
+        // **Zero is "not set", and the evidence is not deleted.** The app used to drop the oldest
+        // turns at four megabytes without anybody asking; the limit is a token count a person types
+        // now, and leaving it at zero means no limit rather than a small one.
+        val project = File(
+            File(System.getProperty("java.io.tmpdir") ?: "/tmp"),
+            "budget-zero-${System.nanoTime()}",
+        )
+        project.mkdirs()
+        try {
+            val log = AgentLog.open(project)
+            log.told("the first thing")
+            log.told("the second thing")
+
+            assertEquals("nothing was dropped", 0, log.trimSession(0L))
+            assertEquals("and both rows are still there", 2, log.rowCount())
+        } finally {
+            project.deleteRecursively()
+        }
     }
 
     // ---- the estimate, and which way it errs --------------------------------
