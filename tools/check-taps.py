@@ -202,7 +202,9 @@ VOCABULARY = {
     # "page" rather than "bubble" a second time
     "bubble page", "close page",
     # the agent itself, how often it reminds, and the numbers it runs with
-    "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
+    # **`reset agent` is gone**: Reset is a stop now, and `stopAgent` records the press. One gesture
+    # with two names was exactly what this list exists to prevent.
+    "start agent", "stop agent", "stop all agents", "remind me",
     "answer timeout", "result length",
     # **The one clock, after the two were merged again.** They were split when streaming landed -
     # nothing came back at all, versus it went quiet halfway through - and the operator merged them

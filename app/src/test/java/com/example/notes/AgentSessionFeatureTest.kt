@@ -673,11 +673,19 @@ class AgentSessionFeatureTest : FeatureTest() {
             record("groceries").rows().any { it.kind == AgentLog.CALL && it.name == "search" },
         )
         assertTrue(
-            "the press and the act are on the trace",
-            Trace.report().lines.any { it.contains("TAP") && it.contains("reset-agent") } &&
-                Trace.report().lines.any { it.contains("agent-reset") },
+            "the act is on the trace",
+            Trace.report().lines.any { it.contains("agent-reset") },
+        )
+        // **And the agent is off**, because a cleared context with a live poll schedule is a
+        // contradiction: the operator's own words, *"if I reset then I expect the agent to stop,
+        // because he now has clear context — what will he even do!?"*
+        assertEquals(
+            "reset stops it",
+            AgentSession.State.STOPPED,
+            scene.viewModel.sessionOf("groceries")?.state,
         )
 
+        // **Speaking turns it back on**, which is the only switch there is.
         scene.viewModel.sendChat("now something else")
         scene.await("the turn after the reset") { door.asked.size == 3 }
 

@@ -264,56 +264,33 @@ class AgentRunnerTest {
         assertEquals("both went out in the end", 2, door.pings.size)
     }
 
-    // ---- what the phone took, and what it did not ---------------------------
+    // ---- resume, which is seamless -----------------------------------------
 
     @Test
-    fun `a session the phone was not running is written down as a gap, and goes on`() {
-        // A force-stop, an OEM battery manager, a Doze window the system never lifted: none of them
-        // announce themselves, and all of them look the same from inside — a session whose last ping
-        // is hours old. The row is how a hole becomes visible instead of looking like a check that
-        // took no time; the session carries on, because "it must never stop until the operator
-        // removes it" is the stronger rule.
+    fun `a session the phone was not running simply goes on`() {
+        // **Nothing is written about the time the app was not running.** It used to write a `gap`
+        // row explaining an absence the person already knew about — they turned the phone off. The
+        // session is on disk, the tick reads it, and it carries on.
         //
-        // **The row does not wait for a ping to be worth writing.** Three hours of absence is also
-        // past the keepalive's ceiling, so a gap read inside the ping path would have been lost —
-        // and the cache was gone hours ago, so there is nothing to warm either.
+        // A force-stop, an OEM battery manager and a Doze window all look the same from inside, and
+        // none of them is the operator ending anything: "it must never stop until the operator
+        // removes it" is the stronger rule, and resuming is how it is kept.
         on("shopping", now = 1_000)
-        val door = PingDoor()
-        val runner = runner(door)
+        val runner = runner()
 
         runner.tick(1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L)
         settle(runner)
 
         val log = AgentLog.open(File(ws.accountDir, "shopping"))
-        val gap = log.rows().single { it.name == "gap" }
+        assertTrue("no row about it", log.rows().none { it.name == "gap" })
+        assertEquals("still on", AgentSession.State.IDLE, runner.sessions().single().state)
+        // **The clock did not move, because nothing was sent.** A wake three hours later is past the
+        // keepalive's ceiling, so no ping goes out — and `lastPollAt` is when a request was made,
+        // not when the app looked at the clock. The session resumes from where it was.
         assertEquals(
-            "how long, in words a person reads: ${gap.body}",
-            "the phone did not run the agent for 3 h 12 min",
-            gap.body,
-        )
-        assertEquals("and it is the app's row, not the model's", AgentLog.APP, gap.ctx)
-        assertTrue("nothing was sent to a cache that has been cold for hours", door.pings.isEmpty())
-        assertEquals("and the wait starts again from the wake", 1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L, runner.sessions().single().lastPollAt)
-        assertEquals("idle", AgentSession.State.IDLE, runner.sessions().single().state)
-        assertTrue(
-            "and the trace says it",
-            Trace.report().lines.any { it.contains("agent-gap") && it.contains("shopping") },
-        )
-    }
-
-    @Test
-    fun `a poll that is a little late is not the phone stopping anything`() {
-        // A late wake, a network change, a short Doze window: ordinary, and a row about each of them
-        // would bury the one that matters.
-        on("shopping", now = 1_000)
-        val runner = runner()
-
-        runner.tick(1_000 + AgentSession.POLL_MS + 30_000L)
-        settle(runner)
-
-        assertTrue(
-            "nothing to say",
-            AgentLog.open(File(ws.accountDir, "shopping")).rows().none { it.name == "gap" },
+            "no request, so no new poll time",
+            1_000L,
+            runner.sessions().single().lastPollAt,
         )
     }
 

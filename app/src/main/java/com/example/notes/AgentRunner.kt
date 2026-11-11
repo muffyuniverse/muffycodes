@@ -244,17 +244,11 @@ class AgentRunner(
                 Trace.note("agent-reminder", current.notice() ?: "")
                 notify(current)
             }
-            // **A gap is written first, and only so the log has an explanation.** The phone being
-            // off is a fact about the phone; the ceiling is a fact about the time. A session that
-            // was asleep for three hours has both, and if the ceiling ran first the hole in the log
-            // would have nothing in it. The row records and moves `lastPollAt` — it does not move
-            // the clock the ceiling reads.
-            val missed = current.missedBy(now, pollMs)
-            if (missed > 0) {
-                noteGap(current.project, missed, current.branch)
-                current = current.polled(now)
-                put(current, speak = false)
-            }
+            // **Nothing is written about time the app was not running.** It used to write a `gap`
+            // row — "the phone did not run the agent for 3 h 12 min" — and the person who turned
+            // the phone off already knows. Resume is seamless: the session is on disk, the tick
+            // reads it, and it carries on from where it was.
+            //
             // **The waiting ceiling, and it is only a clock.** An agent that concluded, or asked
             // something nobody answered, used to stay idle and poll for ever — nothing but a person
             // who remembered to press Stop would end it. The question is `now - startedAt`: the
@@ -568,27 +562,6 @@ class AgentRunner(
     } catch (t: Throwable) {
         // A row about a reconnect is not worth failing the reconnect for.
         rows
-    }
-
-    /**
-     * What the phone took, said once.
-     *
-     * A session whose last ping is hours old was not running, whatever the reason — a force-stop, an
-     * OEM battery manager, a Doze window the system never lifted. The app cannot be told that
-     * happened; it can see the clock, and a row is how a hole becomes visible instead of looking
-     * like a check that took no time.
-     */
-    private fun noteGap(project: String, missed: Long, branch: String = AgentSession.MAIN) {
-        try {
-            AgentLog.open(ws.treeOf(project, branch)).bookkeeping(
-                AgentLog.NOTE,
-                "gap",
-                "the phone did not run the agent for ${howLong(missed)}",
-            )
-        } catch (t: Throwable) {
-            // A row about a gap is not worth failing the tick that ended the gap for.
-        }
-        Trace.note("agent-gap", "$project · ${howLong(missed)}")
     }
 
     /** The session of [project] as the file has it, or null. */

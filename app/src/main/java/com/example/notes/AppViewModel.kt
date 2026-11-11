@@ -4394,19 +4394,29 @@ class AppViewModel @JvmOverloads constructor(
      * leave the record half in each file.
      */
     fun resetAgent(project: String, branch: String = AgentSession.MAIN) {
-        val ws = workspaceFor("reset") ?: return
-        if (chatWorking || agentBusy(project, branch)) return
-        Trace.tap("reset agent", project)
-        onWorker {
-            val log = AgentLog.open(ws.treeOf(project, branch))
-            val id = log.reset()
-            val rows = log.rows()
-            Trace.note("agent-reset", "$project · row $id")
-            main.post {
-                if (chatProject == project) applyChat(rows, follow = true)
-                message = "The working context was cleared. The session log still has it."
-            }
+        // **Reset stops the agent, because a cleared context and a live poll schedule is a
+        // contradiction.** The operator: *"if I reset then I expect the agent to stop, because he now
+        // has clear context — what will he even do!?"* There is no second act here: `stopAgent` writes
+        // a `STOPPED` session, and `AgentStops.resetIfStopped` — the one place every stop goes
+        // through — clears the context as part of it.
+        //
+        // **Refused while a turn is running**, and that refusal is what makes the ordering safe: a
+        // context replaced under a reply being written would leave the record half in each file, and
+        // a tool still running would land its result in the cleared context.
+        // **No account first**, because that is the question every other door asks first and it is
+        // the one with an answer the person can act on. `stopAgent` returns silently when there is
+        // no workspace, which is right for a stop — there is no session to stop — and wrong here:
+        // the person pressed a button and is owed the reason nothing happened.
+        workspaceFor("reset") ?: return
+        if (chatWorking || agentBusy(project, branch)) {
+            message = "The agent is working. Wait for it to finish, then reset."
+            return
         }
+        // **No tap of its own.** `stopAgent` records the press, and one gesture with two ids is what
+        // the trace exists to prevent. The person pressed Reset; the trace says the agent stopped,
+        // which is what happened.
+        stopAgent(project, branch)
+        message = "The agent is off and its working context was cleared. The session log still has it."
     }
 
     /** Switches it off. The reason is recorded, because "why did it stop" is the question later. */

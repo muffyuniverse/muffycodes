@@ -238,38 +238,6 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `a session the phone was not running is late, and one that was is not`() {
-        // **The only thing the app can honestly say about a force-stop.** Android does not tell an
-        // app it was stopped, so the clock is the evidence: a session that should have polled every
-        // four minutes and did not for three hours was not running. It is written down rather than
-        // turned into a stopped state — the session is about to carry on, and a label saying
-        // "stopped" about a session that is running would be the label lying about the fact.
-        val on = session().warmed(0).copy(lastPollAt = 1_000)
-
-        // **The default interval's gap.** The session has no interval set, so it is polled every
-        // POLL_MS and the gap is three of those — the number the app used before the interval became
-        // a setting, and still what an unset one means.
-        val gap = AgentSession.POLL_MS * AgentSession.GAP_INTERVALS
-        assertEquals("on time", 0L, on.missedBy(1_000 + AgentSession.POLL_MS))
-        assertEquals("a late wake is not the phone", 0L, on.missedBy(1_000 + gap))
-        assertEquals(
-            "hours are",
-            2 * gap,
-            on.copy(lastPollAt = 1_000 + gap).missedBy(1_000 + 3 * gap),
-        )
-        assertEquals(
-            "a session that never polled has nothing to be late for",
-            0L,
-            session().missedBy(99_999_999),
-        )
-        assertEquals(
-            "and a stopped one is not polling at all",
-            0L,
-            on.stopped(StopReason.BY_OPERATOR).missedBy(99_999_999),
-        )
-    }
-
-    @Test
     fun `a reminder says which one it is, and the teens are not second`() {
         // **`11st` is what a naive `% 10` produces**, and it is the kind of wrong that survives
         // review because nobody counts to eleven in a test.

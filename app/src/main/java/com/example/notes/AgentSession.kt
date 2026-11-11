@@ -19,8 +19,7 @@ package com.example.notes
  * **There is no "stopped by the phone" state, and its absence is deliberate.** The design named
  * one, and the app cannot honour both it and the stronger rule it sits under: "it must never stop
  * until the operator removes it". A phone that force-stops the app has not been asked to end the
- * session — so on resume the session goes on, and what the phone did is written down where it can
- * be read ([AgentSession.missedBy] and the row the runner writes). A state that says "stopped"
+ * session — so on resume the session simply goes on from where it was. A state that said "stopped"
  * about a session that is about to carry on would be the label lying about the fact.
  *
  * A *session* is one per project, because a session is a conversation and a conversation belongs
@@ -231,14 +230,6 @@ data class AgentSession(
          */
         const val DEFAULT_RECONNECT_MS = 10 * 60 * 1000L
 
-        /**
-         * How many intervals late a poll has to be before the app says the phone was not running it.
-         *
-         * A multiple rather than a fixed number of minutes, because the interval is the operator's:
-         * three late checks of a one-minute session is three minutes, and of a four-minute one is
-         * twelve. A single constant would have been wrong for every setting but the default.
-         */
-        const val GAP_INTERVALS = 3
 
         /** `2nd`, `3rd`… and `11th`, which is why the last two digits are checked first. */
         fun ordinal(n: Int): String {
@@ -373,20 +364,6 @@ data class AgentSession(
      * Three intervals, not one: a late wake, a network change and a Doze window are all ordinary,
      * and a row about every one of them would be noise.
      */
-    /**
-     * How late this session's next check is, when it is late enough to be the phone.
-     *
-     * **Three intervals, and the interval is the setting's.** A session polled every minute that has
-     * not been polled for five is the phone having stopped the app; one polled every four minutes
-     * and four seconds late is a phone doing its best. With a fixed three-times-four-minutes this
-     * would have called every session with a short interval a gap, and reported nothing for one with
-     * a long interval.
-     */
-    fun missedBy(at: Long, every: Long = intervalMs): Long {
-        if (!running || lastPollAt <= 0) return 0
-        val late = at - lastPollAt
-        return if (late > every * GAP_INTERVALS) late else 0
-    }
 
     /**
      * A poll was sent at [at].
