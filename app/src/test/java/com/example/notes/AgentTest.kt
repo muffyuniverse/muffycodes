@@ -1175,6 +1175,57 @@ class AgentTest {
     }
 
     @Test
+    fun `a description that names a limit names the limit the code enforces`() {
+        // **The failure this test exists for, and it happened.** The prompts were rewritten from
+        // memory of the code rather than from it, and four numbers came out wrong: `search` said
+        // max 500 when `MOST_PATHS` is 100, `depth` said 8 when the ceiling is 16, `look` said 8
+        // pictures when `MAX_PICTURES` is 4, and `query` invented two table names.
+        //
+        // A number in a description is a claim about a constant, and a claim that is not checked is
+        // a claim that drifts. The constants are interpolated now, so this asserts the mechanism
+        // rather than each number: a description naming a limit must name it from the code.
+        val described = AgentTools.specs().associate { it.name to it.description }
+
+        // **The ones with a limit worth stating**, and each must carry the constant's own value.
+        assertTrue(
+            "search states the count ceiling: ${described["search"]}",
+            described.getValue("search").contains("Max ${AgentTools.MOST_PATHS}"),
+        )
+        assertTrue(
+            "search states the default count: ${described["search"]}",
+            described.getValue("search").contains("Default ${AgentTools.DEFAULT_PATHS}"),
+        )
+        assertTrue(
+            "search states the depth ceiling: ${described["search"]}",
+            described.getValue("search").contains("1-${AgentTools.SEARCH_DEPTH_MOST}"),
+        )
+        assertTrue(
+            "look states the picture ceiling: ${described["look"]}",
+            described.getValue("look").contains("at most ${AgentTools.MAX_PICTURES}"),
+        )
+        assertTrue(
+            "log states its default: ${described["log"]}",
+            described.getValue("log").contains("default ${AgentTools.LOG_SHOWN}"),
+        )
+    }
+
+    @Test
+    fun `the query description carries the schema rather than a memory of it`() {
+        // **`SqlTool.SCHEMA` was written, documented, and read by nothing.** The description beside it
+        // named two tables that do not exist, so a model was told the wrong column names and had no
+        // way to find the right ones. The schema is one string in one place now, and this is the
+        // assertion that it is the one being sent.
+        val query = AgentTools.specs().first { it.name == "query" }.description
+        assertTrue("the real tables are named: $query", query.contains("roll_day"))
+        assertTrue("and the raw one: $query", query.contains("requests"))
+        assertTrue("with the columns: $query", query.contains("bucket"))
+        assertTrue(
+            "and nothing invented: $query",
+            !query.contains("`response`") && !query.contains("roll_hour` (hour, requests"),
+        )
+    }
+
+    @Test
     fun `no key is accepted without being described`() {
         // **A key only the whitelist knows is a key found by guessing.** `raw` and `id` were keys
         // `read` took while its example named neither, and the example is what a model copies; the
