@@ -78,6 +78,10 @@ object AgentStops {
             AgentSession.StopReason.PROVIDER_REFUSED -> "the provider kept refusing"
             AgentSession.StopReason.LOOP -> "it was going in circles"
             AgentSession.StopReason.ERROR -> "something went wrong"
+            // **Not a failure, and the row should say so in the person's own terms.** The agent
+            // waited as long as the setting allowed and switched itself off; the next agent to read
+            // this row needs to know it was a rule rather than a fault.
+            AgentSession.StopReason.WAITED_OUT -> "it waited as long as you allowed"
             null -> "it stopped"
         }
     }
