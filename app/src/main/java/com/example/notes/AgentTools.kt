@@ -1250,7 +1250,17 @@ class AgentTools(
             },
             row = { id -> log.rows().firstOrNull { it.id == id }?.body },
             call = { tool, inner ->
-                run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
+                val answer = run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
+                // **The body, not the answer.** Every command's result carries `0\n` or `1\n` first
+                // — that is what `run` promises — and a value pasted into a file must not carry the
+                // status line with it. **A refusal is a failure, not a value**: an empty paste
+                // reported as success is the worst outcome available here, so the refusal's own
+                // sentence becomes the refusal.
+                if (answer.startsWith("1\n")) {
+                    Result.failure(IllegalArgumentException(answer.removePrefix("1\n").trim()))
+                } else {
+                    Result.success(answer.removePrefix("0\n"))
+                }
             },
             // **A key that holds a call is not a value.** `background`'s `args` describe the command
             // it defers — resolving them would run that command now, which is the one thing a
@@ -3053,8 +3063,12 @@ class AgentTools(
     private fun restore(args: JSONObject, deadline: Deadline): String {
         val revision = args.optString("revision").trim()
         if (revision.length < 7) return refusal("Give the version id that `log` showed you")
-        val asked = args.optString("path").trim()
-        if (asked.isEmpty()) {
+        // **Absent, not empty.** `{"path":""}` is a model that named a place and named it wrongly, and
+        // it gets the same refusal every other command gives — the project's own folder is not a
+        // file to write. Only a call that never mentioned `path` means "the whole project", which is
+        // the operator's shape and a different sentence.
+        val asked = if (args.has("path")) args.optString("path").trim() else ""
+        if (!args.has("path")) {
             // **The whole tree.** `keep` is read here rather than passed on, because the decision it
             // makes belongs to this command: "was the stage kept" is a fact about the checkout, not
             // an argument to the repository layer.

@@ -225,7 +225,9 @@ class AgentToolsTest {
         // **`message` is the one argument, and it is not a ref.** A push now makes the version
         // (2026-11-10: a save only stages), so the tool has to be able to say why — and the reason a
         // person reads in the history is worth an argument that a branch name never was.
-        assertEquals("push takes a message and nothing else", setOf("message"), AgentTools.KEYS["push"])
+        // **`tag` is the second argument**, and it is not a ref either: it names the version a push
+        // marks, which is a name the host records, not a branch to send to.
+        assertEquals("push takes a message and an optional tag", setOf("message", "tag"), AgentTools.KEYS["push"])
         assertEquals("and pull takes no argument", emptySet<String>(), AgentTools.KEYS["pull"])
     }
 

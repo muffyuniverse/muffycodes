@@ -131,7 +131,7 @@ object Args {
         isPath: Boolean,
         read: (String) -> String?,
         row: (Int) -> String?,
-        call: (String, JSONObject) -> String,
+        call: (String, JSONObject) -> Result<String>,
     ): Expanded {
         // **A source is one object with exactly one key**, and more than one is refused rather than
         // resolved in some order: `{"row":7,"file":"x"}` has no meaning that a reader could predict.
@@ -181,7 +181,10 @@ object Args {
                         )
                     }
                     val inner = raw.optJSONObject("args") ?: JSONObject()
-                    Expanded.One(call(tool, inner))
+                    call(tool, inner).fold(
+                        onSuccess = { Expanded.One(it) },
+                        onFailure = { Expanded.Failed(it.message ?: "that command could not be run") },
+                    )
                 }
                 else -> Expanded.Failed(
                     "`$key` is not a source. A value may name `row`, `file` or `tool`.",

@@ -116,7 +116,7 @@ class ArgsTest {
         isPath = isPath,
         read = { path -> if (path == "notes.md") "the file's text" else null },
         row = { id -> if (id == 17) "the row's body" else null },
-        call = { tool, _ -> "the $tool result" },
+        call = { tool, _ -> Result.success("the $tool result") },
     )
 
     @Test
@@ -191,12 +191,12 @@ class ArgsTest {
         // braces; expanding it would rewrite the person's text into two different files.
         assertEquals(
             2,
-            (Args.expand("n/{a,b}.md", isPath = true, read = { null }, row = { null }, call = { _, _ -> "" })
+            (Args.expand("n/{a,b}.md", isPath = true, read = { null }, row = { null }, call = { _, _ -> Result.success("") })
                 as Args.Expanded.Many).values.size,
         )
         assertEquals(
             "n/{a,b}.md",
-            (Args.expand("n/{a,b}.md", isPath = false, read = { null }, row = { null }, call = { _, _ -> "" })
+            (Args.expand("n/{a,b}.md", isPath = false, read = { null }, row = { null }, call = { _, _ -> Result.success("") })
                 as Args.Expanded.One).value,
         )
     }
@@ -210,7 +210,7 @@ class ArgsTest {
             pathKeys = setOf("path"),
             read = { "text of $it" },
             row = { null },
-            call = { _, _ -> "" },
+            call = { _, _ -> Result.success("") },
         ).getOrThrow()
         assertEquals("text of notes.md", resolved.getString("path"))
     }
