@@ -87,7 +87,7 @@ object Args {
         pathKeys: Set<String>,
         read: (String) -> String?,
         row: (Int) -> String?,
-        call: (String, JSONObject) -> String,
+        call: (String, JSONObject) -> Result<String>,
         /**
          * Keys whose value is **a call, not a value**, and so is not resolved here.
          *

@@ -1249,7 +1249,7 @@ class AgentTools(
                 }
             },
             row = { id -> log.rows().firstOrNull { it.id == id }?.body },
-            call = { tool, inner ->
+            call = call@ { tool, inner ->
                 val answer = run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
                 // **The body, not the answer.** Every command's result carries `0\n` or `1\n` first
                 // — that is what `run` promises — and a value pasted into a file must not carry the
@@ -1257,10 +1257,11 @@ class AgentTools(
                 // reported as success is the worst outcome available here, so the refusal's own
                 // sentence becomes the refusal.
                 if (answer.startsWith("1\n")) {
-                    Result.failure(IllegalArgumentException(answer.removePrefix("1\n").trim()))
-                } else {
-                    Result.success(answer.removePrefix("0\n"))
+                    return@call Result.failure(
+                        IllegalArgumentException(answer.removePrefix("1\n").trim()),
+                    )
                 }
+                Result.success(answer.removePrefix("0\n"))
             },
             // **A key that holds a call is not a value.** `background`'s `args` describe the command
             // it defers — resolving them would run that command now, which is the one thing a
