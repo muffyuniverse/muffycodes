@@ -205,7 +205,15 @@ class ConnectionsTest {
         host: String,
         rows: Map<Pair<SecretScope, ConnKind>, Connection>,
         project: String? = "acme",
-        branch: String? = "feature",
+        /**
+         * **`main` by default, because that is where a project's own row lives.**
+         *
+         * It was `feature`, and every test here stored its row at *project* scope — so they passed
+         * only because the lookup walked upward from the branch to the project. The walk is gone
+         * (scopes are separate records), and a helper that asked one scope while the rows sat at
+         * another would have kept asserting a rule the app no longer has.
+         */
+        branch: String? = AgentSession.MAIN,
     ): Connection? {
         val kind = kindFor(name) ?: return null
         return namedConnection(
@@ -282,7 +290,11 @@ class ConnectionsTest {
             branchRow to Connection("gitlab.com", "glpat-branch", nameable = true),
         )
 
-        assertEquals("the branch's", "glpat-branch", named("git", "gitlab.com", grant)?.secret)
+        assertEquals(
+            "the branch's",
+            "glpat-branch",
+            named("git", "gitlab.com", grant, branch = "feature")?.secret,
+        )
         // **A branch with no grant is not answered by the project's row.** Scopes are separate records
         // — a branch's is written when the branch is made — so falling back would spend a token a push
         // does not use, and `{{secret:git}}` would then describe a different identity than the push.
