@@ -3038,7 +3038,7 @@ class AgentTest {
         // A tag is now an argument of `push`, and `push` with nothing staged and nothing to say is
         // the ordinary "there is nothing to send" — which the operator's own Sync button reaches.
         // So the old test's subject is gone; what replaces it is the case a model will actually hit.
-        val said = call("push", JSONObject("""{}""").toString())
+        val said = tools().run(Call("c-push", "push", "{}"))
 
         assertTrue("it answers: $said", said.startsWith("0"))
     }
