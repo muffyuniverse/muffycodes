@@ -1015,6 +1015,12 @@ jobs:
           MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
+          # **The branch, declared again here because `env:` is per step.** It was set on the step
+          # that works out the version, and this step read `${BRANCH:-}` from a variable that did not
+          # exist in its own environment — so the test was always false, the else branch always ran,
+          # and no release APK was ever built on `main`. The step after it then failed looking for a
+          # file that had never been made, which read as a signing fault and was a missing `env:`.
+          BRANCH: ${{ github.ref_name }}
         run: |
           # --no-configuration-cache, deliberately: this invocation carries a
           # --profile writes a report of what each task took. It costs a moment and
