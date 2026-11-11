@@ -179,8 +179,10 @@ class ArgsTest {
     @Test
     fun `a source naming neither row nor file nor tool is refused, and names what there is`() {
         val failed = one(JSONObject().put("video", "x")) as Args.Expanded.Failed
-        assertTrue(failed.why.contains("`video`"))
+        // **The refusal names what is allowed**, because `video` was never a source key — it is a
+        // key the check did not recognise, and listing the three is the answer that helps.
         assertTrue(failed.why.contains("`row`"))
+        assertTrue(failed.why.contains("`tool`"))
     }
 
     // ---- the two halves together -------------------------------------------

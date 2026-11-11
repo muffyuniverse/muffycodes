@@ -196,8 +196,11 @@ object Args {
                         onFailure = { Expanded.Failed(it.message ?: "that command could not be run") },
                     )
                 }
+                // **Unreachable, and written as such.** `source` is one of the three by the check
+                // above, so this arm exists only because `when` on a `String?` needs it — and it
+                // names what is allowed rather than what was not, since there is nothing to name.
                 else -> Expanded.Failed(
-                    "`$key` is not a source. A value may name `row`, `file` or `tool`.",
+                    "A value may name a source with `row`, `file` or `tool`.",
                 )
             }
         }
