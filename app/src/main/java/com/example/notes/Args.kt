@@ -140,16 +140,20 @@ object Args {
             // **`tool` is the one source that takes a second key**, because a call needs arguments
             // as well as a name. The others are one key by definition — `{"row":7,"file":"x"}` has
             // no meaning a reader could predict, and refusing it is better than picking one.
-            val allowed = if ("tool" in keys) setOf("tool", "args") else setOf(keys.firstOrNull().orEmpty())
+            // **The source key is chosen, not assumed to be first.** `JSONObject` does not promise an
+            // order, so `keys.first()` could be `args` — which is not a source and would report a
+            // failure about a key the model never named as one.
+            val source = keys.firstOrNull { it in setOf("row", "file", "tool") }
+            val allowed = if (source == "tool") setOf("tool", "args") else setOfNotNull(source)
             val extra = keys.filterNot { it in allowed }
-            if (keys.isEmpty() || extra.isNotEmpty()) {
+            if (source == null || extra.isNotEmpty()) {
                 return Expanded.Failed(
                     "A value that names a source has one key — `row`, `file` or `tool` (with " +
                         "`args`) — and this one has " +
                         (if (keys.isEmpty()) "none" else keys.joinToString(", ")) + ".",
                 )
             }
-            return when (val key = keys.first()) {
+            return when (source) {
                 "row" -> {
                     val id = raw.optInt("row", -1)
                     if (id < 0) {
@@ -255,6 +259,11 @@ object Braces {
         val tail = text.substring(close + 1)
         val parts = alternatives(body)
             .getOrElse { return Result.failure(it) }
+        // **A group with no comma and no range is literal**, and returning `"{$body}"` from
+        // [alternatives] would hand it straight back to this loop — the brace is still there, so it
+        // expands forever. It is recognised here instead, before the recursion: the text is one
+        // path, exactly as written.
+        if (parts.isEmpty()) return Result.success(listOf(text))
         val out = mutableListOf<String>()
         for (part in parts) {
             // **The tail is expanded for each alternative**, so a second group multiplies rather than
@@ -284,8 +293,9 @@ object Braces {
         val range = rangeOf(body)
         if (range != null) return Result.success(range)
         val parts = splitTopLevel(body)
-        // One part means no comma was found at this level: bash leaves `{x}` alone.
-        return Result.success(if (parts.size == 1) listOf("{$body}") else parts)
+        // **One part means no comma was found at this level**, so bash leaves `{x}` alone — and the
+        // empty list is how that is said, because returning `{x}` would be re-expanded forever.
+        return Result.success(if (parts.size == 1) emptyList() else parts)
     }
 
     /** `1..9`, `a..e`, and a step — the three shapes bash allows. */

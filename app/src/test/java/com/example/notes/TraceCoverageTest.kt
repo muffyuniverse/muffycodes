@@ -56,7 +56,7 @@ class TraceCoverageTest {
 
             val before = Trace.report().taps
             val answer = AgentTools(ws, "shopping", git, log).run(
-                Call(id = "1", tool = "query", args = """{"sql":"SELECT COUNT(*) AS n FROM requests","path":"count.csv"}"""),
+                Call(id = "1", tool = "query", args = """{"sql":"SELECT COUNT(*) AS n FROM requests"}"""),
             )
 
             // **The summary starts with the column header**, then the count, then the path - so the
@@ -64,7 +64,11 @@ class TraceCoverageTest {
             // emit. (`query` returns prose, like every other tool that produces a document.)
             assertTrue("the column is named: $answer", answer.startsWith("n"))
             assertTrue("and the row was found: $answer", answer.contains("1 rows"))
-            assertTrue("and a file was written", File(ws.projectDir("shopping"), "count.csv").exists())
+            // **The file is filed, not named by the caller** (operator, 2026-11-10): the answer
+            // names `agent/sql/query-<ms>.csv`, and the `path` argument is gone.
+            val where = Regex("""agent/sql/query-\d+\.csv""").find(answer)?.value
+                ?: error("the answer names no file: $answer")
+            assertTrue("and a file was written", File(ws.projectDir("shopping"), where).isFile)
             assertTrue("the tap was recorded", Trace.report().taps > before)
             assertTrue(
                 "and named: ${newest()}",
