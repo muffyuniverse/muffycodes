@@ -1128,7 +1128,7 @@ class AppViewModel @JvmOverloads constructor(
      * Widest last: branch → project → account → general. `main` is the project, so a branch made from
      * `main` is filled from the project's row, which is exactly the parent it was cut from.
      */
-    private fun inForce(scope: SecretScope, kind: ConnKind): Connection? {
+    private fun inForce(scope: SecretScope, kind: ConnKind): com.example.notes.Connection? {
         val (project, branch) = placeOf(scope)
         for (one in connectionScopes(project, branch)) {
             credentials.connection(one, kind)?.takeIf { it.secret.isNotBlank() }?.let { return it }
