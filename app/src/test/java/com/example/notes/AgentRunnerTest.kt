@@ -170,14 +170,19 @@ class AgentRunnerTest {
         val runner = runner(door)
         val minute = 60_000L
 
-        // **Polled through the hour, as a running phone would.** Ticking once at +59 min would be a
-        // *gap* — the phone not running the app — and a gap restarts the wait by design, so the
-        // session would still be on for a reason that has nothing to do with the ceiling.
-        for (m in 1..59) {
-            runner.tick(1_000 + m * minute)
+        // **Polled through the hour, at the poll's own interval.** Ticking every minute would be a
+        // *gap* every fourteen minutes — the app not running for longer than three intervals — and a
+        // gap restarts the wait by design, so the session would still be on for a reason that has
+        // nothing to do with the ceiling.
+        var at = 1_000L
+        // **Four minutes short of the hour**, which is a poll interval, so the last tick before the
+        // ceiling is a real poll rather than a gap.
+        while (at < 1_000L + 56 * minute) {
+            at += AgentSession.POLL_MS
+            runner.tick(at)
             settle(runner)
         }
-        assertTrue("still on, an hour in less one minute", runner.sessions().single().running)
+        assertTrue("still on, four minutes short of the hour", runner.sessions().single().running)
 
         runner.tick(1_000 + 60 * minute)
         settle(runner)
@@ -199,10 +204,12 @@ class AgentRunnerTest {
         on("shopping", now = 1_000)
         val runner = runner()
 
-        // **Polled through, not jumped over**: a single tick a day later is a *gap*, and a gap
-        // restarts the wait — so it would prove nothing about the ceiling.
-        for (h in 1..24) {
-            runner.tick(1_000 + h * 60 * 60_000L)
+        // **Polled through at the poll's own interval**, for the same reason: an hourly tick is a gap
+        // every time, and a gap restarts the wait.
+        var at = 1_000L
+        while (at < 1_000L + 24 * 60 * 60_000L) {
+            at += AgentSession.POLL_MS
+            runner.tick(at)
             settle(runner)
         }
 
