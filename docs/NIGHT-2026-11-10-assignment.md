@@ -11,6 +11,10 @@ reshaping, then the new capability (`log`), then the two that need a decision fr
 
 ## 0. Where the branch actually stands
 
+**DONE — the whole list landed, CI green on `bac0c0d6` (run 42942459137).** Twenty commits, each
+green before the next. The last section records what the night changed about the plan itself.
+
+
 `ce142bb6` and `05e521fe` are pushed; CI was red on `ce142bb6` for three tests I wrote myself, and
 `05e521fe` fixes them. **Nothing else starts until that run is green** — a red branch makes every
 subsequent verdict worthless, and this session has already spent two rounds on my own test mistakes.
