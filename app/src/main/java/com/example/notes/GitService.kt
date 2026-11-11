@@ -1832,8 +1832,17 @@ object GitService {
         // **A version that is not there is not HEAD.** The same rule `treeFor` states: a wrong id
         // that fell back to the current tree would make a checkout answer "done" about a version
         // that was never read.
-        val commit = repo.resolve(revisionId.trim())
+        // **`parseCommit`, not the bare id.** `repo.resolve` answers an `ObjectId`, which may be a
+        // tree, a tag or a blob; a checkout needs the commit, and parsing is what says which it is.
+        val start = repo.resolve(revisionId.trim())
             ?: throw IllegalArgumentException("There is no version $revisionId in this project")
+        val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
+            try {
+                walk.parseCommit(start)
+            } catch (e: Throwable) {
+                throw IllegalArgumentException("There is no version $revisionId in this project")
+            }
+        }
         // **`checkout` with a start point detaches HEAD, which is not what a restore means.** The
         // tree must come from the version while the *branch* stays where it is — otherwise the next
         // push would send from a detached head, and the person's screen would say "no branch".
@@ -1861,7 +1870,13 @@ object GitService {
         // **And now the deletions.** A tracked file the version does not have is gone; a file that is
         // untracked is left alone, because it is not part of any version and deleting it would be
         // destroying work this command was never asked about.
-        val tracked = Git(repo).use { git -> git.lsTree().call().map { it.path } }
+        // **What was tracked before, read from the tree that is on disk's index** — `lsTree` is not
+        // in this jgit, and the index is the right source anyway: it is what "tracked" means here,
+        // and an untracked file is one no version ever had.
+        val tracked = mutableListOf<String>()
+        org.eclipse.jgit.dircache.DirCache.read(repo).use { cache ->
+            for (entry in cache) tracked.add(entry.pathString)
+        }
         for (pathInTree in tracked) {
             if (pathInTree in wanted) continue
             val target = File(repo.workTree, pathInTree)
