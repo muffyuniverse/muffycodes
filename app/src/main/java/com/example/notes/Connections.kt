@@ -158,27 +158,38 @@ fun resolvedConnection(
     val asked = hostOfAddress(host)
     if (asked.isEmpty()) return null
     val own = scopeOfPlace(project, branch)
-    // A row is usable for this host when it has a token and its address covers the host — and a row
-    // with no address at all is usable only where it is the one that supplies the address.
-    // **A local function, not a lambda**, because Kotlin forbids named arguments on a function type
-    // and `mustNameHost` is the one thing a reader has to be told at every call site.
-    fun tokenFor(row: Connection?, mustNameHost: Boolean): Connection? = row?.takeIf {
-        it.secret.isNotBlank() &&
-            if (it.address.isBlank()) !mustNameHost else hostCovers(hostOfAddress(it.address), asked)
+    // **A wider row is a whole credential**, so it is usable only when it has a token *and* names a
+    // host that covers the one asked about. A row with no address is not a wider credential at all —
+    // it is a branch token, which stores no host because the project above it supplies one.
+    fun usable(row: Connection?): Connection? = row?.takeIf {
+        it.secret.isNotBlank() && it.address.isNotBlank() &&
+            hostCovers(hostOfAddress(it.address), asked)
     }
-    val above = parentChain(project, branch)
-        .firstNotNullOfOrNull { tokenFor(at(it), mustNameHost = true) }
+    val above = parentChain(project, branch).firstNotNullOfOrNull { usable(at(it)) }
 
     if (own !is SecretScope.Branch) {
         // The wider scopes are whole credentials, so their own row is the answer when it is usable.
-        return tokenFor(at(own), mustNameHost = true) ?: above
+        return usable(at(own)) ?: above
     }
 
     // **A branch may answer with a token and nothing else**, which is the whole point of the scope.
-    // Everything except the token comes from the row above, and a branch whose token stands alone
-    // still borrows the host the question named — the remote is what says which server it is for.
+    // Everything except the token comes from the row above — **including the host**, which is the part
+    // that must not be invented. A branch row stores no address, so the server it is for is whatever
+    // the project names; accepting the token for any host asked would send it somewhere nobody
+    // entered it for, which is the one mistake this app cannot undo.
     val mine = at(own)
-    val token = tokenFor(mine, mustNameHost = false)?.secret
+    val token = mine
+        ?.takeIf { it.secret.isNotBlank() }
+        ?.takeIf {
+            if (it.address.isNotBlank()) {
+                hostCovers(hostOfAddress(it.address), asked)
+            } else {
+                // No address of its own: the host in force is the project's, so the token is for that
+                // and for nothing else. `above` is null when no wider row names this host either.
+                above != null
+            }
+        }
+        ?.secret
     return when {
         // A token of its own: the branch's checkmark decides, and the rest is the project's.
         token != null -> Connection(

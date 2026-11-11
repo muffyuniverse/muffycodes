@@ -290,13 +290,18 @@ class ConnectionsTest {
             feature to Connection("", "glpat-feature", nameable = true),
         )
 
-        val followed = named("git", "gitlab.com", mapOf(project to rows.getValue(project)))
+        val followed = named(
+            "git",
+            "gitlab.com",
+            mapOf(project to rows.getValue(project)),
+            branch = "feature",
+        )
         assertEquals("the project's token", "glpat-project", followed?.secret)
         assertEquals("and its username, which a branch does not store", "oauth2", followed?.user)
         assertEquals("and its host", "gitlab.com", followed?.address)
         assertEquals("and its grant", true, followed?.nameable)
 
-        val own = named("git", "gitlab.com", rows)
+        val own = named("git", "gitlab.com", rows, branch = "feature")
         assertEquals("a branch with a token of its own spends it", "glpat-feature", own?.secret)
         assertEquals("but still presents the project's username", "oauth2", own?.user)
         assertEquals("and is bound to the project's host", "gitlab.com", own?.address)
