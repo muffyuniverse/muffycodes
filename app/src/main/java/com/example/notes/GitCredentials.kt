@@ -134,3 +134,38 @@ object GitCredentials {
         return Answer.Say(withheld(host, accountHost))
     }
 }
+
+/**
+ * **What `env` answers about the account an agent works as** — every fact a request needs except the
+ * key, which is reached by name through `{{secret:git}}` and never written down.
+ *
+ * **The split is the whole point.** A person needs to know *who* their agent is before they can
+ * reason about what it just did, and the commit it made already says all of this in its author line.
+ * A token in the same answer would be a token in `session.log`, which is inside the project tree and
+ * syncs to the host — the one failure this app cannot undo.
+ */
+data class GitEnv(
+    /** The account signed in — the identity every commit and every request is made as. */
+    val login: String,
+    /** The name and address a commit carries. Both fall back to the login, as [Account.author] does. */
+    val commitName: String,
+    val commitEmail: String,
+    /** The host this account signed in to, which is the host its own key is for. */
+    val host: String,
+    /** The name a token is presented as on this host — `oauth2` on GitLab, blank on GitHub. */
+    val gitUser: String,
+    /** The branch's remote, or null when the project has none. */
+    val remote: String?,
+    /**
+     * **Whether a token is there to be spent**, which is the only thing the checkmark gates.
+     *
+     * A boolean rather than the value, deliberately: this is what a window can draw and what an answer
+     * can say, and neither needs to hold the secret to say it.
+     */
+    val maySpend: Boolean,
+) {
+    companion object {
+        /** Nothing known, which is what a tool set built in a test answers. */
+        val NONE = GitEnv("", "", "", "", "", null, maySpend = false)
+    }
+}

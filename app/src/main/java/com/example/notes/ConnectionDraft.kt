@@ -43,9 +43,13 @@ data class ConnectionDraft(
     /**
      * **May the agent spend this on its own requests to this host?**
      *
-     * **Off unless ticked**, and it is the only way a credential the app itself uses becomes nameable by
-     * `auth: git` ([Connection.nameable]). A window that defaulted it on would be handing an agent a
-     * token because a row exists, which is the opposite of a grant.
+     * **The only way a credential the app itself uses becomes nameable by the agent** ([Connection.nameable])
+     * — it is what `env` reports and what `{{secret:git}}` resolves against.
+     *
+     * **Off for an existing row, on when a branch is created.** Those are two different questions. A row
+     * already stored was written before anybody was asked, so silence on it means nobody granted
+     * anything; a branch being created right now is a branch whose window asked, and the operator's
+     * rule is that the box arrives ticked — a person withdraws a grant rather than grants one.
      */
     val nameable: Boolean = false,
 ) {
@@ -124,9 +128,14 @@ data class ConnectionDraft(
          * A person changing only the token should see the address and the user that are in force, not
          * two empty boxes they have to reconstruct.
          *
-         * **The secret is never filled in.** It is not read back into a field by policy — a window that
-         * showed it would be a screenshot away from a leak — so an empty key box means "keep the one
-         * that is here", and the sentence beside it says whether one is.
+         * **The secret *is* filled in**, and that reversed a policy on 2026-11-11. It used to be
+         * withheld — a window that showed a key was "a screenshot away from a leak" — and the cost was
+         * that a new branch had to be pasted a token by hand or could not push at all. The operator's
+         * rule now: *"by default the field is prefilled with the value from the higher scope."*
+         *
+         * What makes that safe is [changesAgainst]: a window opened on the values in force and saved
+         * unchanged writes **nothing**, so a prefilled token is a display of what already applies
+         * rather than a new copy of it. A scope gets its own row only when somebody changes something.
          */
         fun opening(
             kind: ConnKind,

@@ -27,6 +27,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -128,10 +132,24 @@ fun PromptDialog(
 fun NewBranchDialog(
     /** The branches this can start from, `main` first. Never empty. */
     parents: List<String>,
+    /**
+     * **The credential the parent holds, filled in and editable** — host, token and commit name.
+     *
+     * A branch is made by this window and by nothing else, so this is where its credential is set: a
+     * branch born without one would need a fallback read upward, and a fallback read is a branch that
+     * silently pushes as its project. Filled from the parent because that is what a branch *is* — the
+     * parent's files and the parent's memory — and editable because a token a host limits to one
+     * branch is a credential that branch owns.
+     */
+    credential: ConnectionDraft = ConnectionDraft(ConnKind.GIT),
     onDismiss: () -> Unit,
-    onConfirm: (name: String, from: String) -> Unit,
+    onConfirm: (name: String, from: String, credential: ConnectionDraft) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf(credential.address) }
+    var secret by remember { mutableStateOf(credential.secret) }
+    var user by remember { mutableStateOf(credential.user) }
+    var nameable by remember { mutableStateOf(credential.nameable) }
     // **`main` unless the list says otherwise**, per the operator. The list is `main` first, so this is
     // also the first chip — a window whose default is the first thing on it needs no explaining.
     var from by remember(parents) { mutableStateOf(parents.firstOrNull() ?: AgentSession.MAIN) }
@@ -177,13 +195,80 @@ fun NewBranchDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                // **The branch's own credential, set by the act that makes the branch.** Nothing else
+                // in the app creates a branch, so nothing else could set one — which is what makes
+                // "every branch has its own row" true rather than hoped for.
+                Text(
+                    "Its git credential",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Host") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Uri,
+                        imeAction = ImeAction.Next,
+                    ),
+                    supportingText = { Text("Filled in from $from. Change it for a host of its own.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it },
+                    label = { Text("Token") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Next,
+                    ),
+                    supportingText = {
+                        Text(
+                            if (secret.isBlank()) {
+                                "Filled in from $from, so this branch can push straight away."
+                            } else {
+                                "Never shown again, and sent only to this host."
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    label = { Text("Name commits are made as") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    supportingText = { Text("What the host wants beside the token: oauth2 on GitLab, blank on GitHub.") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = nameable, onCheckedChange = { nameable = it })
+                    Text(
+                        "Let this branch's agent use the token on its own requests",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = text.isNotBlank(),
                 onClick = {
-                    onConfirm(text.trim(), from)
+                    onConfirm(
+                        text.trim(),
+                        from,
+                        ConnectionDraft(
+                            kind = ConnKind.GIT,
+                            address = address,
+                            secret = secret,
+                            user = user,
+                            nameable = nameable,
+                        ),
+                    )
                     onDismiss()
                 },
             ) { Text("Create") }

@@ -2300,6 +2300,64 @@ class AgentTest {
         assertFalse("the folder is gone", folder.exists())
     }
 
+    // ---- env -----------------------------------------------------------------
+
+    @Test
+    fun `env answers the identity whether or not the token may be spent`() {
+        // **The git half is unconditional.** A person asking why an agent did something needs to know
+        // who it was, and that answer must not depend on a permission about a token: an agent with no
+        // grant still makes commits, and its commits still carry a name.
+        val who = {
+            GitEnv(
+                login = "ann",
+                commitName = "Ann",
+                commitEmail = "ann@example.com",
+                host = "github.com",
+                gitUser = "oauth2",
+                remote = "https://github.com/ann/shopping.git",
+                maySpend = false,
+            )
+        }
+        val said = AgentTools(ws, "shopping", git, log, gitEnv = who)
+            .run(Call("e", "env", "{}"))
+
+        assertTrue("answered: $said", said.startsWith("0\n"))
+        for (fact in listOf("ann", "Ann", "ann@example.com", "github.com", "oauth2", "shopping")) {
+            assertTrue("names $fact: $said", said.contains(fact))
+        }
+        assertTrue("says the token is not available: $said", said.contains("not available"))
+        assertFalse(
+            "and does not claim it may be spent: $said",
+            said.contains("{{secret:git}} where a token goes"),
+        )
+    }
+
+    @Test
+    fun `env names the token and never prints it`() {
+        // **The answer is written into the project's own record**, which syncs to the host, so a value
+        // here would be a leaked token in a repository. What the agent gets is the name to write.
+        val said = AgentTools(
+            ws,
+            "shopping",
+            git,
+            log,
+            gitEnv = {
+                GitEnv("ann", "Ann", "ann@example.com", "github.com", "", null, maySpend = true)
+            },
+        ).run(Call("e", "env", "{}"))
+
+        assertTrue("points at the expansion: $said", said.contains("{{secret:git}}"))
+        assertTrue("and says why it is not shown: $said", said.contains("never shown"))
+    }
+
+    @Test
+    fun `env with no account says so rather than answering nothing`() {
+        // A blank identity is a real state — a phone with no account — and the answer has to name it,
+        // because an agent reading an empty block would conclude its account was called "".
+        val said = AgentTools(ws, "shopping", git, log).run(Call("e", "env", "{}"))
+        assertTrue("says no account: $said", said.contains("No account is signed in"))
+    }
+
     // ---- help ----------------------------------------------------------------
 
     @Test

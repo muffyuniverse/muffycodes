@@ -283,14 +283,46 @@ class ConnectionsTest {
         )
 
         assertEquals("the branch's", "glpat-branch", named("git", "gitlab.com", grant)?.secret)
-        assertEquals(
-            "and without the checkmark the project's is still the answer",
-            "glpat-project",
+        // **A branch with no grant is not answered by the project's row.** Scopes are separate records
+        // — a branch's is written when the branch is made — so falling back would spend a token a push
+        // does not use, and `{{secret:git}}` would then describe a different identity than the push.
+        // Withdrawing the grant means "this agent may not spend", not "use the wider one".
+        assertNull(
+            "a branch without the checkmark is not given the project's token",
             named(
                 "git",
                 "gitlab.com",
                 grant + (branchRow to grant.getValue(branchRow).copy(nameable = false)),
-            )?.secret,
+            ),
+        )
+    }
+
+    @Test
+    fun `a branch is answered by its own row and never by the project's`() {
+        // **The rule the whole per-branch credential exists for**: two branches of one project may be
+        // allowed different powers, and a branch that has no token of its own must not silently push
+        // as the project. `main` is the project's own tree, so it is the one branch that reads the
+        // project's row.
+        val rows = mapOf<Pair<SecretScope, ConnKind>, Connection>(
+            (SecretScope.Project("acme") to ConnKind.GIT) to
+                Connection("gitlab.com", "glpat-project", nameable = true),
+            (SecretScope.Branch("acme", "feature") to ConnKind.GIT) to
+                Connection("gitlab.com", "glpat-feature", nameable = true),
+        )
+
+        assertEquals(
+            "feature pushes as itself",
+            "glpat-feature",
+            named("git", "gitlab.com", rows, branch = "feature")?.secret,
+        )
+        assertEquals(
+            "main is the project's tree",
+            "glpat-project",
+            named("git", "gitlab.com", rows, branch = AgentSession.MAIN)?.secret,
+        )
+        assertNull(
+            "a third branch has no credential, and is not lent one",
+            named("git", "gitlab.com", rows, branch = "another"),
         )
     }
 }

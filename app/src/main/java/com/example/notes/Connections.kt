@@ -131,10 +131,15 @@ fun namedConnection(
      */
     at: (SecretScope, ConnKind) -> Connection?,
 ): Connection? {
-    val scope = connectionScope(project, branch) { one ->
-        at(one, kind)?.let { it.nameable && hostCovers(hostOfAddress(it.address), host) } == true
-    } ?: return null
-    return at(scope, kind)
+    // **The worktree's own row, never a wider one.** Scopes are separate records — a branch's is
+    // written when the branch is made — so walking upward would answer the project's credential for a
+    // branch that has its own, and `{{secret:git}}` would then spend a token a push does not use. One
+    // rule for both readers is what keeps the expansion and the push describing the same identity.
+    val scope = scopeOfPlace(project, branch)
+    val row = at(scope, kind) ?: return null
+    if (!row.nameable) return null
+    if (!hostCovers(hostOfAddress(row.address), host)) return null
+    return row
 }
 
 /**
@@ -150,7 +155,7 @@ fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
 }
 
 /**
- * **Where a scope is, as a project and a branch** — the inverse of the screen's `scopeOf`.
+ * **Where a scope is, as a project and a branch** — the inverse of [scopeOfPlace].
  *
  * A window knows only the scope it is editing, and the resolution needs a place to walk from. The
  * project scope is `main`, because "this project" in this app means its main worktree: the other
@@ -159,6 +164,24 @@ fun kindFor(name: String): ConnKind? = when (name.trim().lowercase()) {
  * The account is `null to null`, which is how a caller is told "there is no worktree in this
  * question" — so it invents no branch.
  */
+/**
+ * **Which scope a row's window writes to** — the inverse of [placeOf].
+ *
+ * `main` is the project: it is the branch a project is made of, and its own folder *is* the project's
+ * tree. Any other branch sets that branch's own row.
+ *
+ * **Here, beside [placeOf], because the two are one rule read in two directions.** It lived in the
+ * activity, where only a screen could reach it, so the store that had to ask the same question would
+ * have kept a second copy — which is how a scope rule comes to be written twice and disagree.
+ */
+fun scopeOfPlace(project: String?, branch: String?): SecretScope = when {
+    // **No project is the account**, which is the widest place a credential may live. Nothing wider
+    // answers a request: a request is made *as* somebody, and the log says who spent the tokens.
+    project == null -> SecretScope.Account
+    branch == null || branch == AgentSession.MAIN -> SecretScope.Project(project)
+    else -> SecretScope.Branch(project, branch)
+}
+
 fun placeOf(scope: SecretScope): Pair<String?, String?> = when (scope) {
     is SecretScope.Branch -> scope.project to scope.branch
     is SecretScope.Project -> scope.name to AgentSession.MAIN
@@ -170,6 +193,11 @@ fun placeOf(scope: SecretScope): Pair<String?, String?> = when (scope) {
  *
  * A branch only exists inside a project, so a branch with no project is not a place a value can live
  * and is skipped rather than invented.
+ *
+ * **For filling a window in, not for reading a credential.** Scopes are separate records written when
+ * each one is made, so what a push sends is the worktree's own row and nothing here. This walk is what
+ * a new branch's popover shows prefilled — the values the person is about to copy — which is a display
+ * question and the only one it answers.
  */
 fun connectionScopes(project: String?, branch: String?): List<SecretScope> = buildList {
     if (project != null && branch != null) add(SecretScope.Branch(project, branch))
@@ -177,19 +205,6 @@ fun connectionScopes(project: String?, branch: String?): List<SecretScope> = bui
     add(SecretScope.Account)
     add(SecretScope.General)
 }
-
-/**
- * The narrowest scope that has a connection, or null when none does.
- *
- * [has] answers "is there one here" rather than returning it, because the caller then reads the pair
- * *and* the choice from the same scope, and a resolver that returned the value would have to be asked
- * twice for the second half.
- */
-fun connectionScope(
-    project: String?,
-    branch: String?,
-    has: (SecretScope) -> Boolean,
-): SecretScope? = connectionScopes(project, branch).firstOrNull(has)
 
 /**
  * **What a turn on a worktree is asked with**: the pair's address, the model, the effort — and the

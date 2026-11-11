@@ -158,6 +158,19 @@ class AgentTools(
      * service, and the person may be looking at another branch while it works.
      */
     private val branch: String = AgentSession.MAIN,
+    /**
+     * **What `env` answers about the account the agent works as** — and it is not a secret.
+     *
+     * A login, the name and address commits are made under, the host, and the name a token is
+     * presented as. All of it is already in the record every commit this agent makes carries, so
+     * telling it to the agent reveals nothing a `log` would not. It is a function because it is read
+     * per call: an account renamed while an agent is idle is the account the next `env` describes.
+     *
+     * **The token is not here and never will be.** It is reached through `{{secret:git}}`, which the
+     * expander answers for the request's own host — so the value never enters the conversation, and
+     * so never enters `session.log`, which lives in the project tree and syncs to the host.
+     */
+    private val gitEnv: () -> GitEnv = { GitEnv.NONE },
 ) {
 
     /**
@@ -620,6 +633,10 @@ class AgentTools(
             // argument a wrong call is pointed at. It takes `of` and nothing else: the name of the
             // command to explain, or absent for the list.
             "help" to setOf("of"),
+            // **`env` takes nothing**, because everything it answers is already a fact about where
+            // the agent stands: which branch, which account, which host. A filter would only be a
+            // way to ask for half an answer and then act on the half.
+            "env" to setOf(),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -692,6 +709,7 @@ class AgentTools(
             "background" to setOf(),
             "pull" to setOf(),
             "push" to setOf(),
+            "env" to setOf(),
         )
 
         /**
@@ -722,6 +740,16 @@ class AgentTools(
                     "answer is the same description the tool list carries, so it cannot disagree " +
                     "with what runs. Call it after a refusal for arguments.",
                 "{\"of\":\"a command name, or leave it out for the list\"}",
+                required = emptyList(),
+            ),
+            spec(
+                "env",
+                "Who this agent is and what it may spend: the account, the name and address commits " +
+                    "carry, the host, the git user, this project and branch, and the remote. Then " +
+                    "every secret's name, host and scope. **The git token is named, never printed** — " +
+                    "write `{{secret:git}}` where a token goes and it is filled in for that request's " +
+                    "host. Whether the token is available at all is the branch's own checkmark.",
+                "{}",
                 required = emptyList(),
             ),
             spec(
@@ -1136,6 +1164,7 @@ class AgentTools(
             "log" -> logTool(values, deadline)
             "pull" -> pull()
             "push" -> push(values)
+            "env" -> env()
             "help" -> help(values)
             else -> refusal("There is no tool called ${call.tool}")
         }
@@ -4242,6 +4271,76 @@ class AgentTools(
      * it reads nothing, touches nothing, and cannot fail except by naming a command that is not
      * there.
      */
+    /**
+     * **Who this agent is, and what it may spend** — the one call that answers the environment.
+     *
+     * **The git half is answered every time**, whatever the checkmark says: the login, the name and
+     * address commits carry, the host, the name a token is presented as, and the branch's remote. A
+     * person asking "why did it do that" needs to know who *it* was, and an agent cannot reason about
+     * its own push without knowing which branch it stands in. None of it is a secret — every commit
+     * this agent makes carries it in the author line.
+     *
+     * **The token is the only thing the checkmark gates, and even then it is never printed.** What
+     * the answer says is that one is there and how to reach it: `{{secret:git}}`, which the expander
+     * resolves for the request's own host at the moment the request is built. A value written here
+     * would land in `session.log`, which is inside the project tree and syncs to the host — the one
+     * failure in this app that cannot be undone.
+     */
+    private fun env(): String = success(buildString {
+        val git = gitEnv()
+        append("## git\n")
+        if (git.login.isBlank()) {
+            append("No account is signed in, so there is no identity to work as.\n")
+        } else {
+            append("login        ${git.login}\n")
+            append("commit       ${git.commitName} <${git.commitEmail}>\n")
+            append("host         ${git.host}\n")
+            append("git user     ${git.gitUser.ifBlank { "(the token is the username)" }}\n")
+            append("project      $project\n")
+            append("branch       $branch\n")
+            append("remote       ${git.remote ?: "(this project has none)"}\n")
+            append("token        ")
+            append(
+                if (git.maySpend) {
+                    "available — write {{secret:git}} where a token goes, and it is filled in " +
+                        "for that request's host. It is never shown, because this answer is written " +
+                        "into the project's own record."
+                } else {
+                    "not available to this agent. The person can grant it in this branch's git " +
+                        "settings; until then a request needing a token must ask them for one."
+                },
+            )
+            append("\n")
+        }
+        // **The vault's names, never its values, and only the ones this worktree can reach.** A
+        // secret's scope says where it applies, so a row for another project or another branch is one
+        // `{{secret:name}}` would refuse — listing it would be telling an agent about a value it
+        // cannot use, which is worse than not mentioning it.
+        val here = scopeOfPlace(project, branch)
+        val rows = credentials?.secretRows().orEmpty().filter { row ->
+            when (val at = row.scope) {
+                is SecretScope.Branch -> at == here
+                is SecretScope.Project -> at == SecretScope.Project(project)
+                SecretScope.Account, SecretScope.General -> true
+            }
+        }
+        append("\n## secrets\n")
+        if (rows.isEmpty()) {
+            append("none\n")
+        } else {
+            for (row in rows.sortedWith(compareBy({ scopeOrder(it.scope) }, { it.name }))) {
+                append(row.name)
+                append("  ")
+                append(row.host.ifEmpty { "(this phone only)" })
+                append("  ")
+                append(scopeLabel(row.scope))
+                append("\n")
+            }
+            append("Write {{secret:<name>}} where a value goes. It is filled in only for that " +
+                "secret's own host.")
+        }
+    })
+
     private fun help(args: JSONObject): String {
         val of = args.optString("of").trim()
         val all = AgentTools.specs()

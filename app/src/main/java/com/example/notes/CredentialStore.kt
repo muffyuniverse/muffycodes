@@ -259,10 +259,18 @@ interface Credentials {
     fun forgetConnection(scope: SecretScope, kind: ConnKind) {}
 
     /**
-     * The git connection that may be offered to [host], or null.
+     * **The credential a worktree holds for [host]** — its own row, and nothing else.
      *
-     * A default that answers null, so a store with no vault — every fake in the suite — keeps working
-     * and cannot silently send an unscoped key.
+     * **No fallback, because the scopes are separate records.** A branch's row is written when the
+     * branch is made, by the same window that names it, so a branch without one does not exist. The
+     * walk this used to be (branch, then project, then account) was a read of records nothing ever
+     * wrote in that order: a branch would have silently pushed as the project, and a project as the
+     * account, which is the one thing a per-branch token exists to prevent.
+     *
+     * [branch] null or `main` is the project's own row, because a project's folder *is* main's tree.
+     *
+     * **A default that answers null**, so a store with no vault — every fake in the suite — keeps
+     * working and cannot silently send an unscoped key.
      */
     fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? = null
 
@@ -669,6 +677,18 @@ class CredentialStore(context: Context) : Credentials {
             // stored before the checkmark existed is a row on which it was never given.
             nameable = json.optBoolean("nameable", false),
         )
+    }
+
+    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
+        val asked = hostOfAddress(host)
+        if (asked.isEmpty()) return null
+        val scope = scopeOfPlace(project, branch) ?: return null
+        val row = connection(scope, ConnKind.GIT) ?: return null
+        // **The row must be for the host being asked.** A branch whose credential is for another
+        // host has no credential for this one, and sending it would be the leak the host binding
+        // exists to stop — so the answer is null rather than the nearest row.
+        if (!hostCovers(hostOfAddress(row.address), asked)) return null
+        return row.takeIf { it.secret.isNotBlank() }
     }
 
     override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {

@@ -148,22 +148,6 @@ private sealed interface Pending {
     /** What the project is: the one-word caption in the bar, tapped. */
 }
 
-/**
- * **Which scope a row's window writes to.**
- *
- * `main` is the project — it is the branch a project is made of, and its own folder *is* the project's
- * tree — so a row opened on `main` sets the project's credential. Any other branch sets that branch's.
- * One function rather than the rule written twice at the two call sites, because the two rows are the
- * same question asked from two screens.
- */
-internal fun scopeOf(project: String?, branch: String?): SecretScope = when {
-    // **No project is the account**, which is the widest place a chat model may live. Nothing wider
-    // answers a chat: a request is made *as* somebody, and the log says who spent the tokens.
-    project == null -> SecretScope.Account
-    branch == null || branch == AgentSession.MAIN -> SecretScope.Project(project)
-    else -> SecretScope.Branch(project, branch)
-}
-
 /** How a window names where it is: the project, or the project and the branch. */
 internal fun whereOf(project: String?, branch: String?): String = when {
     project == null -> "this account"
@@ -1000,7 +984,7 @@ private fun Dialogs(
 
         is Pending.GitConnection -> GitConnectionDialog(
             inForce = viewModel.connectionShown(
-                scope = scopeOf(pending.project, pending.branch),
+                scope = scopeOfPlace(pending.project, pending.branch),
                 kind = ConnKind.GIT,
                 project = pending.project,
                 branch = pending.branch,
@@ -1010,18 +994,18 @@ private fun Dialogs(
             onSave = { draft ->
                 Trace.tap("confirm git connection", whereOf(pending.project, pending.branch))
                 viewModel.saveConnection(
-                    scope = scopeOf(pending.project, pending.branch),
+                    scope = scopeOfPlace(pending.project, pending.branch),
                     draft = draft,
                 )
             },
             onForget = {
                 Trace.tap("forget git connection", whereOf(pending.project, pending.branch))
-                viewModel.forgetConnection(scopeOf(pending.project, pending.branch), ConnKind.GIT)
+                viewModel.forgetConnection(scopeOfPlace(pending.project, pending.branch), ConnKind.GIT)
             },
             onCheck = { draft, then ->
                 Trace.tap("check git connection", whereOf(pending.project, pending.branch))
                 viewModel.checkConnection(
-                    scope = scopeOf(pending.project, pending.branch),
+                    scope = scopeOfPlace(pending.project, pending.branch),
                     draft = draft,
                     project = pending.project,
                     branch = pending.branch,
@@ -1073,10 +1057,26 @@ private fun Dialogs(
             // them, and a second read on the frame the window opens would be file I/O for an answer
             // that cannot have changed since.
             parents = viewModel.choosingBranches,
+            // **Filled from the parent**, which is the branch the new one is a copy of: its files,
+            // its agent's memory, and the credential that lets it push. Editable in the window,
+            // because a token a host limits to one branch is a credential that branch owns.
+            credential = viewModel.connectionShown(
+                scope = scopeOfPlace(viewModel.choosingBranchFor, AgentSession.MAIN),
+                kind = ConnKind.GIT,
+                project = viewModel.choosingBranchFor,
+                branch = AgentSession.MAIN,
+            ).let {
+                // **The checkmark is on for a branch that did not exist a second ago.** The operator:
+                // *"there should be a checkmark for that in the popover branch settings window that
+                // is by default marked."* A branch made by a person is a branch whose agent may push;
+                // the box is there to withdraw that, not to grant it. It stays off for the *edit*
+                // window, where an existing row's silence means nobody ever granted it.
+                it.copy(nameable = true)
+            },
             onDismiss = dismiss,
-            onConfirm = { name, from ->
+            onConfirm = { name, from, credential ->
                 Trace.tap("confirm add branch", name)
-                viewModel.newBranch(name, from)
+                viewModel.newBranch(name, from, credential)
             },
         )
 

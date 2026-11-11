@@ -172,6 +172,16 @@ class Agent(
      * secret" are two different refusals and only the second one is actionable.
      */
     private val credentials: Credentials? = null,
+    /**
+     * **What `env` answers about the account and the branch** — the identity every commit carries.
+     *
+     * A function, because the account can be renamed and the branch's credential granted or withdrawn
+     * while an agent is idle; the answer that applies is the one in force when `env` is called.
+     *
+     * **The token is not part of it.** [GitEnv.maySpend] says whether one is there, and the value is
+     * reached by name through the expander, so it never enters the record.
+     */
+    private val gitEnv: () -> GitEnv = { GitEnv.NONE },
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /**
@@ -213,6 +223,7 @@ class Agent(
         fetchLimit = fetchLimit,
         onDiskChanged = onDiskChanged,
         branch = branch,
+        gitEnv = gitEnv,
     )
 
     /**

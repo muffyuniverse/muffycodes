@@ -198,11 +198,19 @@ open class MemoryCredentials : Credentials {
         if (connection.wroteNothing()) connections.remove(key) else connections[key] = connection
     }
 
+    /**
+     * **The worktree's own row and nothing else**, which is the real store's rule.
+     *
+     * This used to walk `connectionScope` — branch, then project, then account — and the fake walking a
+     * chain the phone no longer walks is the worst kind of fake: every test about a scoped credential
+     * would have passed here and pushed as the project on a phone.
+     */
     override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
-        val at = connectionScope(project, branch) { scope ->
-            connection(scope, ConnKind.GIT)?.let { hostCovers(hostOfAddress(it.address), host) } == true
-        } ?: return null
-        return connection(at, ConnKind.GIT)
+        if (hostOfAddress(host).isEmpty()) return null
+        val scope = scopeOfPlace(project, branch)
+        val row = connection(scope, ConnKind.GIT) ?: return null
+        if (!hostCovers(hostOfAddress(row.address), hostOfAddress(host))) return null
+        return row.takeIf { it.secret.isNotBlank() }
     }
 
     override fun spendable(name: String, host: String, project: String?, branch: String?): String? {

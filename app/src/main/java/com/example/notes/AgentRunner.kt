@@ -110,6 +110,40 @@ class AgentRunner(
     private val sessions = AgentSessions(ws.accountDir)
 
     /**
+     * **The identity `env` describes** — who the commits are made as, on which host, with which token
+     * name, and whether this branch's credential may be spent.
+     *
+     * Read fresh on every call, because every one of these can change while an agent is idle.
+     *
+     * **`maySpend` is the checkmark and nothing else.** It is asked through the same lookup the
+     * expander uses ([Credentials.gitConnectionFor]), so what `env` says and what a `{{secret:git}}`
+     * actually resolves to cannot disagree — a row that says "available" and then answers nothing
+     * would be worse than one that said nothing at all.
+     */
+    private fun gitEnvOf(project: String, branch: String): GitEnv {
+        val login = credentials?.activeLogin ?: return GitEnv.NONE
+        val accounts = AccountStore(ws.accountDir)
+        val account = accounts.account(login) ?: return GitEnv.NONE
+        val author = account.author()
+        val remote = try {
+            git.remoteUrl(project)
+        } catch (e: Throwable) {
+            null
+        }
+        val host = Secrets.hostOf(remote.orEmpty()).ifEmpty { account.host }
+        val spendable = credentials?.gitConnectionFor(project, branch, host) != null
+        return GitEnv(
+            login = login,
+            commitName = author.name,
+            commitEmail = author.email,
+            host = account.host,
+            gitUser = account.gitUser,
+            remote = remote,
+            maySpend = spendable,
+        )
+    }
+
+    /**
      * **One request at a time, on purpose.**
      *
      * The per-project guard above already allows several projects to be due at once, so this thread
@@ -411,6 +445,10 @@ class AgentRunner(
                     browseMs = { settings.browseMs },
                     onDiskChanged = onDiskChanged,
                     branch = branch,
+                    // **Built per call, from the account as it is now.** A person who renames their
+                    // account or changes the commit address while an agent is idle expects the next
+                    // `env` to describe the account they just set, not the one it was born with.
+                    gitEnv = { gitEnvOf(project, branch) },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

@@ -1099,7 +1099,7 @@ class AppViewModel @JvmOverloads constructor(
         project: String?,
         branch: String?,
     ): ConnectionDraft {
-        val own = credentials.connection(scope, kind)
+        val own = inForce(scope, kind)
         return ConnectionDraft(
             kind = kind,
             // **The account scope has no project to ask**, and its own host is the honest answer:
@@ -1107,9 +1107,33 @@ class AppViewModel @JvmOverloads constructor(
             address = own?.address
                 ?: project?.let { host(it, branch.orEmpty()) }
                 ?: activeLogin?.let { accounts.account(it)?.host }.orEmpty(),
+            // **The token is filled in, and that is a decision the operator made twice**: *"when the
+            // user adds a project or branch inside the popover he can set a new token, by default the
+            // field is prefilled with the value from the higher scope."* The policy this replaces —
+            // "never read a key back into a field" — protected against a screenshot, and the cost of
+            // it was that every new branch had to be pasted a token by hand or push as nobody.
+            secret = own?.secret.orEmpty(),
             user = own?.user ?: activeLogin?.let { accounts.account(it)?.gitUser }.orEmpty(),
             nameable = own?.nameable == true,
         )
+    }
+
+    /**
+     * **The credential in force for a scope** — its own row, or the nearest wider one, for *display*.
+     *
+     * **This is a prefill walk and not a read rule.** What a push sends is the branch's own row and
+     * nothing else ([Credentials.gitConnectionFor]); this exists so a window opens on the values a
+     * person is about to copy, and so "same as the project" is one press rather than a paste.
+     *
+     * Widest last: branch → project → account → general. `main` is the project, so a branch made from
+     * `main` is filled from the project's row, which is exactly the parent it was cut from.
+     */
+    private fun inForce(scope: SecretScope, kind: ConnKind): Connection? {
+        val (project, branch) = placeOf(scope)
+        for (one in connectionScopes(project, branch)) {
+            credentials.connection(one, kind)?.takeIf { it.secret.isNotBlank() }?.let { return it }
+        }
+        return null
     }
 
     /**
@@ -5436,7 +5460,19 @@ class AppViewModel @JvmOverloads constructor(
      * **The refusal is said, not swallowed.** A name git would reject, an existing name, a parent that is
      * not there — all three are refusals the person has to see, or the button looks broken.
      */
-    fun newBranch(name: String, from: String = AgentSession.MAIN) {
+    fun newBranch(
+        name: String,
+        from: String = AgentSession.MAIN,
+        /**
+         * **The credential the window was opened with**, written as the new branch's own row.
+         *
+         * Defaulted to the parent's, so a caller that does not ask — every test, and any future one —
+         * still gets the invariant: a branch exists with a credential of its own, and no read ever
+         * has to fall back upward. `main` is the project's own row, so a branch made from `main`
+         * copies the project's credential.
+         */
+        credential: ConnectionDraft? = null,
+    ) {
         // **The tap is recorded by the window that pressed it**, because the window knows which parent
         // was chosen and a second record here would give one press two ids.
         val project = choosingBranchFor ?: return
@@ -5460,6 +5496,26 @@ class AppViewModel @JvmOverloads constructor(
                 // **The memory, after the tree exists.** The count is what the person is told, because
                 // "inherited" with no number is a claim and "2 files" is an answer.
                 val kept = ws?.let { Worktrees(it).inherit(project, made, from) }
+                // **The branch's own credential, written by the act that made the branch.** After the
+                // tree exists, because a row for a branch whose folder failed to check out would be a
+                // credential nothing can use. A window that typed nothing writes nothing, which is
+                // `wroteNothing`'s rule and the same one every other scope follows.
+                val row = credential ?: connectionShown(
+                    scope = scopeOfPlace(project, from),
+                    kind = ConnKind.GIT,
+                    project = project,
+                    branch = from,
+                )
+                // **Written as given, not compared against the branch's own row.** A new branch has
+                // no row, and comparing against the *inherited* value would find them equal and write
+                // nothing — which is the one outcome that must not happen here: the branch would then
+                // have no credential of its own and no way to push. A window that typed nothing still
+                // writes nothing, because `connection()` is null for a blank address.
+                credentials.setConnection(
+                    scopeOfPlace(project, made),
+                    ConnKind.GIT,
+                    row.connection() ?: Connection(),
+                )
                 when {
                     kept == null -> "Made $made from $from."
                     kept.isFailure -> "Made $made from $from, but its agent's record was not copied: " +
