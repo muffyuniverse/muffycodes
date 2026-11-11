@@ -79,13 +79,6 @@ class KeySafetyTest {
     }
 
     @Test
-    fun `secret cannot be printed by accident`() {
-        val secret = Secret(token)
-        assertEquals("***", secret.toString())
-        assertEquals(token, secret.reveal())
-    }
-
-    @Test
     fun `clone puts the key nowhere`() {
         val remote = File(root, "remote")
         val remoteRepo = GitService.initOrOpen(remote, author)

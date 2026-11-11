@@ -18,6 +18,16 @@ import org.junit.Test
  */
 class StreamTest {
 
+    /**
+     * The lines of a server-sent-event body, **as a sequence.**
+     *
+     * It lived in `Stream.kt` and shipped in the APK while only this file called it. The transport's
+     * job is to hand over lines, and the reader accepts a line with or without `data:`, so a test can
+     * feed raw SSE text or a bare JSON line and both mean the same thing.
+     */
+    private fun serverSentLines(text: String): List<String> =
+        text.split('\n').map { it.trimEnd('\r') }
+
     private fun recorded(name: String): Streamed {
         // **From the classpath, because that is where a test resource lives** — a relative path
         // depends on the working directory Gradle happens to choose, which is a fact about the

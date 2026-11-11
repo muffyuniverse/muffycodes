@@ -274,16 +274,4 @@ object Secrets {
     private val SCP_FORM = Regex("""^[^/@:\s]+@[^/:\s]+:[^\s]+$""")
 }
 
-/**
- * A value that cannot leak by being printed.
- *
- * Tokens travel inside this rather than in a bare `String`, so that the day
- * somebody writes `"the token was $token"` into a message, what appears is
- * `***`. `reveal()` is the one door out, and it is deliberate every time.
- */
-@JvmInline
-value class Secret(private val value: String) {
-    fun reveal(): String = value
 
-    override fun toString(): String = "***"
-}

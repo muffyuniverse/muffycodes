@@ -245,12 +245,3 @@ class Streamed {
         usage?.let { append(" · ${it.optInt("total_tokens")} tokens") }
     }
 }
-
-/**
- * The lines of a server-sent-event body, **as a sequence.**
- *
- * Split out because the transport's job is to hand over lines and this is the only thing that
- * knows what a line means. `data:` is stripped by [Streamed.line], which accepts a line either way,
- * so a test can feed raw SSE text or a bare JSON line and both mean the same thing.
- */
-fun serverSentLines(text: String): List<String> = text.split('\n').map { it.trimEnd('\r') }
