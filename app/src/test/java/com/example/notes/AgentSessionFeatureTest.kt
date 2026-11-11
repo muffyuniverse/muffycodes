@@ -648,9 +648,13 @@ class AgentSessionFeatureTest : FeatureTest() {
         // never clears, so `any { it.contains("agent-reset") }` matched a note left by an earlier
         // test and the wait returned before this reset had been written — the assertion then read
         // the log mid-act, which is exactly what waiting on the trace was meant to prevent.
-        val resetsBefore = Trace.report().lines.count { it.contains("agent-reset") }
-        scene.await("the reset to be written") {
-            Trace.report().lines.count { it.contains("agent-reset") } > resetsBefore
+        // **Wait on the state the press is about**, not on a trace line: the claim is that the agent
+        // is off and its context is empty, and both are readable.
+        scene.await("the agent to stop") {
+            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.STOPPED
+        }
+        scene.await("the context to be cleared") {
+            record("groceries").contextRows().isEmpty()
         }
 
         assertEquals(
