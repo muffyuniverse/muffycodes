@@ -2054,6 +2054,83 @@ class AgentTest {
     }
 
     @Test
+    fun `original replaces the one place that says exactly this`() {
+        // **The selector for a model that is quoting.** `grep` takes a pattern and replaces every
+        // match, which is right when all of them should change; `original` takes the text as it was
+        // read and changes the one place that says it. A model that just read a paragraph is much
+        // better at pasting it than at writing a pattern that matches only it.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\nbuy milk\nlast\n")
+
+        val body = tool(
+            "write",
+            """{"path":"milk.txt","original":"buy milk","text":"buy bread"}""",
+        )
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals(
+            "the one line changed",
+            "first\nbuy bread\nlast\n",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")),
+        )
+    }
+
+    @Test
+    fun `original that matches nothing is refused, and says to read first`() {
+        // **Not "nothing changed" — a refusal.** A model that quoted text which is not there has
+        // read the wrong version or remembered it, and the useful answer is that, not a success.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\nlast\n")
+
+        val body = tool(
+            "write",
+            """{"path":"milk.txt","original":"buy milk","text":"buy bread"}""",
+        )
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and says it is not there: $body", body.contains("Nothing in"))
+        assertTrue("and what to do: $body", body.contains("Read the"))
+        assertEquals(
+            "and the file is untouched",
+            "first\nlast\n",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")),
+        )
+    }
+
+    @Test
+    fun `original that matches twice is refused, and says how many places`() {
+        // **The refusal that makes the key safe.** Replacing the first of two would change a place
+        // the model did not name, and the answer would say it worked — so the count is the answer,
+        // and the way out (more context, or `grep` for all of them) is in the sentence.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "buy milk\nother\nbuy milk\n")
+
+        val body = tool(
+            "write",
+            """{"path":"milk.txt","original":"buy milk","text":"buy bread"}""",
+        )
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the count: $body", body.contains("2 times"))
+        assertTrue("and the way out: $body", body.contains("`grep`"))
+        assertEquals(
+            "and nothing changed",
+            "buy milk\nother\nbuy milk\n",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")),
+        )
+    }
+
+    @Test
+    fun `original and grep in one call is refused, because one call means one edit`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "buy milk\n")
+
+        val body = tool(
+            "write",
+            """{"path":"milk.txt","original":"buy milk","grep":"milk","text":"buy bread"}""",
+        )
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming both: $body", body.contains("`original`") && body.contains("`grep`"))
+    }
+
+    @Test
     fun `a replacement that names any tool but read is refused`() {
         ws.write(File(ws.repoOf("shopping"), "todo.txt"), "text")
 

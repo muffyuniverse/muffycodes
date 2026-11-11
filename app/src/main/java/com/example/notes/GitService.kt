@@ -1834,22 +1834,46 @@ object GitService {
         // that was never read.
         val commit = repo.resolve(revisionId.trim())
             ?: throw IllegalArgumentException("There is no version $revisionId in this project")
-        Git(repo).use { git ->
-            // **`setAllPaths` and `setStartPoint` together** are "make the tree look like that
-            // commit": jgit walks the difference and both writes and deletes.
-            val checkout = git.checkout()
-                .setStartPoint(commit)
-                .setAllPaths(true)
-                .setForced(true)
-            // **`setUpToDate` false would be a partial checkout**, which is the one thing this must
-            // not be — a tree half from one version and half from another is worse than either.
-            checkout.setUpToDate(true)
-            checkout.call()
+        // **`checkout` with a start point detaches HEAD, which is not what a restore means.** The
+        // tree must come from the version while the *branch* stays where it is — otherwise the next
+        // push would send from a detached head, and the person's screen would say "no branch".
+        //
+        // So the tree is written from the commit's tree directly, and the removal is the half a
+        // per-path restore cannot do: **every tracked path that the version does not have is
+        // deleted**, which is what "all files change to that state" means.
+        val tree = commit.tree
+        val wanted = LinkedHashMap<String, org.eclipse.jgit.lib.ObjectId>()
+        org.eclipse.jgit.treewalk.TreeWalk(repo).use { walk ->
+            walk.addTree(tree)
+            walk.isRecursive = true
+            while (walk.next()) {
+                if (walk.getFileMode(0) == org.eclipse.jgit.lib.FileMode.GITLINK) continue
+                wanted[walk.pathString] = walk.getObjectId(0).copy()
+            }
+        }
+        // **Written before anything is deleted**, so a failure part way leaves every old file still
+        // there rather than a tree that is missing both versions of something.
+        for ((pathInTree, id) in wanted) {
+            val target = File(repo.workTree, pathInTree)
+            target.parentFile?.mkdirs()
+            target.writeBytes(repo.open(id).bytes)
+        }
+        // **And now the deletions.** A tracked file the version does not have is gone; a file that is
+        // untracked is left alone, because it is not part of any version and deleting it would be
+        // destroying work this command was never asked about.
+        val tracked = Git(repo).use { git -> git.lsTree().call().map { it.path } }
+        for (pathInTree in tracked) {
+            if (pathInTree in wanted) continue
+            val target = File(repo.workTree, pathInTree)
+            // **`Workspace.deleteTree`, because a path may be the `system` link** — the same reason
+            // the per-path restore uses it.
+            if (target.exists()) Workspace.deleteTree(target)
         }
         if (!keepStage) {
-            // **`reset` and not `rm --cached`**: the index is set to match the tree that was just
-            // checked out, which is what "nothing is staged" means after a checkout. Doing nothing
-            // would leave the old index describing files that no longer exist.
+            // **`reset` and not `rm --cached`**: the index is set to match the tree that is now on
+            // disk, which is what "nothing is staged" means. Doing nothing would leave the old index
+            // describing files that no longer exist — and `push` counts the index, so the next push
+            // would commit the whole tree as one version.
             Git(repo).use { git ->
                 git.reset().setRef(commit.name).setMode(ResetCommand.ResetType.MIXED).call()
             }

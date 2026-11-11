@@ -556,7 +556,7 @@ class AgentTools(
             // acts on the file in front of it, and a key the runner never reads is a key a model is
             // told it may send — which is what `no tool takes an argument it never describes` exists to
             // catch, in the other direction.
-            "write" to setOf("path", "grep", "from", "to", "text", "multi", "word"),
+            "write" to setOf("path", "grep", "original", "from", "to", "text", "multi", "word"),
             "forget" to setOf("ids"),
             "delete" to setOf("path"),
             // **No `name`.** The operator: "move doesnt need \"name\" arg - it should rename
@@ -822,6 +822,12 @@ class AgentTools(
                     "they are not there** - so the same call creates and overwrites. " +
                     "`{path, from, to, text}` replaces those lines; `{path, grep, text}` replaces " +
                     "every match of the pattern `read` takes, and `from`/`to` may narrow it. " +
+                    "**`{path, original, text}` replaces the one place that says exactly " +
+                    "`original`** — matched as literal text, not as a pattern — and **refuses when " +
+                    "it matches nothing or more than once**, which is what makes it safe: a model " +
+                    "that quoted the wrong paragraph would otherwise rewrite a different part of the " +
+                    "file and be told it worked. Use `grep` when every match should change, and " +
+                    "`original` when you are quoting what you just read. " +
                     "One call changes one thing: two selectors in one call is refused, because a " +
                     "call that means two edits is a call whose result you cannot check. " +
                     "`\"text\": \"\"` deletes those lines on purpose. " +
@@ -836,7 +842,8 @@ class AgentTools(
                 // `spec()` derives the schema from this sample, so a key left out of it is an
                 // argument the model is never told it may send - while the runner still reads it.
                 "{\"path\":\"the file, relative to the project\",\"text\":\"the new text\"," +
-                    "\"grep\":\"a pattern, when replacing matches\",\"from\":1,\"to\":20," +
+                    "\"original\":\"the exact text to replace, when quoting it\"," +
+                    "\"grep\":\"a pattern, when replacing every match\",\"from\":1,\"to\":20," +
                     "\"multi\":false,\"word\":false}",
             ),
             spec(
@@ -2475,12 +2482,41 @@ class AgentTools(
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val hasFind = find != null
         val hasRange = args.has("from") || args.has("to")
+        // **`original` is the same selector as `grep`, matched literally.** The operator's decision
+        // (2026-11-10): *"expanded as grep value"* — so it is not a fourth kind of shape, it is the
+        // grep shape with the pattern taken as text rather than as a regex.
+        //
+        // The two are for different moments. `grep` finds **every** match and is right when the
+        // model is changing all of them; `original` finds **the one place** that says exactly this,
+        // and refuses when there are none or several — which is the safety `grep` deliberately does
+        // not have, and the one a model wants when it is quoting text it just read.
+        val original = args.optString("original", "")
+        val hasOriginal = args.has("original")
+        if (hasOriginal && hasFind) {
+            return refusal(
+                "`original` and `grep` both say what to replace, so one call cannot mean both. " +
+                    "`original` matches the text exactly and must find exactly one place; `grep` " +
+                    "matches a pattern and replaces every match.",
+            )
+        }
+        if (hasOriginal && hasRange) {
+            return refusal(
+                "`original` names the text to replace, so a `from`/`to` range would say it twice. " +
+                    "Use `original` alone, or a range with `text`.",
+            )
+        }
+        if (hasOriginal && !hasText) {
+            return refusal(
+                "`original` says what to replace, so add `text`: what it should say instead. " +
+                    "`\"text\": \"\"` removes it.",
+            )
+        }
 
         // **Nothing at that path means "make it", and that is the only case a missing file is not a
         // refusal.** A selector against a file that does not exist is a model that believes it is
         // editing something; answering "done" would be a lie about work that never happened.
         if (!file.exists()) {
-            if (hasFind || hasRange) {
+            if (hasFind || hasRange || hasOriginal) {
                 return refusal(
                     "There is no file at ${rel(file)}, so there is nothing to select from it. " +
                         "To make it, send `path` and `text` alone.",
@@ -2539,6 +2575,30 @@ class AgentTools(
         // whole-file branch and overwrite the file with the replacement word. The selector decides
         // which shape this is; `text` only says what goes there.
         val text = when {
+            hasOriginal -> {
+                // **The one place that says exactly this, or a refusal.** Not "the first match" —
+                // a model that quoted the wrong paragraph would silently rewrite a different part of
+                // the file, and the answer would say it worked. Not "every match" either: that is
+                // what `grep` is for, and the model chose this key to be precise.
+                val put = args.optString("text")
+                val places = before.split(original).size - 1
+                if (places == 0) {
+                    return refusal(
+                        "Nothing in ${rel(file)} says that, so there is nothing to replace. Read the " +
+                            "file first: `original` has to match the text exactly, including " +
+                            "indentation and line breaks.",
+                    )
+                }
+                if (places > 1) {
+                    return refusal(
+                        "That text appears ${places} times in ${rel(file)}, so replacing it would " +
+                            "change ${places} places and this call named one. Give more of the " +
+                            "surrounding text so it is unique, or use `grep` if every match should " +
+                            "change.",
+                    )
+                }
+                before.replace(original, put)
+            }
             hasFind -> {
                 // **The match is the replacement's whole extent, and it is a pattern.** `before
                 // .replace(find, put)` took a literal, so the key was called `find` and behaved
