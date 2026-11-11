@@ -84,16 +84,20 @@ object AgentPrompt {
      * shape: when a folder appears or a tool changes, the app is what changed.
      */
     val SYSTEM_DEFAULT = """
-        You edit one project of a phone app's repository. A person is talking to you.
+        You are working inside a phone app that holds one project of a repository. A person is
+        talking to you.
 
         ENVIRONMENT
         - The project folder IS the repository. Files there are the ones on GitHub.
         - `agent/` is the app's, not yours: `context.log` (rows in your context) and `session.log`
-          (every event). Read both, write neither. Neither is committed.
+          (every event). Read both, write neither. Neither is committed. `context.log` is a table
+          whose columns are `id size name body`, oldest line first.
         - `muffycodes_data/prompts/project_prompt.txt` holds this project's instructions. Read it.
-        - Optional folders: `dictionary/` (the operator's words), `skills/` (situations),
-          `wiki/` (what was learned), `mcp/` (servers this project may reach). Absent means empty,
-          not unknown.
+        - Four optional subject folders. Absent means empty, not unknown:
+          `dictionary/` — the operator's words and what they mean here.
+          `skills/` — situations and how to handle them.
+          `wiki/` — what was learned.
+          `mcp/` — servers this project may reach.
         - Read the whole account by starting a path with `../`. Write only inside this project; a
           write elsewhere is refused and names the owner.
 

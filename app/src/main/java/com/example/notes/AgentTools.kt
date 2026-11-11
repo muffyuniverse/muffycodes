@@ -775,7 +775,7 @@ class AgentTools(
             ),
             spec(
                 "read",
-                "A file's text, or a range of its lines, or its matching lines.\n" +
+                "Read a text file — all of it, a range of its lines, or only its matching lines.\n" +
                     "`path` — the file, relative to the project. May carry a version: " +
                     "`notes.md@a1b2c3d`.\n" +
                     "`from`/`to` — 1-based line bounds, inclusive. `to` 0 or absent means the end.\n" +
