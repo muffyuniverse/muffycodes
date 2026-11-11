@@ -146,6 +146,20 @@ data class AgentSession(
 
         /** Something else went wrong, and [AgentSession.lastWords] holds what. */
         ERROR,
+
+        /**
+         * **It waited for the person for as long as the setting allowed.**
+         *
+         * An agent that concluded, or asked something and was never answered, used to stay `IDLE`
+         * and keep polling for ever — a session nothing would ever end except a person who
+         * remembered to press Stop. The ceiling is the operator's answer to "when may this switch
+         * itself off": waiting is cheap but not free, and a conversation nobody is coming back to
+         * should not hold a service and a poll schedule indefinitely.
+         *
+         * **Silent, like [BY_OPERATOR] and for the same reason**: nothing is wrong, the person set
+         * the number, and a notification about a rule they chose is the app arguing with them.
+         */
+        WAITED_OUT,
     }
 
     companion object {
@@ -268,7 +282,11 @@ data class AgentSession(
      * kept asking about it would be arguing with them.
      */
     val needsYou: Boolean
-        get() = state == State.STOPPED && reason != StopReason.BY_OPERATOR
+        get() = state == State.STOPPED &&
+            reason != StopReason.BY_OPERATOR &&
+            // **Waiting out is the setting working, not a problem.** The person chose the ceiling;
+            // telling them their agent obeyed it is a notification about arithmetic.
+            reason != StopReason.WAITED_OUT
 
     // ---- the poll's clock ---------------------------------------------------
 
@@ -288,6 +306,29 @@ data class AgentSession(
 
     /** The moment the wait began: [warmFrom], or the last poll on a file written before it existed. */
     val warmSince: Long get() = if (warmFrom > 0) warmFrom else lastPollAt
+
+    /**
+     * True when this session has been waiting on the person for longer than [forMs].
+     *
+     * **The same clock as the keepalive's ceiling, and a different question.** [warmDue] asks
+     * "should I spend money keeping this warm" and stops the *pings*; this asks "should this session
+     * still exist" and stops the *session*. They are separate numbers because they answer separate
+     * things: a person may want an agent to stay reachable for a day and pay nothing to keep it
+     * warm, or to go quiet in ten minutes.
+     *
+     * **Only a session that is waiting counts.** One that is `STOPPED` has already ended, and one
+     * that is reconnecting is not waiting on anybody — its ladder is the next check.
+     *
+     * `forMs` of zero is no ceiling, which is what a phone that has never set the field gets.
+     */
+    fun waitedOut(at: Long, forMs: Long): Boolean {
+        if (forMs <= 0L) return false
+        if (state == State.STOPPED) return false
+        if (sub == Sub.RECONNECTING) return false
+        // **From the moment the wait began**, not the last poll: a poll moves `lastPollAt` every
+        // interval, so a ceiling counted from it would never arrive.
+        return at - warmSince >= forMs
+    }
 
     /**
      * True when the conversation should be kept warm at [at].
@@ -613,6 +654,7 @@ data class AgentSession(
         StopReason.PROVIDER_REFUSED -> s.lastWords.ifBlank { "the provider kept refusing" }
         StopReason.LOOP -> "it kept going without doing anything"
         StopReason.ERROR -> s.lastWords.ifBlank { "it could not go on" }
+        StopReason.WAITED_OUT -> "it waited as long as it was allowed to"
         null -> "not running"
     }
 

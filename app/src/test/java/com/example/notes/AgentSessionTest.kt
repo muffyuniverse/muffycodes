@@ -74,6 +74,60 @@ class AgentSessionTest {
         )
     }
 
+    // ---- the waiting ceiling, which is the other question from the keepalive's ---------------
+
+    @Test
+    fun `an agent that waits past the ceiling has waited out`() {
+        // **The number the operator asked for.** An agent that concluded used to stay idle and poll
+        // for ever; nothing but a person who remembered to press Stop would end it. The ceiling is
+        // measured from when the wait began, so a poll every four minutes cannot push it along.
+        val s = session().concluded(at = 1_000)
+        val hour = 60 * 60_000L
+
+        assertFalse("not yet", s.waitedOut(1_000 + hour - 1, hour))
+        assertTrue("and at the hour exactly", s.waitedOut(1_000 + hour, hour))
+        assertFalse("a ceiling of zero is no ceiling", s.waitedOut(1_000 + hour * 24, 0))
+    }
+
+    @Test
+    fun `a poll does not restart the wait`() {
+        // The bug this is here for: `lastPollAt` moves every interval, so a ceiling counted from it
+        // would never arrive — an agent polled every four minutes would wait for ever.
+        val hour = 60 * 60_000L
+        val s = session().concluded(at = 0).polled(30 * 60_000L)
+
+        assertTrue("half an hour of polls later, the hour still ends it", s.waitedOut(hour, hour))
+    }
+
+    @Test
+    fun `a session that already stopped is not waited out again`() {
+        val hour = 60 * 60_000L
+        val done = session().stopped(AgentSession.StopReason.BY_OPERATOR)
+
+        assertFalse("it has ended", done.waitedOut(hour * 10, hour))
+    }
+
+    @Test
+    fun `a reconnecting session is not waiting on the person`() {
+        // Its ladder *is* the next check. Counting a reconnect as waiting would switch off an agent
+        // in the middle of recovering from a dropped packet.
+        val hour = 60 * 60_000L
+        val retrying = session().failed(0, forMs = hour * 2)
+
+        assertFalse("the ladder is the next check", retrying.waitedOut(hour * 2, hour))
+    }
+
+    @Test
+    fun `waiting out is silent, because the person set the number`() {
+        // The whole notification policy in one assertion: a session that stopped because its own
+        // ceiling arrived is the app doing what it was told, and telling somebody about it is an
+        // argument with a rule they chose.
+        val done = session().stopped(AgentSession.StopReason.WAITED_OUT)
+
+        assertFalse("it does not need a person", done.needsYou)
+        assertNull("so nothing is posted", done.notice())
+    }
+
     @Test
     fun `the next ping is one interval after the last one, not one after now`() {
         // A clock consulted at "now + interval" drifts by however late the tick was: four minutes

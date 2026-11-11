@@ -346,6 +346,35 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** [warmMinutes] in milliseconds; zero is no ceiling. */
     val warmMs: Long get() = warmMinutes * 60_000L
 
+    /**
+     * How long an agent may **wait on the person** before it switches itself off, in minutes.
+     *
+     * **The other ceiling, and a different question from [warmMinutes].** That one stops the
+     * *keepalive pings* when they stop paying for themselves. This one stops the *session*: an agent
+     * that concluded, or asked something nobody answered, used to stay idle and keep polling for
+     * ever — nothing but a person who remembered to press Stop would ever end it.
+     *
+     * Two numbers rather than one because they answer two things. A person may want an agent
+     * reachable for a day while paying nothing to keep it warm, or want it gone in ten minutes.
+     *
+     * Zero means no ceiling: it waits until the person speaks or stops it, which is what every
+     * phone had before this field existed.
+     */
+    var waitMinutes: Int by mutableStateOf(prefs.getInt(KEY_WAIT_MINUTES, DEFAULT_WAIT_MINUTES))
+        private set
+
+    /** Sets the waiting ceiling, in minutes. Zero is "no ceiling". */
+    fun waitFor(minutes: Int) {
+        val clean = minutes.coerceIn(0, MAX_WAIT_MINUTES)
+        Trace.tap("waiting ceiling", if (clean == 0) "no ceiling" else "$clean min")
+        waitMinutes = clean
+        prefs.edit().putInt(KEY_WAIT_MINUTES, clean).apply()
+        Trace.said(if (clean == 0) "an idle agent waits for ever" else "an idle agent waits $clean min")
+    }
+
+    /** [waitMinutes] in milliseconds; zero is no ceiling. */
+    val waitMs: Long get() = waitMinutes * 60_000L
+
     /** The interval in milliseconds, with the design's own when the person set none. */
     val pollMs: Long
         get() = if (pollSeconds <= 0) {
@@ -602,6 +631,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         keepWarm(true)
         keepPoll(0)
         keepWarmFor(DEFAULT_WARM_MINUTES)
+        waitFor(DEFAULT_WAIT_MINUTES)
         keepForeground(DEFAULT_FOREGROUND_SECONDS)
         keepBackground(DEFAULT_BACKGROUND_SECONDS)
         keepReconnect(DEFAULT_RECONNECT_SECONDS)
@@ -688,6 +718,9 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_KEEPALIVE = "agent_keepalive"
     const val KEY_WARM_MINUTES = "agent_warm_minutes"
 
+    /** **How long an idle agent waits before it switches itself off**, in minutes. */
+    const val KEY_WAIT_MINUTES = "agent_wait_minutes"
+
     /**
      * **Whether the agent may reach this phone and the private network**, and how long a page may
      * take.
@@ -739,6 +772,22 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val DEFAULT_WARM_MINUTES = 60
 
     const val MAX_WARM_MINUTES = 1_440
+
+    /**
+     * **How long an idle agent waits before switching itself off: an hour.**
+     *
+     * The same hour as the keepalive's ceiling, and for a related reason: that is where keeping a
+     * conversation warm stops paying. A session that has waited longer than the point where its
+     * cache is gone twice over is one the person is not coming back to this hour — and the agent
+     * going quiet is what makes the strip's "stopped" mean something.
+     *
+     * **It is a default and not a rule.** Zero is no ceiling, which is what every phone had before
+     * this field existed, and a day is the ceiling for someone who leaves an agent watching a
+     * branch overnight.
+     */
+    const val DEFAULT_WAIT_MINUTES = 60
+
+    const val MAX_WAIT_MINUTES = 1_440
 
     /**
      * Command limits: **three minutes in the conversation, off for work that goes to a file.**

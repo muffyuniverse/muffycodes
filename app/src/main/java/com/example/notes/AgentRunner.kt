@@ -205,6 +205,9 @@ class AgentRunner(
     /** How long keeping it warm may go on, from Settings; zero is "until the person speaks". */
     private val warmMs: Long get() = settings.warmMs
 
+    /** How long an idle session may wait before it switches itself off. Read fresh, like [warmMs]. */
+    private val waitMs: Long get() = settings.waitMs
+
     /** How often a session that needs a person reminds them, from Settings. */
     private val reminderMs: Long get() = settings.remindMinutes * 60_000L
 
@@ -247,11 +250,29 @@ class AgentRunner(
             // its ceiling — so reading the gap inside the ping would have lost the one row that
             // makes the hole visible. The wait restarts from the wake: the cache was lost hours
             // ago, and a ping now would buy four minutes of warmth for someone who is not here.
+            // **A gap is measured before the ceiling, and the order is the meaning.** A gap is the
+            // phone not running the app; the ceiling is the person not coming back. A phone that was
+            // off for a day has both, and the gap is the one that explains the other — so the wait
+            // restarts from the wake, and the ceiling is then measured from there. Counting the
+            // ceiling first would report "waited out" about a session that had spent the time in a
+            // pocket.
             val missed = current.missedBy(now, pollMs)
             if (missed > 0) {
                 noteGap(current.project, missed, current.branch)
                 current = current.polled(now)
                 put(current, speak = false)
+            }
+            // **The waiting ceiling.** An agent that concluded, or asked something nobody answered,
+            // used to stay idle and keep polling for ever — nothing but a person who remembered to
+            // press Stop would end it. It is asked of the session rather than of the ping: a session
+            // can wait a day and be kept warm for an hour, or the other way round.
+            //
+            // **A stopped session is left alone** by `waitedOut` itself, and a reconnecting one is
+            // not counted: its ladder is the next check rather than a wait on the person.
+            if (current.waitedOut(now, waitMs)) {
+                Trace.note("agent-waited-out", AgentSession.keyOf(current.project, current.branch))
+                put(current.stopped(AgentSession.StopReason.WAITED_OUT), speak = false)
+                continue
             }
             // **A finished command outranks a ping, and does not wait for the interval.** Its own work
             // coming back is the one thing worth spending a turn on that the person did not ask for.

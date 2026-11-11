@@ -630,6 +630,27 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+
+            // **The other ceiling, and it is outside the keepalive block on purpose.** That one
+            // decides how long the app pays to keep a conversation warm; this decides how long the
+            // session exists at all. A person may want an agent reachable all day and spend nothing
+            // keeping it warm, so a field inside `if (keepAlive)` would make one switch mean two.
+            LengthField(
+                label = "Switch off after waiting (minutes, blank = never)",
+                value = settings.waitMinutes,
+                placeholder = "never",
+                onValueChange = { settings.waitFor(it) },
+            )
+            Text(
+                text = "Now: " + if (settings.waitMinutes <= 0) {
+                    "an idle agent waits until you speak or stop it."
+                } else {
+                    "an agent that waits ${settings.waitMinutes} min switches itself off. " +
+                        "It says so in the strip, and nothing is lost: the record is on disk."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             RowDivider()
 
             // **"Session log", not "The record".** The operator asked directly: "if 'the record'
@@ -845,6 +866,13 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
+                // **Both directions, because the waiting ceiling stops sessions on its own.** A
+                // person who comes back to an agent that switched itself off an hour ago needs the
+                // way back on, and opening each project to type something is not that.
+                TextButton(
+                    onClick = { viewModel.startAllAgents() },
+                    enabled = viewModel.agentSessions.any { !it.running },
+                ) { Text("Start all") }
                 TextButton(
                     onClick = { viewModel.stopAllAgents() },
                     enabled = viewModel.agentSessions.any { it.running },

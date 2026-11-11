@@ -4358,6 +4358,25 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * **Switches every agent this phone knows about back on.**
+     *
+     * The counterpart to [stopAllAgents], and it exists because the waiting ceiling made it
+     * necessary: an agent that switches itself off after an hour is a *session that stopped*, and
+     * before this there was no way to start one again except speaking to its project — which meant
+     * opening each project in turn and typing something.
+     *
+     * It starts the sessions the store already knows about, and nothing else: a project whose agent
+     * has never run is started from its chat, because "which project" is a question this button
+     * cannot answer.
+     */
+    fun startAllAgents() {
+        val off = agentSessions.filter { !it.running }
+        if (off.isEmpty()) return
+        Trace.tap("start all agents", "${off.size}")
+        for (session in off) startAgent(session.project, session.branch)
+    }
+
+    /**
      * Clears the agent's working context, and keeps the evidence.
      *
      * The person's act, not the agent's: the agent's own clear-up is checked by

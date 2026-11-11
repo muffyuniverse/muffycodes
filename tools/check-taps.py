@@ -221,6 +221,12 @@ VOCABULARY = {
     # result goes into the conversation may run, and how long one whose result goes to a file may
     # run. The last two are separate numbers because the results land in two places.
     "keepalive", "keepalive interval", "keepalive cap",
+    # **The waiting ceiling**, which is the other half of the same question: the keepalive's cap
+    # stops the *pings*, and this stops the *session*. Two numbers because they answer two things.
+    "waiting ceiling",
+    # The two directions of the one switch, on Settings. They are a pair: `stop all agents` existed
+    # alone until the ceiling could stop a session without anybody pressing anything.
+    "start all agents",
     "foreground timeout", "background timeout",
     # how big the evidence may get, which is a different number from the context's: one takes a row
     # out of what the model is sent, the other removes it

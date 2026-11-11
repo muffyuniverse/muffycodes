@@ -152,6 +152,54 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `a session that waited past the ceiling is stopped, and says why`() {
+        // **The end the app had no way of reaching.** An agent that concluded stayed idle and
+        // polled for ever; only a person who remembered to press Stop ever ended one. The ceiling
+        // is a setting, and this is the tick obeying it.
+        settings.waitFor(60)
+        on("shopping", now = 1_000)
+        val door = PingDoor()
+        val runner = runner(door)
+        val minute = 60_000L
+
+        // **Polled through the hour, as a running phone would.** Ticking once at +59 min would be a
+        // *gap* — the phone not running the app — and a gap restarts the wait by design, so the
+        // session would still be on for a reason that has nothing to do with the ceiling.
+        for (m in 1..59) {
+            runner.tick(1_000 + m * minute)
+            settle(runner)
+        }
+        assertTrue("still on, an hour in less one minute", runner.sessions().single().running)
+
+        runner.tick(1_000 + 60 * minute)
+        settle(runner)
+
+        val after = runner.sessions().single()
+        assertFalse("switched itself off", after.running)
+        assertEquals("and says why", AgentSession.StopReason.WAITED_OUT, after.reason)
+        assertTrue("no request was spent on it", door.pings.isEmpty())
+        // **Silent**, because the person set the number. A notification about a rule they chose is
+        // the app arguing with them.
+        assertTrue("and nobody was told", notices.isEmpty())
+    }
+
+    @Test
+    fun `a ceiling of zero leaves the session waiting for ever`() {
+        settings.waitFor(0)
+        on("shopping", now = 1_000)
+        val runner = runner()
+
+        // **Polled through, not jumped over**: a single tick a day later is a *gap*, and a gap
+        // restarts the wait — so it would prove nothing about the ceiling.
+        for (h in 1..24) {
+            runner.tick(1_000 + h * 60 * 60_000L)
+            settle(runner)
+        }
+
+        assertTrue("still on a day later", runner.sessions().single().running)
+    }
+
+    @Test
     fun `at its own due time the conversation is warmed once, and nothing is asked`() {
         on("shopping", now = 1_000)
         val door = PingDoor()
