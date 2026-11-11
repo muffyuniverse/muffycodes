@@ -872,8 +872,15 @@ class ProjectGit(
             try {
                 // **Read before the checkout, never after.** Afterwards the count would be
                 // reporting the restore, which is always a whole tree.
+                //
+                // **Unstaged, staged and untracked — and NOT `ahead`.** `ahead` counts commits the
+                // remote does not have, which is work that is very much in a version: a project with
+                // no remote at all is `ahead` by every commit it has, and refusing a restore there
+                // would refuse it always. The three that matter are the ones a checkout overwrites
+                // with nothing able to bring them back.
                 val unsent = try {
-                    changes(project).total
+                    val state = changes(project)
+                    state.staged + state.unstaged + state.untracked
                 } catch (t: Throwable) {
                     0
                 }

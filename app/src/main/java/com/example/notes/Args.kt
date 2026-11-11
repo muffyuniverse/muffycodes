@@ -250,7 +250,18 @@ object Braces {
      * wrote `a{1,2}b{3,4}` expects `a1b3, a1b4, a2b3, a2b4` and a different order would be a
      * different program.
      */
-    fun expand(text: String): Result<List<String>> {
+    fun expand(text: String): Result<List<String>> = try {
+        expandOrFail(text)
+    } catch (e: TooMany) {
+        Result.failure(
+            IllegalArgumentException(
+                "`${e.text}` expands to more than $MOST paths, so it was not run. " +
+                    "Name the ones you want, or use a folder.",
+            ),
+        )
+    }
+
+    private fun expandOrFail(text: String): Result<List<String>> {
         val first = text.indexOf('{')
         if (first < 0) {
             return if (text.indexOf('}') >= 0) unbalanced(text) else Result.success(listOf(text))
@@ -260,7 +271,7 @@ object Braces {
         val head = text.substring(0, first)
         val body = text.substring(first + 1, close)
         val tail = text.substring(close + 1)
-        val parts = alternatives(body)
+        val parts = alternatives(body, text)
             .getOrElse { return Result.failure(it) }
         // **A group with no comma and no range is literal**, and returning `"{$body}"` from
         // [alternatives] would hand it straight back to this loop — the brace is still there, so it
@@ -292,8 +303,8 @@ object Braces {
      * to bash, and it must stay literal here too, or a file genuinely named with braces becomes
      * unreachable.
      */
-    private fun alternatives(body: String): Result<List<String>> {
-        val range = rangeOf(body)
+    private fun alternatives(body: String, whole: String): Result<List<String>> {
+        val range = rangeOf(body, whole)
         if (range != null) return Result.success(range)
         val parts = splitTopLevel(body)
         // **One part means no comma was found at this level**, so bash leaves `{x}` alone — and the
@@ -302,7 +313,7 @@ object Braces {
     }
 
     /** `1..9`, `a..e`, and a step — the three shapes bash allows. */
-    private fun rangeOf(body: String): List<String>? {
+    private fun rangeOf(body: String, whole: String): List<String>? {
         val bits = body.split("..")
         if (bits.size !in 2..3) return null
         val step = if (bits.size == 3) bits[2].toIntOrNull() ?: return null else 1
@@ -315,7 +326,10 @@ object Braces {
             val width = maxOf(from.length, to.length)
             val ascending = a <= b
             val count = if (ascending) (b - a) / step + 1 else (a - b) / step + 1
-            if (count > MOST) return null
+            // **An oversized range is a refusal, not a literal.** Returning null would fall through
+            // to "no comma, so this is one path" and hand the command a file named `v{1..100000}` —
+            // a mistake made silent, which is the one thing a cap must not do.
+            if (count > MOST) throw TooMany(whole)
             return (0 until count).map {
                 val n = if (ascending) a + it * step else a - it * step
                 n.toString().padStart(width, '0')
@@ -324,7 +338,7 @@ object Braces {
         if (from.length == 1 && to.length == 1) {
             val ascending = from[0] <= to[0]
             val count = if (ascending) (to[0] - from[0]) / step + 1 else (from[0] - to[0]) / step + 1
-            if (count > MOST) return null
+            if (count > MOST) throw TooMany(whole)
             return (0 until count).map {
                 val c = if (ascending) from[0] + it * step else from[0] - it * step
                 c.toChar().toString()
@@ -366,6 +380,9 @@ object Braces {
         }
         return null
     }
+
+    /** An expansion past the cap, thrown from the depth of the grammar to the one place that answers. */
+    private class TooMany(val text: String) : RuntimeException()
 
     private fun unbalanced(text: String): Result<List<String>> = Result.failure(
         IllegalArgumentException(

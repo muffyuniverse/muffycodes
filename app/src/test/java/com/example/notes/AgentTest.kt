@@ -1730,7 +1730,15 @@ class AgentTest {
         // over paths and an empty one means the account, which is a legitimate call.
         for (name in listOf("write", "delete", "move", "restore")) {
             for (path in listOf("", ".")) {
-                val body = tool(name, """{"path":"$path"}""")
+                // **`restore` is given a revision**, because a call with a path and no version has
+                // two things wrong with it and this test is about one of them. The version is a
+                // real one, so the only thing left to refuse is the path.
+                val args = if (name == "restore") {
+                    """{"path":"$path","revision":"${git.log("shopping", null, 1).first().id}"}"""
+                } else {
+                    """{"path":"$path"}"""
+                }
+                val body = tool(name, args)
                 assertTrue(
                     "$name with \"$path\" is refused: $body",
                     body.startsWith(AgentLog.FAILURE),
