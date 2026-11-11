@@ -160,11 +160,11 @@ fun resolvedConnection(
     val own = scopeOfPlace(project, branch)
     // A row is usable for this host when it has a token and its address covers the host — and a row
     // with no address at all is usable only where it is the one that supplies the address.
-    val tokenFor = { row: Connection?, mustNameHost: Boolean ->
-        row?.takeIf {
-            it.secret.isNotBlank() &&
-                if (it.address.isBlank()) !mustNameHost else hostCovers(hostOfAddress(it.address), asked)
-        }
+    // **A local function, not a lambda**, because Kotlin forbids named arguments on a function type
+    // and `mustNameHost` is the one thing a reader has to be told at every call site.
+    fun tokenFor(row: Connection?, mustNameHost: Boolean): Connection? = row?.takeIf {
+        it.secret.isNotBlank() &&
+            if (it.address.isBlank()) !mustNameHost else hostCovers(hostOfAddress(it.address), asked)
     }
     val above = parentChain(project, branch)
         .firstNotNullOfOrNull { tokenFor(at(it), mustNameHost = true) }
