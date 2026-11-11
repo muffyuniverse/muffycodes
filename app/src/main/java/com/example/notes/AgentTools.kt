@@ -3088,7 +3088,11 @@ class AgentTools(
                     val stage = if (keep) "the stage was kept" else "the stage was cleared"
                     success("put the whole project back to ${short(revision)} — $stage")
                 },
-                onFailure = { refusal(it.message ?: "it could not be restored") },
+                // **`Secrets.describe`, not `message`.** A JGit failure arrives as a wrapper whose
+                // `message` is often null, so the fallback sentence is what a person reads — and
+                // "it could not be restored" about a real error is the answer that cannot be acted
+                // on. `describe` unwraps the cause.
+                onFailure = { refusal(Secrets.describe(it)) },
             )
         }
         val file = resolveFile(asked)

@@ -1836,12 +1836,16 @@ object GitService {
         // tree, a tag or a blob; a checkout needs the commit, and parsing is what says which it is.
         val start = repo.resolve(revisionId.trim())
             ?: throw IllegalArgumentException("There is no version $revisionId in this project")
-        val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
-            try {
+        // **The tree id, read inside the walk that parsed the commit.** A `RevCommit`'s `.tree` is
+        // only populated by the walk that produced it — reaching for it after the walk is closed is
+        // how this answered `1` with no sentence at all.
+        val treeId = org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
+            val commit = try {
                 walk.parseCommit(start)
             } catch (e: Throwable) {
                 throw IllegalArgumentException("There is no version $revisionId in this project")
             }
+            commit.tree.id
         }
         // **`checkout` with a start point detaches HEAD, which is not what a restore means.** The
         // tree must come from the version while the *branch* stays where it is — otherwise the next
@@ -1850,10 +1854,9 @@ object GitService {
         // So the tree is written from the commit's tree directly, and the removal is the half a
         // per-path restore cannot do: **every tracked path that the version does not have is
         // deleted**, which is what "all files change to that state" means.
-        val tree = commit.tree
         val wanted = LinkedHashMap<String, org.eclipse.jgit.lib.ObjectId>()
         org.eclipse.jgit.treewalk.TreeWalk(repo).use { walk ->
-            walk.addTree(tree)
+            walk.addTree(treeId)
             walk.isRecursive = true
             while (walk.next()) {
                 if (walk.getFileMode(0) == org.eclipse.jgit.lib.FileMode.GITLINK) continue
@@ -1891,7 +1894,7 @@ object GitService {
             // describing files that no longer exist — and `push` counts the index, so the next push
             // would commit the whole tree as one version.
             Git(repo).use { git ->
-                git.reset().setRef(commit.name).setMode(ResetCommand.ResetType.MIXED).call()
+                git.reset().setRef(start.name).setMode(ResetCommand.ResetType.MIXED).call()
             }
         }
     }
