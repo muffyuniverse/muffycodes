@@ -754,7 +754,7 @@ class AgentTools(
                     "`grep` — a regex; answers only matching lines as `N: text`.\n" +
                     "`revision` — a version id from `log` or `search {history}`, instead of `@` in " +
                     "the path.\n" +
-                    "`multi` — `grep` may match across lines (`.` matches a newline).\n" +
+                    "`multi` — `grep` may match across lines.\n" +
                     "`word` — `grep` matches whole words only.\n" +
                     "`numbers` — number every answered line.\n" +
                     "A result too large is written to `agent/background_results/` and its path is " +
@@ -885,11 +885,12 @@ class AgentTools(
             ),
             spec(
                 "push",
-                "Commits everything unsent and sends it. `message` is the commit message. `tag` " +
-                    "names a version on the commit this push makes. Never forced: a refusal means " +
-                    "GitHub has commits this phone does not, so `pull` and resolve first.",
+                "Commits everything unsent and sends it. `message` is the commit message, required " +
+                    "when anything is staged. `tag` names a version on the commit this push makes. " +
+                    "Never forced: a refusal means GitHub has commits this phone does not, so " +
+                    "`pull` and resolve first.",
                 "{\"message\":\"Add the shopping list and its prices\",\"tag\":\"1.4.0\"}",
-                required = listOf("message"),
+                required = emptyList(),
             ),
             spec(
                 "diff",
@@ -908,19 +909,43 @@ class AgentTools(
             ),
             spec(
                 "pull",
-                "Brings in what GitHub has. Refuses when the phone has unsent work, naming it.",
+                "Fetches `origin` and merges `origin/main` into this project's `main`. Merge, never " +
+                    "rebase. A conflict answers the conflicted paths and stops: read one, choose " +
+                    "what it should say, `write` the answer, then `push`.",
                 "{}",
                 required = emptyList(),
             ),
-        )
+        ).filter { httpAllowed || it.name != "http" }
 
         /**
-         * **One command, from an example that is also its shape.**
+         * One tool, described to the model.
          *
-         * The `parameters` argument is a filled-in sample, and the JSON Schema is derived from it: the
-         * example's keys become `properties`, and each value's own text becomes that field's
-         * description. So the example is not documentation beside the schema — it **is** the schema,
-         * which is why a key nobody names cannot be quietly accepted.
+         * **The parameters here are written as an EXAMPLE, and this is where it becomes a schema.**
+         * Every call site passes something like `{"ids":"2 5 7-12 14"}` - a filled-in sample, which
+         * is far easier to read and to keep honest than a tree of `type`/`description` objects - and
+         * this function wraps it in the one thing JSON Schema requires and an example cannot say:
+         * `{"type":"object","properties":{...}}`.
+         *
+         * **The wrap is not cosmetic, and its absence was a 400 on every chat request.** OpenRouter
+         * forwarded the bare example to DeepSeek, which refused the whole request with
+         * `Invalid schema for function 'forget': schema must be a JSON Schema of 'type: "object"',
+         * got 'type: null'`. The app reported only OpenRouter's wrapper sentence - "Provider
+         * returned error" - because the provider's own words are inside `error.metadata.raw`, which
+         * `why()` did not read. Two defects, one symptom: a chat that never answered.
+         */
+        /**
+         * One command's description and its schema.
+         *
+         * **[required] is the keys a call cannot work without, and it defaults to every key the
+         * example shows.** That default is right for a command where the example *is* the call —
+         * `read` needs a path — and wrong for one where the keys are filters that may each be left
+         * out. `search` is that second kind and says so: with all six marked required, a provider
+         * would be told a listing is an invalid call, which is the mode the operator asked for by
+         * name (*"you just provide scope and get all of current paths back"*).
+         *
+         * **An empty list is a real answer**, not a missing one: `{}` is a valid `search`, so the
+         * default is `null` ("the example's keys") rather than an empty list, which would make
+         * "nothing is required" impossible to say.
          */
         private fun spec(
             name: String,
@@ -968,6 +993,1022 @@ class AgentTools(
             is JSONObject, is JSONArray -> value.toString()
             else -> value.toString()
         }
+    }
+
+    // ---- running ------------------------------------------------------------
+
+    /**
+     * Runs one call and returns its body, `0` or `1` first.
+     *
+     * **Every tool advertised here is run here.** `ask` and `conclude` used to be the exception: the
+     * loop ended the turn on them instead of running them, so a spec existed for something this
+     * function would never answer. They are gone, and the rule is now the simple one — if the model
+     * can see it, it can call it, and the call is answered.
+     *
+     * **One `when`, and every command gets the deadline.** There used to be a short list of "slow"
+     * commands with a deadline and a second dispatch beside this one for them; a `read` of a huge
+     * file and a `search` of a huge account are as slow as the disk says they are, so no command has
+     * the option of outlasting its turn. What each one does with the deadline is its own business:
+     * the ones that can ask inside a loop do ([Deadline.check]), and the ones that write once have
+     * either finished or not started by the time it passes.
+     */
+    fun run(
+        call: Call,
+        deadline: Deadline = Deadline.none(),
+        /**
+         * Whether a command that runs out of time is handed to the background instead of stopped.
+         *
+         * **False for a background call's own work**, because there is nowhere left to hand it to -
+         * a background of a background is how a result gets lost. True for the foreground, which is
+         * where report 13 lives.
+         */
+        canHandOver: Boolean = false,
+        /**
+         * How many nested calls deep this one is.
+         *
+         * **A `{"tool":…}` argument runs a command to get a value**, so a value could name a command
+         * whose own value names a command. The nesting is useful one deep — "read this and write it
+         * there" — and unbounded nesting is a stack overflow a model could reach by accident. The
+         * bound is small enough to be a real answer and large enough for any honest use.
+         */
+        nested: Int = 0,
+    ): String = try {
+        // **The arguments, or a sentence about them.** `JSONObject(...)` throws on anything that is
+        // not one — a model that sends `[]`, or a bare string where the object should be — and
+        // "that tool could not be run" would leave it guessing at which part of the call was wrong.
+        if (nested > NESTED_MOST) {
+            return refusal(
+                "Arguments nested $nested calls deep, and $NESTED_MOST is the limit. A value that " +
+                    "names a command is for reading one thing once — write the intermediate result " +
+                    "to a file if you need a chain.",
+            )
+        }
+        val args = try {
+            JSONObject(call.args.ifBlank { "{}" })
+        } catch (e: Throwable) {
+            return refusal(
+                "The arguments must be a JSON object, like {\"path\":\"a file\"}. " +
+                    "This call's were: ${call.args.take(160)}",
+            )
+        }
+        // **Before the command, not inside it.** A key a command does not take means the model and
+        // the description disagree, and answering as if they did not is how `lines` silently became
+        // "everything". Nothing has happened yet at this point, which is the only moment a refusal
+        // can leave everything exactly as it was.
+        val unknown = unknownIn(call.tool, args)
+        if (unknown.isNotEmpty()) return refuseKeys(call.tool, unknown)
+        // **Every value is expanded before any command sees it** — a source (`{"row":17}`,
+        // `{"file":…}`, `{"tool":…}`) or a brace pattern in a path. One place, called once, after
+        // the keys are checked and before dispatch, so no command can forget it and two commands
+        // cannot disagree about what a value means.
+        //
+        // **After `unknownIn`, deliberately.** Expanding a value for a key the command does not take
+        // would do work on the way to a refusal — and a `{"row":7}` naming a deleted row would then
+        // answer about the row instead of about the key, which is the wrong sentence.
+        val values = Args.resolve(
+            args = args,
+            pathKeys = PATHS[call.tool].orEmpty(),
+            read = { path ->
+                resolveFile(path).getOrNull()?.takeIf { it.isFile }?.let { file ->
+                    if (file.length() > Args.MOST_CHARS) null else file.readText()
+                }
+            },
+            row = { id -> log.rows().firstOrNull { it.id == id }?.body },
+            call = call@ { tool, inner ->
+                val answer = run(Call("nested", tool, inner.toString()), deadline, nested = nested + 1)
+                // **The body, not the answer.** Every command's result carries `0\n` or `1\n` first
+                // — that is what `run` promises — and a value pasted into a file must not carry the
+                // status line with it. **A refusal is a failure, not a value**: an empty paste
+                // reported as success is the worst outcome available here, so the refusal's own
+                // sentence becomes the refusal.
+                if (answer.startsWith("1\n")) {
+                    return@call Result.failure(
+                        IllegalArgumentException(answer.removePrefix("1\n").trim()),
+                    )
+                }
+                Result.success(answer.removePrefix("0\n"))
+            },
+            // **A key that holds a call is not a value.** `background`'s `args` describe the command
+            // it defers — resolving them would run that command now, which is the one thing a
+            // background must not do. `mcp`'s `args` go to a remote tool, which interprets them.
+            verbatim = setOf("args"),
+        ).getOrElse { return refusal(it.message ?: "that argument cannot be expanded") }
+        // **One path, many values is a refusal, not a choice.** A command that takes one file has no
+        // rule for picking one of twelve, and acting on the first would be a silent partial act — the
+        // model would believe it had done all twelve. `look` is the one command whose path key is a
+        // list already, and `Args` keeps it a list.
+        for (key in PATHS[call.tool].orEmpty() - MULTI_KEYS) {
+            val value = values.opt(key)
+            if (value is JSONArray) {
+                return refusal(
+                    "`$key` expanded to ${value.length()} paths, and `${call.tool}` acts on one. " +
+                        "Give one path, or call it once per path.",
+                )
+            }
+        }
+        // **Every path out of the `when` is answered, and every one of them tells the screens.**
+        // The command's own answer is what comes back; the notification is a separate act that
+        // happens after it, whether the answer was a success or a refusal.
+        val said = when (call.tool) {
+            "search" -> searchTool(values, deadline)
+            "read" -> read(values, deadline)
+            "write" -> write(values, deadline)
+            "forget" -> forget(values)
+            "delete" -> delete(values, deadline)
+            "move" -> move(values, deadline)
+            "restore" -> restore(values, deadline)
+            "background" -> background(call, values)
+            "browse" -> browse(values, deadline)
+            "shot" -> shot(values, deadline)
+            "look" -> look(values)
+            "query" -> query(values, deadline)
+            "archive" -> archive(values, deadline)
+            "http" -> if (httpAllowed()) {
+                http(values, deadline)
+            } else {
+                refusal(
+                    "Reaching the network is switched off in this account's settings, so nothing can be " +
+                        "sent. A page can still be read with `browse`.",
+                )
+            }
+            "mcp" -> mcp(values, deadline)
+            "diff" -> diffTool(values, deadline)
+            "log" -> logTool(values, deadline)
+            "pull" -> pull()
+            "push" -> push(values)
+            "help" -> help(values)
+            else -> refusal("There is no tool called ${call.tool}")
+        }
+        if (call.tool in CHANGES_DISK) onDiskChanged()
+        said
+    } catch (e: StoppedException) {
+        // **A command that ran out of time may still have written something.** A folder delete that
+        // stopped part way has already removed files; a write that was handed over is still running.
+        // Either way the list a person is looking at is now wrong, and this is the case they are most
+        // likely to be watching.
+        if (call.tool in CHANGES_DISK) onDiskChanged()
+        // **Report 13: the work carries on and its result arrives later.** A command that outlasts
+        // the operator's wait is restarted in the background - restarted, not resumed, because
+        // nothing here can carry on from the middle - and the turn is told where the result will be.
+        // A folder delete keeps its own sentence instead: part of it is already gone, and running it
+        // again would be a second delete reported as the interrupted one.
+        if (canHandOver) {
+            handOver(call, deadline)?.let { return it }
+        }
+        e.message ?: Stopped.body(call.tool, deadline)
+    } catch (e: Throwable) {
+        // **The same rule for a command that threw.** A tool that failed half way through a folder
+        // is indistinguishable, from the screen's side, from one that stopped part way through it.
+        if (call.tool in CHANGES_DISK) onDiskChanged()
+        refusal(Secrets.explain(e, "That tool could not be run"))
+    }
+
+    /**
+     * Any command, run so that its result lands in a file instead of in the conversation.
+     *
+     * **The answer comes back before the work starts** — [Background.start] writes the file and then
+     * hands the work over — so this never holds a turn open, however long the command takes. Its
+     * limit is the operator's *background* number, applied to the work and not to the answer.
+     *
+     * **The tool name is the argument**: a result belongs to the call that asked for it, and the path
+     * is named after that call's own row. The work goes through [run], the same one the foreground
+     * uses, so the file's body is the body the agent would have read in the conversation and no
+     * command can exist on one path and not the other.
+     *
+     * **The inner call inherits the outer one's id**, which is what makes the path unique. It used to
+     * take an `id` from the arguments, defaulting to `"0"` — so two backgrounded reads both wrote
+     * `read-0.txt` and the second answer replaced the first, silently, while the agent read it as the
+     * answer to its own question.
+     *
+     * Refused: the three that end a turn, because there is no result to file, and `background`
+     * itself, because a background of a background is a way to lose a result.
+     */
+    /**
+     * A call the foreground ran out of time for, restarted in the background.
+     *
+     * **The sentence names the file the result will land in**, because that file already exists —
+     * [Background.start] writes it before the work begins — so the model can read it on any later
+     * turn. The operator's words for this were "will be returned on one of the next turns with
+     * other call results", and the wake that does it is the one `background` already uses: a
+     * completion wakes the agent for a real turn naming the file.
+     *
+     * Returns null for a call that must not be restarted, which is only a command that has already
+     * changed something part of the way (see [Stopped.partway]).
+     */
+    fun handOver(call: Call, deadline: Deadline): String? {
+        if (call.tool == "background") return null
+        if (call.tool !in KEYS) return null
+        val args = try {
+            JSONObject(call.args.ifBlank { "{}" })
+        } catch (e: Throwable) {
+            return null
+        }
+        // A **folder** delete that got part of the way is the one act that cannot be repeated: its
+        // paths are already gone, and running it again would be a second delete rather than the
+        // interrupted one. Everything else removes one entry and is done, or writes all at once.
+        if (call.tool == "delete" && isFolder(args)) return null
+        val dir = projectDir
+        // **The background's own limit, and no second handover.** A background of a background is
+        // how a result gets lost, so this work is bounded by the operator's background number and
+        // dies honestly when it runs out.
+        // **The session key**, because a worktree's folder is named after its branch — see
+        // `Background.Done.project`.
+        bg.start(dir, call, sessionKey) { run(call, Deadline(backgroundMs())) }
+        val file = bg.resultFile(dir, call)
+        val path = file.relativeTo(dir).invariantSeparatorsPath
+        Trace.note("agent", "${dir.name} · ${call.tool} handed over after ${deadline.expiredIn()}")
+        return Stopped.stillRunning(call.tool, deadline, path)
+    }
+
+    /**
+     * Whether a delete's target is a folder — **asked before the work, not after it stopped.**
+     *
+     * The question a handover needs is not "did it stop part of the way" (only knowable afterwards)
+     * but "could it have". Removing one file happens in the last instant and is done; a tree removal
+     * walks, so it can stop in the middle of a folder and leave part of it gone. Only the second is
+     * unsafe to repeat, and `isDirectory` is what tells them apart — not a key the tool does not take.
+     */
+    private fun isFolder(args: JSONObject): Boolean =
+        resolveFile(args.optString("path")).getOrNull()?.isDirectory == true
+
+    private fun background(call: Call, args: JSONObject): String {
+        val tool = args.optString("tool").trim()
+        if (tool.isEmpty()) return refusal("Say which command to run in the background")
+        if (tool == "background") {
+            return refusal("A background command cannot be put in the background")
+        }
+        // **The command it names is checked now, not when it runs.** Otherwise the wrong key would
+        // be found by the work, and the answer would be a file containing a refusal the model does
+        // not look at until it thinks the command finished.
+        if (tool !in KEYS) return refusal("There is no tool called $tool")
+        val innerArgs = innerArgsOf(args)
+            .getOrElse { return refusal(it.message ?: "`args` must be a JSON object") }
+        val unknown = unknownIn(tool, innerArgs)
+        if (unknown.isNotEmpty()) return refuseKeys(tool, unknown)
+        val inner = Call(id = call.id, tool = tool, args = innerArgs.toString())
+        val dir = projectDir
+        return bg.start(dir, inner, sessionKey) { run(inner, Deadline(backgroundMs())) }
+    }
+
+    /**
+     * The `args` of a `background` call: an object, or a string that holds one.
+     *
+     * **Both shapes, because models write both.** The string form used to be read as "no arguments
+     * at all", so `{"tool":"read","args":"{\\"path\\":\\"milk.txt\\"}"}` ran a `read` of the
+     * project's own folder and answered with a sentence about a folder — a command that quietly
+     * dropped what it was told, which is the same class of mistake as a wrong key.
+     */
+    private fun innerArgsOf(args: JSONObject): Result<JSONObject> {
+        val raw = args.opt("args")
+        return when {
+            raw == null || raw === JSONObject.NULL -> Result.success(JSONObject())
+            raw is JSONObject -> Result.success(raw)
+            raw is String -> try {
+                Result.success(JSONObject(raw))
+            } catch (e: Throwable) {
+                Result.failure(
+                    IllegalArgumentException(
+                        "`args` must be a JSON object, like {\"path\":\"a file\"}",
+                    ),
+                )
+            }
+            else -> Result.failure(IllegalArgumentException("`args` must be a JSON object"))
+        }
+    }
+
+    /**
+     * The one search: **where** (`path`), **what** (`grep`), **when** (`history`), **how deep**
+     * (`depth`), **how many** (`count`).
+     *
+     * **The filters are independent axes.** Setting none is a listing rather than a search with
+     * everything unset — unlike `grep`/`from`/`to`, which competed to say *where* and refused each
+     * other. `count` bounds paths in both modes, and a content match answers one row per path, so
+     * the count and the rows cannot disagree.
+     *
+     * ## The filters, and what each one is asked of
+     *
+     * - **`path`** is a case-insensitive pattern asked of the **account-relative path**, matched
+     *   anywhere in it. So `wiki/` is the wiki of every project, `groceries/wiki/` is one,
+     *   `milk.txt` is one file, and `\\.md$` is every markdown file. A folder is matched with its
+     *   trailing slash, so `path: "src/"` lists the folder as well as its contents.
+     * - **`grep`** is asked of each **line** of a text file, with the same [hit] `read` uses, so the
+     *   two commands cannot disagree about whether a file matches.
+     * - **`depth`** counts folder levels below the account. Eight by default: deep enough to reach
+     *   any file whose project keeps its text in a subfolder, bounded so a pathological tree cannot
+     *   turn one call into a walk of the phone.
+     *
+     * ## Why the answer is per path and not per match
+     *
+     * A file matching forty times is one answer, with the first match, its line number, and a count
+     * of the rest — because a list that hid "and 39 more" would read as a file that says it once,
+     * and because `count` is a count of paths.
+     */
+    private fun searchTool(args: JSONObject, deadline: Deadline): String {
+        val scope = pattern(args, "path")
+            .getOrElse { return refusal("`path` is not a pattern: ${it.message}") }
+        val query = pattern(args, "grep")
+            .getOrElse { return refusal("`grep` is not a pattern: ${it.message}") }
+        val depth = count(args, "depth", SEARCH_DEPTH)
+            .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
+            .coerceIn(1, SEARCH_DEPTH_MOST)
+        val history = args.optBoolean("history", false)
+        // **The default depends on whether anything narrows the answer**, and `count` means the same
+        // thing in both cases — how many paths to answer with.
+        //
+        // - **A pure listing** (`path` + `depth`, nothing else) is a folder's contents and is read
+        //   whole, so it is bounded at the most rather than at ten. Stopping it at ten would make
+        //   `path` useless for "what is here", which is the case the operator named.
+        // - **Anything that filters** — a `grep`, or `history`, which turns every listed file into
+        //   a row per save — answers a handful, and ten is the default the operator asked for:
+        //   *"an optional key to set how many rows are shown (with default max of 10)"*.
+        val most = count(args, "count", if (query == null && !history) MOST_PATHS else DEFAULT_PATHS)
+            .getOrElse { return refusal(it.message ?: "that count cannot be used") }
+            .coerceIn(1, MOST_PATHS)
+
+        val state = SearchState(most, args.optBoolean("total", false))
+        val found = mutableListOf<String>()
+        // **A file that is in scope but whose text does not match is still a directory entry**, and
+        // in listing mode it is the answer. Content mode drops it, which is the difference between
+        // "what is here" and "which of these says this".
+        walkForSearch(ws.accountDir, depth, scope, query, state, found, deadline)
+        // **Files outside this project were skipped by the history pass**, and how many matters: a
+        // person told only "no version matches" cannot tell whether their history was searched.
+        val versions = if (history) {
+            searchVersions(scope, query, depth, state, found, deadline)
+        } else {
+            Versions()
+        }
+
+        if (found.isEmpty()) {
+            // **Two sentences, because they are two questions.** "Nothing matches X" is about a
+            // query; "nothing is in scope" is about a place. Writing one sentence for both left the
+            // message saying "nothing matches in this account" when nothing had been searched for.
+            val where = scope?.let { " in anything matching \"${it.pattern}\"" } ?: " in this account"
+            val also = if (history) ", now or in any saved version" else ""
+            val said = if (query == null) {
+                "nothing is listed$where"
+            } else {
+                "nothing matches \"${query.pattern}\"$where$also"
+            }
+            // **And why the history pass answered nothing, when it could not run at all.**
+            return success(
+                if (versions.noRepository) {
+                    said + "\n(this project has no history to search: it is not a repository yet)"
+                } else {
+                    said
+                },
+            )
+        }
+        // **"stopped at N" is only true when the walk stopped at N.** It reached the limit and there
+        // were more entries to look at; if it finished exactly on the limit there is nothing more to
+        // promise, and the sentence would send a model looking for a remainder that does not exist.
+        val head = if (state.full && state.more) {
+            "stopped at $most paths; narrow `path`, lower `depth`, or raise `count` for the rest\n"
+        } else {
+            ""
+        }
+        val skipped = when {
+            !history -> ""
+            versions.noRepository ->
+                "\n(this project has no history to search: it is not a repository yet)"
+            versions.skipped > 0 ->
+                "\n(${versions.skipped} file(s) in scope are in other projects, whose versions are " +
+                    "not reachable from here — only their current text was searched)"
+            else -> ""
+        }
+        return success(head + found.joinToString("\n") + skipped)
+    }
+
+    /**
+     * Walks [dir] depth-first, adding one line per entry as [state] has room.
+     *
+     * **Depth-first in the order `ws.list` gives**, so an answer that hits its limit holds the first
+     * N a person reading the tree would meet rather than an arbitrary N. A folder that cannot be
+     * listed is skipped rather than failing the whole search: one unreadable folder must not make
+     * the account unsearchable.
+     *
+     * **A folder is answered only in listing mode.** With a `grep` the answer is files and lines:
+     * a folder in the result would be there because something inside it matched, and printing the
+     * folder adds a line nobody asked about.
+     *
+     * @return true when it **stopped with work left**. That is not the same as "it is full": a walk
+     * that reaches the limit exactly as it meets the last entry finished, and saying "there is more"
+     * would send the model looking for a remainder that does not exist. Only the walk knows the
+     * difference, so it answers rather than leaving the caller to guess — and the first version of
+     * this got it wrong: when the entry that filled the limit was a *folder*, its contents were
+     * never visited and nothing recorded that they had been skipped, so a truncated listing looked
+     * complete.
+     */
+    private fun walkForSearch(
+        dir: File,
+        left: Int,
+        scope: Regex?,
+        query: Regex?,
+        state: SearchState,
+        found: MutableList<String>,
+        deadline: Deadline,
+    ): Boolean {
+        // **The order of these two lines is the difference between a note and no note.** A folder at
+        // the depth edge that also filled the answer was never looked into, so there is work left —
+        // checking `left` first would return "done" for a listing that had just been cut short.
+        if (state.full) {
+            // **Full before arriving** means this folder was never looked into, which is work left.
+            state.more = true
+            return true
+        }
+        if (left <= 0) return false
+        val entries = try {
+            ws.list(dir)
+        } catch (e: Throwable) {
+            return false
+        }
+        for (entry in entries) {
+            deadline.check("search")
+            if (state.full) {
+                // **There was more to ask.** Recorded here rather than inferred later, because only
+                // the walk knows whether it stopped short or simply finished.
+                state.more = true
+                return true
+            }
+            // **A link is followed only while it stays in the account**, the same rule every walk
+            // applies: a link inside the account can point anywhere, and a search that followed one
+            // would read files the instructions promise it cannot see.
+            if (!withinProject(entry.file)) continue
+            if (entry.isFolder) {
+                // **The folder is listed when it is in scope**, and the walk continues regardless —
+                // a file inside may be in scope even when its folder is not, because `path` is a
+                // pattern over the whole path and not a prefix test.
+                if (query == null) {
+                    val shown = relToAccount(entry.file) + "/"
+                    if (inScope(shown, scope)) {
+                        found.add(shown)
+                        state.count++
+                    }
+                }
+                if (walkForSearch(entry.file, left - 1, scope, query, state, found, deadline)) {
+                    return true
+                }
+                continue
+            }
+            val path = relToAccount(entry.file)
+            if (!inScope(path, scope)) continue
+            if (query == null) {
+                found.add(path)
+                state.count++
+                continue
+            }
+            if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
+            val text = try {
+                readText(entry.file, deadline, "search")
+            } catch (e: Throwable) {
+                continue
+            }
+            val lines = text.split("\n")
+            // **Every matching line, not the first one and a count.** The operator asked for it:
+            // *"if there are several grep hits across a file, all of them should be displayed"*.
+            // `(+N more)` was a number a model could not act on — it said there were other hits and
+            // then made the model search again to find them, which is the work the answer was
+            // supposed to save.
+            //
+            // **Each row is `path:line: text`, and `path` is the account-relative path**, so the
+            // answer is directly usable: `read {path, from, to}` takes the number this prints.
+            //
+            // **Bounded by `HITS_PER_FILE`, with the remainder counted.** A file where a pattern
+            // matches four thousand lines would otherwise answer four thousand rows, which is a whole
+            // conversation for one call — and the count says so, so a model that wants more can
+            // narrow the pattern rather than wonder whether it saw everything.
+            var matched = 0
+            var shown = 0
+            for ((index, line) in lines.withIndex()) {
+                val at = hit(line, query, deadline, "search") ?: continue
+                matched++
+                // **`count: true` answers `grep -c`**: one row per file with how many lines match,
+                // instead of the lines themselves. A model asking "where is this used most" wants
+                // numbers it can compare, and twenty rows per file is the wrong shape for that.
+                if (state.counting) continue
+                // **Bounded by both the per-file cap and what is left of `count`.** `count` is how
+                // many ROWS the answer holds, so a file with twenty hits would otherwise fill an
+                // answer of ten and crowd out every other file — which is the defect `count` exists
+                // to prevent, arriving from the other direction.
+                if (shown >= HITS_PER_FILE || state.count >= state.limit - 1) continue
+                shown++
+                found.add("$path:${index + 1}: ${excerpt(line, at, HIT)}")
+                state.count++
+            }
+            if (state.counting && matched > 0) {
+                found.add("$path: $matched")
+                state.count++
+            }
+            if (!state.counting && matched > shown) {
+                // **Counted separately from `found`, because `state.count` is what fills the answer.**
+                // The note is a row of its own so it cannot be lost by a later truncation, and it
+                // names the pattern so the next call can narrow rather than repeat.
+                found.add("$path: (+${matched - shown} more lines match, not shown)")
+                state.count++
+            }
+            // **A file with no match contributes nothing** — `matched == 0` adds no rows, which is
+            // what `continue` used to do.
+            if (matched == 0) continue
+        }
+        return false
+    }
+
+    /**
+     * True when [path] is in `path` — **anywhere in the path, or anywhere at all when there is no
+     * scope.**
+     *
+     * The pattern is not anchored, which is what makes one key cover the three questions the old
+     * commands asked separately: `wiki/` finds a folder at any depth (a substring), `\\.md$` finds a
+     * name suffix (the path ends with it), and `^shopping/` finds one project (anchored by the
+     * pattern itself, when the caller wants that).
+     */
+    private fun inScope(path: String, scope: Regex?): Boolean =
+        scope == null || scope.containsMatchIn(path)
+
+    /**
+     * Every text file under [dir], as account-relative paths — **without reading any of them.**
+     *
+     * The history pass needs the list of candidates rather than the list of matches, because its
+     * whole purpose is the file whose current text does not match. Reading every file to decide
+     * would be the expensive half of the search done twice, so this only walks.
+     */
+    private fun collectPaths(
+        dir: File,
+        left: Int,
+        scope: Regex?,
+        out: MutableList<String>,
+        deadline: Deadline,
+    ) {
+        if (left <= 0) return
+        val entries = try {
+            ws.list(dir)
+        } catch (e: Throwable) {
+            return
+        }
+        for (entry in entries) {
+            deadline.check("search")
+            if (!withinProject(entry.file)) continue
+            if (ws.isStructural(entry.file)) continue
+            if (entry.isFolder) {
+                collectPaths(entry.file, left - 1, scope, out, deadline)
+                continue
+            }
+            if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
+            val path = relToAccount(entry.file)
+            if (!inScope(path, scope)) continue
+            out.add(path)
+        }
+    }
+
+    /**
+     * Adds the **saved versions** of every file in scope, as `path@sha7`.
+     *
+     * ## Why only this project's files
+     *
+     * `versionsOf` opens every version of a file — it loads a tree per commit — so doing it for every
+     * project in the account would be every repository's history for a question about one function.
+     * The candidates are the text files of **this** project, which is the one whose repository the
+     * agent has open. How many were skipped for that reason is answered, so a "nothing matches"
+     * about another project's history is never mistaken for "that was never written".
+     *
+     * ## What it answers
+     *
+     * `path@sha7` for each version whose text matches, which is **exactly what `read` and `restore`
+     * accept** — so a hit is directly usable as the next call, with no translation. With no `grep`
+     * it answers every version in scope, which is what `history` used to be.
+     *
+     * @return how many candidates were skipped because they belong to another project.
+     */
+    private fun searchVersions(
+        scope: Regex?,
+        query: Regex?,
+        depth: Int,
+        state: SearchState,
+        found: MutableList<String>,
+        deadline: Deadline,
+    ): Versions {
+        // **Only this project.** `versionsOf` needs a repository, and another project's repository is
+        // not this one — reading across is allowed, but a history walk in a repository the agent does
+        // not have open is a different feature with its own costs.
+        //
+        // **No repository is reported, not swallowed.** A project that has never been synced and has
+        // no history folder open has nowhere for a version to be, and an answer that simply omitted
+        // them would read as "this file was never saved" — which is true, but for a reason the person
+        // can act on and deserves to be told.
+        val repo = try {
+            repo.open(project)
+        } catch (e: Throwable) {
+            null
+        } ?: return Versions(noRepository = true)
+        val seen = found.toMutableSet()
+        // **The content hashes already answered**, so a commit that did not change the file's text
+        // adds no row. Without this a mode change or a rename produced a second identical row under
+        // a different sha, and `(+N more in this version)` counted a difference that was not one.
+        val blobs = mutableSetOf<String>()
+        // **The candidate paths, found by walking.** `found` holds the entries that already matched,
+        // and the point of the history pass is the ones whose current text does not — a deleted line, a
+        // renamed function. So the walk is repeated for paths only.
+        val candidates = mutableListOf<String>()
+        // **The caller's depth, not a constant.** The history pass walks the same tree the main
+        // pass did, so a `depth` that narrowed the search must narrow the versions looked at too —
+        // otherwise a shallow search would answer with deep versions the call said to skip.
+        collectPaths(ws.accountDir, depth, scope, candidates, deadline)
+        var skipped = 0
+        for (path in candidates) {
+            // **Full here is still "there was more to ask"**, and the walk has already finished by
+            // now, so this is the only place that can say so — without it a `history` answer that
+            // stopped at the limit would look complete.
+            if (state.full) {
+                state.more = true
+                return Versions(skipped)
+            }
+            deadline.check("search")
+            val file = try {
+                File(ws.accountDir, path).canonicalFile
+            } catch (e: Throwable) {
+                continue
+            }
+            if (projectOf(file) != project) {
+                skipped++
+                continue
+            }
+            val inside = try {
+                file.relativeTo(projectDir).invariantSeparatorsPath
+            } catch (e: Throwable) {
+                continue
+            }
+            val versions = try {
+                GitService.versionsOf(repo, inside, limit = VERSIONS_CONSIDERED, deadline = deadline)
+            } catch (e: Throwable) {
+                continue
+            }
+            // **`CommitInfo`, not a string** — the pair is the commit and the file's text at it.
+            // `shortId` is the seven-character sha, which is exactly what `read {revision}` and
+            // `restore` accept.
+            for ((commit, text) in versions) {
+                if (state.full) {
+                    state.more = true
+                    return Versions(skipped)
+                }
+                deadline.check("search")
+                // **Keyed by the blob, not the commit.** `versionsOf` answers every commit that
+                // *touched* the path, and a commit that changed a mode bit or moved the file
+                // elsewhere leaves the content identical — so two rows would say the same thing
+                // under two different shas. A version is a change in what the file says, so the
+                // content is what identifies it.
+                val shown = "$path@${commit.shortId}"
+                if (shown in seen) continue
+                // **A hash of the content, because a version is a change in what the file says.**
+                // SHA-256 rather than `hashCode`: this decides whether two rows are the same
+                // version, and a 32-bit hash that collides would silently hide a real change.
+                val content = text?.let {
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(it.toByteArray())
+                        .take(8)
+                        .joinToString("") { b -> "%02x".format(b) }
+                } ?: ""
+                // **No query means every version is an answer**, which is what the old command did. With a
+                // query, a version is shown only when its own text matches — and `versionsOf` has
+                // loaded every version's bytes anyway, so asking is free.
+                val row = if (query == null) {
+                    versionRow(path, commit, text)
+                } else {
+                    if (text == null) continue
+                    val hit = firstHit(text, query, deadline, "search") ?: continue
+                    // **One row per version, and the rest counted.** A version is the thing this
+                    // pass answers with — its sha is what `read` takes — so twenty rows for one
+                    // save would bury the other saves. The count is not decoration: a version
+                    // where a pattern occurs forty times is a very different hit from one where it
+                    // occurs once, and saying only the first would hide that.
+                    val also = countHits(text, query, deadline) - 1
+                    versionRow(path, commit, text, hit) +
+                        if (also > 0) " (+$also more in this version)" else ""
+                }
+                // **Keyed by path and content, not content alone.** A file whose current text
+                // equals its last version is not a duplicate: the current file is one answer
+                // ("it is here now") and the version is another ("this is the save that made it
+                // so"), and `read` reaches them differently — by path and by `path@sha`. Deduping
+                // on content alone would drop the version row whenever nobody had edited since,
+                // which is the commonest case of all.
+                // **Only when a query was given.** With no query every version in scope is the
+                // answer, and two saves with identical text are two versions a person may want to
+                // see — the dedupe exists for a *search* that would otherwise repeat a hit, not for
+                // a listing. It is also what keeps a just-created file from losing the version that
+                // created it, since its current text and that version's text are the same.
+                if (query != null && content.isNotEmpty() && !blobs.add("$path\u0000$content")) continue
+                found.add(row)
+                seen.add(shown)
+                state.count++
+            }
+        }
+        return Versions(skipped)
+    }
+
+    /**
+     * What the history pass did, beyond adding rows.
+     *
+     * **Both numbers are things the answer has to say.** A person told only "nothing matches"
+     * cannot tell whether their history was searched; and a project with no repository has no
+     * versions to search at all, which is a different sentence from "there were none".
+     */
+    private data class Versions(val skipped: Int = 0, val noRepository: Boolean = false)
+
+    /** How many files a search has answered with, so the walk can stop. */
+    private class SearchState(val limit: Int, val counting: Boolean = false) {
+        var count: Int = 0
+
+        /** True once the answer holds as many paths as the model asked for. */
+        val full: Boolean get() = count >= limit
+
+        /**
+         * True when the walk stopped **because of the limit** rather than because it ran out.
+         *
+         * Set by the walk when it gives up with entries still unasked. The distinction is the
+         * difference between "there is more, ask again" and a promise the app cannot keep.
+         */
+        var more: Boolean = false
+    }
+
+    /**
+     * A file's path from the **account** folder, with forward slashes.
+     *
+     * **From the account and not the project**, because `search` crosses projects: a hit in another
+     * project has to say which one, and `notes.txt` alone would name a file the agent cannot place.
+     * The result is also what `in` filters are matched against, so the two agree by construction.
+     */
+    private fun relToAccount(file: File): String = try {
+        file.relativeTo(ws.accountDir).invariantSeparatorsPath
+    } catch (e: Throwable) {
+        file.name
+    }
+
+    /** True while [file] is inside the project once the phone's own links are followed. */
+    /**
+     * True when [file] is inside **the account** — which is the boundary, not the project.
+     *
+     * **This used to be the project, and the answer changed it.** The operator's rule gives a project's
+     * agent read-only access to the account's other folders, so a listing of `../other/` has to be
+     * allowed to walk out of this project; bounding it at the project would have returned an empty
+     * listing for a folder the agent may read, which reads as "that project is empty" rather than
+     * "you may not look there".
+     *
+     * What it still stops is the walk *itself* leaving the account — `..` past the account folder, or
+     * a symlink pointing at the phone's storage. Everything the agent can reach is under one folder,
+     * and that folder is the rule.
+     */
+    private fun withinProject(file: File): Boolean = try {
+        val base = ws.accountDir.canonicalFile
+        val target = file.canonicalFile
+        target == base || target.path.startsWith(base.path + File.separator)
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * A whole number from the model, or a refusal that names it.
+     *
+     * **Read from the value, never through `optInt`.** The phone's `org.json` answers the default
+     * where the JVM's casts and throws, so `{"from":"2"}` meant "from 1" on a phone and "that tool
+     * could not be run" in a test — one call, two behaviours, and no way to see either from the
+     * other side. Reading the value makes both say the same thing, and it accepts a number written
+     * as a string, which models do.
+     */
+    private fun count(args: JSONObject, key: String, fallback: Int): Result<Int> {
+        if (!args.has(key) || args.isNull(key)) return Result.success(fallback)
+        val raw = args.opt(key)
+        val number = whole(raw)
+            ?: return Result.failure(
+                IllegalArgumentException(
+                    "`$key` is a whole number, and ${quoted(raw)} is not one",
+                ),
+            )
+        return Result.success(number)
+    }
+
+    /** [value] as a whole number, or null when it is not one — a number, or a string holding one. */
+    private fun whole(value: Any?): Int? {
+        val number = when (value) {
+            is Number -> value.toDouble()
+            is String -> value.trim().toDoubleOrNull()
+            else -> null
+        } ?: return null
+        if (number != Math.floor(number)) return null
+        if (number < Int.MIN_VALUE.toDouble() || number > Int.MAX_VALUE.toDouble()) return null
+        return number.toInt()
+    }
+
+    /** A value from the arguments, short enough to quote back inside a sentence. */
+    private fun quoted(value: Any?): String = "\"" + value.toString().take(30) + "\""
+
+    /**
+     * [text] without the `12: ` a `read` puts in front of a whole-line answer.
+     *
+     * **Only ever applied to a replacement for whole lines**, so a body that legitimately starts
+     * with digits — a numbered list pasted in as a replacement — keeps them: the caller asks this
+     * only when the line it is replacing was answered as `number: line`.
+     */
+    private fun stripNumber(text: String): String =
+        text.replaceFirst(Regex("""^\s*\d+: ?"""), "")
+
+    /**
+     * A pattern from the model, or null when it gave none — **and the one meaning every command
+     * gives it.**
+     *
+     * **Per line, always.** `read` and `search` ask the same question of the same text, so
+     * a pattern that finds a line in one finds that line in the others. It used to have two
+     * meanings: `read` matched line by line, while the list commands first matched the whole
+     * file and only then the lines. Anchors were the difference — `^milk` matches only at the very
+     * start of the text it is given, so a file whose *second* line was `milk` was skipped by the walk
+     * and found by `read`, and the model had no way to know which answer it would get.
+     *
+     * **Case-insensitive in every script.** `CASE_INSENSITIVE` on its own folds US-ASCII only, so
+     * `Kraków` and `kraków` were two different words; `UNICODE_CASE` is what makes "ignore case"
+     * mean what it says for a name with an accent in it.
+     *
+     * A pattern holding a line break is refused, because no line contains one: it would answer
+     * "nothing matches" about a file that plainly holds the text, and the model would go looking
+     * for a mistake in its path. `from`/`to` is how a block of lines is read.
+     *
+     * **A refusal, not a crash.** A model writing `[` is making a mistake about a regular
+     * expression, and the answer it needs is that sentence — not an exception turned into "that
+     * tool could not be run", which says nothing about what to fix.
+     *
+     * The pattern [args] names, with `word` applied when it asks for one.
+     *
+     * **`word` is a flag on the call, not syntax in the pattern**, because the alternative is asking a
+     * model to write a lookaround it will get wrong. `-w` in grep is the same idea, and the operator
+     * asked for it by that name.
+     */
+    private fun pattern(args: JSONObject, key: String = "grep"): Result<Regex?> =
+        pattern(args.optString(key, ""), args.optBoolean("word", false))
+
+    private fun pattern(raw: String, word: Boolean = false): Result<Regex?> {
+        val text = raw.trim()
+        if (text.isEmpty()) return Result.success(null)
+        if (text.any { it == '\n' || it == '\r' }) {
+            return Result.failure<Regex?>(
+                IllegalArgumentException(
+                    "it holds a line break, and a pattern looks inside one line. " +
+                        "Use `from`/`to` for a block of lines, or search for one of its lines",
+                ),
+            )
+        }
+        // **`(?<!\w)` and `(?!\w)`, not `\b`.** `\b` is the usual answer and it is wrong at the edges:
+        // it treats `_` as a word character, so a `word` search for `_id` would miss a bare `_id`
+        // between two non-word characters, and it collapses to "start or end of a word" rather than
+        // "not part of a longer word". Lookarounds say exactly the second thing, and wrapping the
+        // pattern rather than appending to it means a pattern with its own `^`/`$` still works.
+        //
+        // **The wrap is `(?:…)`, so alternation stays inside it.** `cat|dog` with `word` must not
+        // become `(?<!\w)cat|dog(?!\w)`, which would anchor only the first alternative and then
+        // match `dog` inside `dogma`.
+        val body = if (word) "(?<!\\w)(?:$text)(?!\\w)" else text
+        return try {
+            // **`Pattern`, not `Regex`, because Kotlin has no Unicode case option.** `RegexOption`
+            // has `IGNORE_CASE` and nothing that goes with it, and `CASE_INSENSITIVE` alone folds
+            // US-ASCII: it makes `k` and `K` one letter while leaving `ó` and `Ó` two, so a search
+            // for "KRAKÓW" missed "Kraków". The engine underneath is the same one; only the flag is
+            // out of reach from the Kotlin wrapper.
+            Result.success(
+                Pattern.compile(body, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE).toRegex(),
+            )
+        } catch (e: Throwable) {
+            Result.failure<Regex?>(IllegalArgumentException("that is not a regular expression"))
+        }
+    }
+
+    /**
+     * Where [pattern] first matches [line] — **the one place any command runs a regular expression.**
+     *
+     * **A pattern is the only input to a command that can take unbounded time in one call.** Walking
+     * a folder asks the deadline per entry and a read asks it per chunk, but `Regex.find` against one
+     * line is a single call, and no deadline *outside* the call can stop it. So the text is handed
+     * over through [Timed], which asks the clock every few thousand characters — the engine reaches
+     * the input through `charAt`, so the question is asked *inside* the match, and the answer is the
+     * same stop sentence every other command gives.
+     *
+     * Internal so a test can ask this question directly. It is a claim about a *call*, not about a
+     * pattern: which patterns a given engine finds hard is the engine's business, and a test that
+     * named one would be testing the JVM's optimiser rather than this app's clock.
+     */
+    internal fun hit(line: String, pattern: Regex, deadline: Deadline, tool: String): IntRange? =
+        pattern.find(Timed(line, deadline, tool))?.range
+
+    /**
+     * **Every** match of [pattern] in [line], in the order they appear — the selector's answer.
+     *
+     * The same [Timed] view as [hit], for the same reason: `findAll` walks the text through
+     * `charAt`, so handing it the view keeps the clock *inside* the scan. A line of ten thousand
+     * numbers and a pattern that backtracks is exactly the call this exists to interrupt, and it is
+     * the call a selector invites.
+     */
+    internal fun hits(line: String, pattern: Regex, deadline: Deadline, tool: String): List<String> {
+        val timed = Timed(line, deadline, tool)
+        val out = ArrayList<String>()
+        for (match in pattern.findAll(timed)) out.add(match.value)
+        return out
+    }
+
+    /**
+     * Every match of [pattern] in [line] as its **position**, in order — so a caller can answer with
+     * the text, the line, or a slice, without walking the line a second time.
+     *
+     * The same [Timed] view as [hits], for the same reason.
+     */
+    internal fun spansOf(line: String, pattern: Regex, deadline: Deadline): List<IntRange> {
+        val timed = Timed(line, deadline, "read")
+        val out = ArrayList<IntRange>()
+        for (match in pattern.findAll(timed)) out.add(match.range)
+        return out
+    }
+
+    /**
+     * The text a matcher walks, with the clock in it.
+     *
+     * A view and not a copy, so a match is still asked about the file's own characters.
+     */
+    private class Timed(
+        private val text: CharSequence,
+        private val deadline: Deadline,
+        private val tool: String,
+    ) : CharSequence {
+        private var reads = 0
+
+        override val length: Int get() = text.length
+
+        override fun get(index: Int): Char {
+            // Every 4096 characters: often enough that a long scan is stopped in milliseconds, rare
+            // enough that the count costs nothing beside the matching itself.
+            if ((++reads and 4095) == 0) deadline.check(tool)
+            return text[index]
+        }
+
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
+            Timed(text.subSequence(startIndex, endIndex), deadline, tool)
+
+        override fun toString(): String = text.toString()
+    }
+
+    /** The first line of [text] that [pattern] matches, and where in the line it matched. */
+    /**
+     * The first line of [text] matching [pattern], as **its number, its text, and the span**.
+     *
+     * The number is part of the answer rather than something the caller recount: a version row
+     * shows where the match was (`path@sha7:12: …`) in the same place a current file does, so both
+     * kinds of hit read the same way and `read` takes the same next step.
+     */
+    /** How many lines of [text] match [pattern] — used to say what a single row is not showing. */
+    private fun countHits(text: String, pattern: Regex, deadline: Deadline): Int {
+        var count = 0
+        for (line in text.split("\n")) {
+            deadline.check("search")
+            if (hit(line, pattern, deadline, "search") != null) count++
+        }
+        return count
+    }
+
+    private fun firstHit(
+        text: String,
+        pattern: Regex,
+        deadline: Deadline,
+        tool: String,
+    ): Triple<Int, String, IntRange>? {
+        for ((index, line) in text.split("\n").withIndex()) {
+            val at = hit(line, pattern, deadline, tool) ?: continue
+            return Triple(index + 1, line, at)
+        }
+        return null
+    }
+
+    /**
+     * The part of [line] a hit shows: a window around the match, with a mark where it was cut.
+     *
+     * **The window is placed around the match, not at the start of the line.** A minified line can
+     * be a hundred thousand characters; the answer is a path, a line number and enough text to
+     * recognise the place, and a hit reported at character 40 000 beside the first two hundred
+     * characters would be an answer that does not contain the thing it answers about.
+     */
+    private fun excerpt(line: String, at: IntRange, width: Int): String {
+        val start = if (line.length <= width) {
+            0
+        } else {
+            (at.first - width / 4).coerceIn(0, line.length - width)
+        }
+        val end = (start + width).coerceAtMost(line.length)
+        val window = line.substring(start, end).filterNot { it < ' ' && it != '\t' }.trim()
+        if (window.isEmpty()) return "\u2026"
+        return (if (start > 0) "\u2026" else "") + window + (if (end < line.length) "\u2026" else "")
+    }
+
+    private fun read(args: JSONObject, deadline: Deadline): String =
+        readInto(args, deadline).fold(
+            onSuccess = {
+                // **Remembered only when the read worked**, and only the file's own state — a read
+                // that failed says nothing about what the file holds.
+                rememberRead(args.optString("path"))
+                success(it)
+            },
+            onFailure = { refusal(it.message ?: "that file cannot be read") },
         )
 
     /**
