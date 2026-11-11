@@ -264,7 +264,7 @@ class DiffLogTest {
 
         val body = tool("""{"revision":"$first"}""")
 
-        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("it worked", AgentLog.SUCCESS, body.lineSequence().first())
         val root = ws.projectDir("shopping")
         assertEquals("the old text is back", "one\n", File(root, "milk.txt").readText())
         assertTrue("the file the version did not have is gone", !File(root, "added-later.txt").exists())
