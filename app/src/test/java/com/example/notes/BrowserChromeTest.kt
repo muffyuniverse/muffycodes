@@ -60,7 +60,9 @@ class BrowserChromeTest {
                     BrowserScreen(
                         viewModel = scene.viewModel,
                         username = scene.viewModel.activeLogin,
-                        onOpenSettings = {},
+                        // **Every project act defaults to doing nothing**, so this harness names only
+                        // the row actions it stubs and lets the rest be the object's own defaults.
+                        project = ProjectActions(),
                         actions = BrowserActions(
                             onOpen = {},
                             onRename = {},
@@ -76,20 +78,6 @@ class BrowserChromeTest {
                             onHistory = {},
                             onSelect = {},
                         ),
-                        onAddProject = {},
-                        onRowChat = {},
-                        onRowRename = {},
-                        onRowDelete = {},
-                        onCreateFile = {},
-                        onCreateFolder = {},
-                        onCreateImage = {},
-                        onUploadFiles = {},
-                        onUploadFolder = {},
-                        onRestoreDeleted = {},
-                        onMoveSelected = {},
-                        onCopySelected = {},
-                        onDeleteSelected = {},
-                        onReport = {},
                     )
                 }
             }

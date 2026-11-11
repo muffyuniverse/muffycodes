@@ -439,52 +439,10 @@ fun AccountsScreen(
 fun BrowserScreen(
     viewModel: AppViewModel,
     username: String?,
-    onOpenSettings: () -> Unit,
+    /** **What this screen asks the app to do about projects and the toolbar**, in one object. */
+    project: ProjectActions,
+    /** What it asks about a *row* — the file and folder acts. Disjoint from [project]. */
     actions: BrowserActions,
-    onAddProject: () -> Unit,
-    onRowChat: (String) -> Unit,
-    /**
-     * **A project's own credentials**, from its row's ⋮ — two entries, because the two kinds are two
-     * independent acts: a git token can push, a model key can spend money.
-     *
-     * The branch is passed so `main`'s row sets the *project*, and a branch row sets that branch. The
-     * row that opens the window decides the scope, which is the only way "where does this go" can be
-     * answered without a second scope picker inside the window.
-     *
-     * **The model half is gone** (2026-11-10): a chat's model, address and effort belong to the request
-     * form it picks, so there is nothing per project to open.
-     */
-    onRowGit: (String) -> Unit = {},
-    /** Exports the project's newest artifact, or the project's own files when it has none. */
-    /**
-     * Opens the window that publishes a release of [project] (§13b.7).
-     *
-     * **A parameter because the window is the app's.** Every other menu item here already reaches the
-     * app through one of these callbacks; the release button on the strip is the same act as the menu
-     * items beside it, so it takes the same road rather than reaching into a dialog of its own.
-     */
-    onRelease: (String) -> Unit = {},
-    /** Opens "Set the address…" for [project] — the row's menu and a dead remote's notice. */
-    onRowRename: (String) -> Unit,
-    onRowDelete: (String) -> Unit,
-    /**
-     * **A project going to another account** (§3.9) — `(project, copy)`.
-     *
-     * Offered only when this phone has a second account, because the window's list would otherwise be
-     * empty: a move needs somewhere to go.
-     */
-    onRowTransfer: (String, Boolean) -> Unit = { _, _ -> },
-    onCreateFile: () -> Unit,
-    onCreateFolder: () -> Unit,
-    /** A blank picture, which needs a size as well as a name. */
-    onCreateImage: () -> Unit,
-    onUploadFiles: () -> Unit,
-    onUploadFolder: () -> Unit,
-    onRestoreDeleted: () -> Unit,
-    onMoveSelected: () -> Unit,
-    onCopySelected: () -> Unit,
-    onDeleteSelected: () -> Unit,
-    onReport: () -> Unit = {},
     /** Opens the picker for the open project's type. One word, in the bar, tap to change. */
 ) {
     val projects = viewModel.atProjects
@@ -550,7 +508,7 @@ fun BrowserScreen(
                     // **First in the row, on every screen, always in the same place.**
                     // The moment a person wants it is the moment something has just gone
                     // wrong, and hunting for it then is the worst possible time.
-                    ReportButton(onReport)
+                    ReportButton(project.onReport)
                     if (viewModel.currentProject != null) {
                         // **The chat is where the agent is, so it is where the project is.** It
                         // used to be reachable only from the overflow menu of a project's row on
@@ -572,7 +530,7 @@ fun BrowserScreen(
                         // An outside action runs *after* the add menu has closed, so
                         // the menu is never left standing over the next screen.
                         adding = false
-                        onOpenSettings()
+                        project.onOpenSettings()
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
@@ -586,7 +544,7 @@ fun BrowserScreen(
             } else if (projects) {
                 // **The account root *is* the list of projects**, so the button that makes one
                 // lives here — there is no `projects/` row to open first.
-                FloatingActionButton(onClick = onAddProject) {
+                FloatingActionButton(onClick = project.onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "Add a project")
                 }
             } else if (viewModel.workspace?.isAppHeld(viewModel.path.joinToString("/")) == true) {
@@ -631,27 +589,27 @@ fun BrowserScreen(
                                 // Putting something in from Downloads sits beside making
                                 // something, because to a person they are the same
                                 // question: "how does a file get here?"
-                                TextButton(onClick = { adding = false; onUploadFolder() }) {
+                                TextButton(onClick = { adding = false; project.onUploadFolder() }) {
                                     Text("Upload a folder…")
                                 }
-                                TextButton(onClick = { adding = false; onUploadFiles() }) {
+                                TextButton(onClick = { adding = false; project.onUploadFiles() }) {
                                     Text("Upload files…")
                                 }
-                                TextButton(onClick = { adding = false; onCreateFolder() }) {
+                                TextButton(onClick = { adding = false; project.onCreateFolder() }) {
                                     Text("New folder")
                                 }
-                                TextButton(onClick = { adding = false; onCreateFile() }) {
+                                TextButton(onClick = { adding = false; project.onCreateFile() }) {
                                     Text("New file")
                                 }
                                 // **A picture is a file, so it is made here** rather than in a
                                 // separate place: to a person "how does a file get here?" has the same
                                 // answer whichever kind it is, and the size is the only difference.
-                                TextButton(onClick = { adding = false; onCreateImage() }) {
+                                TextButton(onClick = { adding = false; project.onCreateImage() }) {
                                     Text("New image")
                                 }
                                 // The one way back for a deleted file: its row is gone,
                                 // so there is nothing left to open a history on.
-                                TextButton(onClick = { adding = false; onRestoreDeleted() }) {
+                                TextButton(onClick = { adding = false; project.onRestoreDeleted() }) {
                                     Text("Restore deleted…")
                                 }
                             }
@@ -680,11 +638,11 @@ fun BrowserScreen(
                     // `AppViewModel.canPublish`, which holds the rule rather than this call site.
                     onRelease = viewModel.currentProject
                         ?.takeIf { viewModel.canPublish }
-                        ?.let { project -> { onRelease(project) } },
+                        ?.let { name -> { project.onRelease(name) } },
                     // **The door out of the fault**, from the notice the strip becomes when the host
                     // cannot be reached: the same "Set the address…" window the row's menu opens.
-                    onSetAddress = viewModel.currentProject?.let { project ->
-                        { onRowRename(project) }
+                    onSetAddress = viewModel.currentProject?.let { name ->
+                        { project.onRowRename(name) }
                     },
                 )
 
@@ -694,9 +652,9 @@ fun BrowserScreen(
                 if (viewModel.selected.isNotEmpty()) {
                     SelectionBar(
                         count = viewModel.selected.size,
-                        onMove = onMoveSelected,
-                        onCopy = onCopySelected,
-                        onDelete = onDeleteSelected,
+                        onMove = project.onMoveSelected,
+                        onCopy = project.onCopySelected,
+                        onDelete = project.onDeleteSelected,
                         onClear = { viewModel.clearSelection() },
                     )
                 }
@@ -731,8 +689,8 @@ fun BrowserScreen(
                     // most to learn about what the agent costs.
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
-                        viewModel, onRowChat, onRowRename, onRowDelete,
-                        onRowGit, onRowTransfer,
+                        viewModel, project.onRowChat, project.onRowRename, project.onRowDelete,
+                        project.onRowGit, project.onRowTransfer,
                     )
                 } else {
                     EntryList(viewModel, actions)

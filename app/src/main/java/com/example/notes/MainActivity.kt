@@ -587,40 +587,42 @@ private fun AppRoot(viewModel: AppViewModel) {
             BrowserScreen(
                 viewModel = viewModel,
                 username = viewModel.account?.login,
-                onOpenSettings = { tap("settings"); showSettings = true },
-                onReport = openReport,
                 actions = actions,
-                onAddProject = { tap("add project"); pending = Pending.AddProject },
-                onRowChat = { project -> viewModel.openChat(project) },
-                onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
-                onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
-                // **A project's own move, and it is offered only where it can go somewhere** (§3.9):
-                // with one account on the phone the window would list nothing.
-                onRowTransfer = { project, copy ->
-                    tap(if (copy) "copy project" else "move project", project)
-                    pending = Pending.TransferProject(project, copy)
-                },
-                // **A project's row sets the project's git credential**, which is `main`'s scope — the
-                // branch a project is made of, and whose folder is the project's own tree.
-                onRowGit = { project ->
-                    tap("git connection", project)
-                    pending = Pending.GitConnection(project, AgentSession.MAIN)
-                },
-                // **The release button on the project's strip.** It is offered only when nothing is
-                // unsent, so the window is reached exactly when a version can honestly be named.
-                onRelease = { project -> tap("publish release", project); pending = Pending.Release(project) },
-                onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
-                onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
-                onCreateImage = { tap("new image"); viewModel.currentDir?.let { pending = Pending.NewImage(it) } },
-                onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
-                onUploadFolder = { pickingFolder = tap("upload folder"); pickFolder.launch(null) },
-                onRestoreDeleted = {
-                    tap("restore deleted")
-                    viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
-                },
-                onMoveSelected = { tap("move", "${viewModel.selected.size} chosen"); pending = Pending.MoveSelected },
-                onCopySelected = { tap("copy", "${viewModel.selected.size} chosen"); pending = Pending.CopySelected },
-                onDeleteSelected = { tap("delete", "${viewModel.selected.size} chosen"); pending = Pending.DeleteSelected },
+                project = ProjectActions(
+                    onOpenSettings = { tap("settings"); showSettings = true },
+                    onReport = openReport,
+                    onAddProject = { tap("add project"); pending = Pending.AddProject },
+                    onRowChat = { project -> viewModel.openChat(project) },
+                    onRowRename = { project -> tap("set address", project); pending = Pending.SetAddress(project) },
+                    onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
+                    // **A project's own move, and it is offered only where it can go somewhere** (§3.9):
+                    // with one account on the phone the window would list nothing.
+                    onRowTransfer = { project, copy ->
+                        tap(if (copy) "copy project" else "move project", project)
+                        pending = Pending.TransferProject(project, copy)
+                    },
+                    // **A project's row sets the project's git credential**, which is `main`'s scope — the
+                    // branch a project is made of, and whose folder is the project's own tree.
+                    onRowGit = { project ->
+                        tap("git connection", project)
+                        pending = Pending.GitConnection(project, AgentSession.MAIN)
+                    },
+                    // **The release button on the project's strip.** It is offered only when nothing is
+                    // unsent, so the window is reached exactly when a version can honestly be named.
+                    onRelease = { project -> tap("publish release", project); pending = Pending.Release(project) },
+                    onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
+                    onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
+                    onCreateImage = { tap("new image"); viewModel.currentDir?.let { pending = Pending.NewImage(it) } },
+                    onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
+                    onUploadFolder = { pickingFolder = tap("upload folder"); pickFolder.launch(null) },
+                    onRestoreDeleted = {
+                        tap("restore deleted")
+                        viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
+                    },
+                    onMoveSelected = { tap("move", "${viewModel.selected.size} chosen"); pending = Pending.MoveSelected },
+                    onCopySelected = { tap("copy", "${viewModel.selected.size} chosen"); pending = Pending.CopySelected },
+                    onDeleteSelected = { tap("delete", "${viewModel.selected.size} chosen"); pending = Pending.DeleteSelected },
+                ),
             )
             // At the bottom, and **clear of the add button**. It used to sit at the
             // bottom centre with 16dp of margin, which is exactly where the button

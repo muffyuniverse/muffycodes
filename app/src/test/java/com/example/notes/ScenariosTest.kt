@@ -99,21 +99,10 @@ class ScenariosTest {
         BrowserScreen(
             viewModel = viewModel,
             username = viewModel.activeLogin,
-            onOpenSettings = {},
             actions = noActions(),
-            onAddProject = {},
-            onRowChat = {},
-            onRowRename = {},
-            onRowDelete = {},
-            onCreateFile = {},
-            onCreateFolder = {},
-                        onCreateImage = {},
-            onUploadFiles = {},
-            onUploadFolder = {},
-            onRestoreDeleted = {},
-            onMoveSelected = {},
-            onCopySelected = {},
-            onDeleteSelected = {},
+            // **Nothing is stubbed, because nothing is asked.** A scenario photographs the screen,
+            // and every project act defaults to doing nothing — which is what a photograph needs.
+            project = ProjectActions(),
         )
     }
 
