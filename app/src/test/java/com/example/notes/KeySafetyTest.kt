@@ -243,6 +243,19 @@ class KeySafetyTest {
 
         assertFalse("a locked phone is not a dead key", KeyVerdict.isDead(locked))
         assertTrue("and it is the locked case", KeyVerdict.isLocked(locked))
+        // **And the store must not delete it.** This is the assertion the file was missing: the two
+        // above test the classifier, and the bug was in the caller — which used `isDead` alone, or
+        // in fact neither, and dropped the row on any exception at all.
+        assertFalse("so the token is kept", KeyVerdict.shouldDrop(locked))
+    }
+
+    @Test
+    fun `a key that can never open again is dropped`() {
+        val gone = IllegalStateException(
+            "could not decrypt",
+            javax.crypto.AEADBadTagException("mac check in GCM failed"),
+        )
+        assertTrue("a reset phone leaves nothing that can open it", KeyVerdict.shouldDrop(gone))
     }
 
     @Test

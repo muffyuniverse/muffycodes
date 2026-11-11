@@ -409,6 +409,20 @@ enum class KeyState {
  */
 object KeyVerdict {
 
+    /**
+     * Whether an unreadable token should be **deleted** rather than left in place.
+     *
+     * The one question a store has to answer when decryption fails, and the answer is not "it
+     * failed": a factory reset leaves a token nothing can ever open, and a row that fails for ever
+     * is worse than no row. But a **locked phone** fails the same way, and deleting a key because
+     * the person had not unlocked their phone yet is how a token typed a minute ago disappears.
+     *
+     * `CredentialStore` calls this and nothing else. It is a separate function rather than an
+     * `if` inside that class because a `Context` cannot be built in a JVM test — so the rule lived
+     * in the one place that could not be tested, and the bug it describes survived three releases.
+     */
+    fun shouldDrop(error: Throwable): Boolean = isDead(error) && !isLocked(error)
+
     /** True when [error] means the ciphertext can never be opened again. */
     fun isDead(error: Throwable): Boolean = chain(error).any { e ->
         // `AEADBadTagException` is a `BadPaddingException`; both mean the bytes did not open.
@@ -477,9 +491,7 @@ class CredentialStore(context: Context) : Credentials {
         return try {
             decrypt(stored)
         } catch (e: Exception) {
-            // The keystore key is gone (a factory reset, for instance): drop the
-            // unreadable token rather than keeping a broken one.
-            prefs.edit().remove(tokenKey(login)).apply()
+            if (KeyVerdict.shouldDrop(e)) prefs.edit().remove(tokenKey(login)).apply()
             null
         }
     }
