@@ -6,56 +6,30 @@ import java.util.concurrent.Executors
 /**
  * What the app was asked to do, and what answered — one line per event, in one file.
  *
- * ## The shape, and why this one
- *
  * ```
  * 16:03:11.412  149  open   41 TAP      open-file  milk.txt
- * 16:03:11.418  149  open   42 TAP      Save       milk.txt
- * 16:03:11.455  149  open   42 CHANGED  state      at / · 3 rows · milk.txtL
+ * 16:03:11.455  149  open   42 CHANGED  state      at / · 3 rows · milk.txt
  * 16:03:20.001  149  open    0 REPORT   I-pressed-Save-and-nothing-appeared
- * 16:05:02.310  149  cls     0 NOTE     app-hidden
  * ```
  *
- * Fixed columns: **time, build, state, id, kind, name, detail**. `id` is the fourth field, after
- * the two facts every line carries — which build wrote it, and whether the app was in front of
- * somebody — so a shell can count it:
+ * Fixed columns: **time, build, state, id, kind, name, detail**. `id` is the fourth field, after the
+ * two facts every line carries — which build wrote it, and whether the app was in front of somebody
+ * — so a shell can count it:
  *
  * ```
  * awk '$5=="TAP"{print $4}' trace.log | sort | uniq -c | awk '$1==1'
  * ```
  *
- * and the same file can be split by build, which is the query that was impossible while the
- * version was prose inside one NOTE:
+ * That prints the ids of every tap that appears exactly once: a thing a person asked for, with
+ * nothing that answered. **That is what "the app didn't react" is**, and it is a query rather than a
+ * judgement.
  *
- * ```
- * awk '$2=="149"' trace.log
- * ```
+ * **A report is a line in the same stream** (`REPORT`, id 0, the person's words as the detail), so
+ * everything above it is its context. There is no snapshot to freeze and no second document.
  *
- * That prints the ids of every tap that appears exactly once — a thing a person asked
- * for, with nothing that answered. **That is what "the app didn't react" is**, and it is
- * a query rather than a judgement.
- *
- * ## What the earlier version got wrong
- *
- * It had four artifacts: a ring in memory, an append-only file in the account, a digest
- * rewritten into Downloads every four seconds, and a separate report document on the bug
- * button. Reading "what did the app do" meant knowing which of four things to open, and
- * the digest destroyed its own history every four seconds — so an event seen a moment
- * late had already been overwritten. Three formats, one truth. This is one format.
- *
- * ## What a report is now
- *
- * **A line in the same stream** (`REPORT`, id 0, the person's words as the detail).
- * Everything above it is the context, because a log is ordered. There is no snapshot to
- * freeze and no second document to write: the file already holds it, and it was being
- * written before the button was pressed.
- *
- * ## Why the file and not only memory
- *
- * A phone has no console, and a screenshot cannot show a tap. The file is in Downloads —
- * the one place a person (and this container) can reach — is written as it happens, and
- * is a debug build's only output. In a release build no sink is ever attached: there is
- * nothing to write to and nothing written.
+ * **The file and not only memory**: a phone has no console and a screenshot cannot show a tap. It
+ * lives in Downloads — the one place a person and this container can both reach — and is written as
+ * it happens. In a release build no sink is attached, so nothing is written.
  */
 object Trace {
 

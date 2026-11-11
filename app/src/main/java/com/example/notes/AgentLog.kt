@@ -371,11 +371,6 @@ class AgentLog private constructor(
          * A burst is one conversation: **an operator's message starts it, and the next one starts
          * the next.** Trimming happens between bursts and never inside one — half a conversation is
          * a log that reads like a bug.
-         *
-         * It used to end at a terminating row (`ask`/`conclude`), which had a consequence worth
-         * naming: the keepalive's rows that followed a conclusion started a burst with no operator
-         * message in it, and `AgentChat.conversation` needed a loop to re-attach them. That loop is
-         * gone, because there is no such row any more.
          */
         fun bursts(rows: List<Row>): List<List<Row>> {
             val out = mutableListOf<MutableList<Row>>()
