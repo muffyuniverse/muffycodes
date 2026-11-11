@@ -2492,10 +2492,10 @@ class AgentTools(
          */
         class Lines(private val args: JSONObject) : Selector {
             override fun newText(edit: Edit): Result<String> {
-                val from = count(args, "from", 1)
+                val from = edit.tools.count(args, "from", 1)
                     .getOrElse { return Result.failure(it) }
                     .coerceAtLeast(1)
-                val asked = count(args, "to", 0)
+                val asked = edit.tools.count(args, "to", 0)
                     .getOrElse { return Result.failure(it) }
                 if (asked > 0 && asked < from) {
                     return Result.failure(
@@ -2571,14 +2571,14 @@ class AgentTools(
         ) : Selector {
             override fun newText(edit: Edit): Result<String> {
                 val first = if (hasRange) {
-                    count(args, "from", 1)
+                    edit.tools.count(args, "from", 1)
                         .getOrElse { return Result.failure(it) }
                         .coerceAtLeast(1)
                 } else {
                     1
                 }
                 val last = if (hasRange) {
-                    val asked = count(args, "to", 0)
+                    val asked = edit.tools.count(args, "to", 0)
                         .getOrElse { return Result.failure(it) }
                     when {
                         asked > 0 && asked < first -> return Result.failure(
@@ -2624,7 +2624,7 @@ class AgentTools(
                 val rewritten = edit.lines.mapIndexed { index, line ->
                     // 1-based, and only inside the range the model named.
                     if (index + 1 < first || index + 1 > last) return@mapIndexed line
-                    val at = hit(line, find, deadline, "write") ?: return@mapIndexed line
+                    val at = edit.tools.hit(line, find, deadline, "write") ?: return@mapIndexed line
                     changed = true
                     // **A pasted `2: milk` is a line, not text to write.** `read` answers a
                     // whole-line pattern with `number: line`, so the obvious next move — paste that
@@ -2632,7 +2632,7 @@ class AgentTools(
                     // **only when this edit replaces whole lines**, because that is exactly when
                     // `read` put a number on the front.
                     val wholeLine = at.first == 0 && at.last == line.length - 1
-                    val body = if (wholeLine) stripNumber(put) else put
+                    val body = if (wholeLine) edit.tools.stripNumber(put) else put
                     find.replace(line, Regex.escapeReplacement(body))
                 }
                 if (!changed) {
@@ -2657,7 +2657,23 @@ class AgentTools(
         val name: String,
         val before: String,
         val lines: List<String>,
-    )
+        /**
+         * **The three tools a selector needs from [AgentTools]**, passed in because a nested class of
+         * a sealed interface cannot reach the outer instance — Kotlin allows `inner` only on a class,
+         * and the compiler says so.
+         *
+         * They travel together as one object so a selector does not take three parameters to answer
+         * one question.
+         */
+        val tools: Tools,
+    ) {
+        /** The [AgentTools] methods the selectors call, named once. */
+        class Tools(
+            val count: (JSONObject, String, Int) -> Result<Int>,
+            val hit: (String, Regex, Deadline, String) -> IntRange?,
+            val stripNumber: (String) -> String,
+        )
+    }
 
     private fun write(args: JSONObject, deadline: Deadline): String {
         // **No empty-path refusal of my own.** `resolveFile` already answers `""` and `"."` with the
@@ -2777,7 +2793,19 @@ class AgentTools(
             // through the conversation. `Args` resolved it before this ran.
             else -> Selector.Whole(args.optString("text"))
         }
-        val text = selector.newText(Edit(file, rel(file), before, lines))
+        val text = selector.newText(
+            Edit(
+                file = file,
+                name = rel(file),
+                before = before,
+                lines = lines,
+                tools = Edit.Tools(
+                    count = ::count,
+                    hit = ::hit,
+                    stripNumber = ::stripNumber,
+                ),
+            ),
+        )
             .getOrElse { return refusal(it.message ?: "${rel(file)} could not be changed") }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
         // **Asked before the one write, because the write is atomic.** A `write` either lands whole
