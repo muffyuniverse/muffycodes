@@ -2467,6 +2467,198 @@ class AgentTools(
      * remains says where it acts by naming the place. A cursor was a fourth way to say "here" beside
      * `from`/`to`, and the model that used both got a refusal.
      */
+    /**
+     * **Where a write puts its text** — one of four shapes, decided once.
+     *
+     * The `when` this replaces was four arms inside a 269-line function, each arm reading the same
+     * `before`, `lines`, `args` and `rel(file)`, each able to `return refusal(...)` out of the middle
+     * of the selection. That last part was the real cost: a refusal about a *pattern* was written
+     * five hundred lines below the code that decided a pattern was being used, and the reader had to
+     * hold both to see why `grep` and `original` were different shapes.
+     *
+     * [newText] answers `Result` rather than the text, so every refusal is a value the one caller
+     * turns into the same sentence — and a selector cannot end the function from inside itself.
+     */
+    private sealed interface Selector {
+        /** The whole file replaced, which is also what a bare `text` means. */
+        class Whole(private val text: String) : Selector {
+            override fun newText(edit: Edit): Result<String> = Result.success(text)
+        }
+
+        /**
+         * A line range replaced — `from`/`to`. **An empty replacement means the lines are gone**, not
+         * that one blank line stands in their place: a person who selects three lines and deletes
+         * them expects three fewer lines.
+         */
+        class Lines(private val args: JSONObject) : Selector {
+            override fun newText(edit: Edit): Result<String> {
+                val from = count(args, "from", 1)
+                    .getOrElse { return Result.failure(it) }
+                    .coerceAtLeast(1)
+                val asked = count(args, "to", 0)
+                    .getOrElse { return Result.failure(it) }
+                if (asked > 0 && asked < from) {
+                    return Result.failure(
+                        IllegalArgumentException(
+                            "That range ends at line $asked, before it starts at line $from. " +
+                                "`from` is the first line and `to` is the last.",
+                        ),
+                    )
+                }
+                val to = if (asked <= 0) edit.lines.size else asked.coerceAtMost(edit.lines.size)
+                if (from > to) {
+                    return Result.failure(
+                        IllegalArgumentException("There is no line $from: the file has ${edit.lines.size} lines"),
+                    )
+                }
+                val put = args.optString("text")
+                val replacement = if (put.isEmpty()) emptyList() else put.split("\n")
+                return Result.success(
+                    (edit.lines.take(from - 1) + replacement + edit.lines.drop(to)).joinToString("\n"),
+                )
+            }
+        }
+
+        /**
+         * The one place that says exactly this text — `original`, matched literally.
+         *
+         * Not "the first match": a model that quoted the wrong paragraph would silently rewrite a
+         * different part of the file and the answer would say it worked. Not "every match" either —
+         * that is what [Matches] is for, and the model chose this key to be precise.
+         */
+        class Literal(private val original: String, private val put: String) : Selector {
+            override fun newText(edit: Edit): Result<String> {
+                val places = edit.before.split(original).size - 1
+                if (places == 0) {
+                    return Result.failure(
+                        IllegalArgumentException(
+                            "Nothing in ${edit.name} says that, so there is nothing to replace. Read " +
+                                "the file first: `original` has to match the text exactly, including " +
+                                "indentation and line breaks.",
+                        ),
+                    )
+                }
+                if (places > 1) {
+                    return Result.failure(
+                        IllegalArgumentException(
+                            "That text appears $places times in ${edit.name}, so replacing it would " +
+                                "change $places places and this call named one. Give more of the " +
+                                "surrounding text so it is unique, or use `grep` if every match should " +
+                                "change.",
+                        ),
+                    )
+                }
+                return Result.success(edit.before.replace(original, put))
+            }
+        }
+
+        /**
+         * Every match of a pattern — `grep`, optionally narrowed by a range.
+         *
+         * **Per line, like every other command.** A pattern is a test of one line here, as it is in
+         * `read` and `search`; applying it to the whole file would make `^milk` match only at
+         * position 0. Splitting and rejoining is exact — the file's own newlines are the separators,
+         * and nothing is normalised.
+         *
+         * `multi: true` is the deliberate opt-in that replaces across lines, which is the only way to
+         * rewrite a function by its signature and its closing brace.
+         */
+        class Matches(
+            private val args: JSONObject,
+            private val find: Regex,
+            private val hasRange: Boolean,
+            private val deadline: Deadline,
+        ) : Selector {
+            override fun newText(edit: Edit): Result<String> {
+                val first = if (hasRange) {
+                    count(args, "from", 1)
+                        .getOrElse { return Result.failure(it) }
+                        .coerceAtLeast(1)
+                } else {
+                    1
+                }
+                val last = if (hasRange) {
+                    val asked = count(args, "to", 0)
+                        .getOrElse { return Result.failure(it) }
+                    when {
+                        asked > 0 && asked < first -> return Result.failure(
+                            IllegalArgumentException(
+                                "That range ends at line $asked, before it starts at line $first. " +
+                                    "`from` is the first line and `to` is the last.",
+                            ),
+                        )
+                        asked <= 0 -> edit.lines.size
+                        else -> asked.coerceAtMost(edit.lines.size)
+                    }
+                } else {
+                    edit.lines.size
+                }
+                val put = args.optString("text")
+                if (args.optBoolean("multi", false)) {
+                    val wide = Regex(
+                        find.pattern,
+                        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE) +
+                            (if (find.options.contains(RegexOption.IGNORE_CASE)) {
+                                setOf(RegexOption.IGNORE_CASE)
+                            } else {
+                                emptySet()
+                            }),
+                    )
+                    // **The range still bounds it**: `grep` narrowed by `from`/`to` is one selection
+                    // with a bound, and it applies here too.
+                    val head = edit.lines.take(first - 1)
+                    val middle = edit.lines.subList(first - 1, last.coerceAtMost(edit.lines.size))
+                    val tail = edit.lines.drop(last.coerceAtMost(edit.lines.size))
+                    val whole = middle.joinToString("\n")
+                    if (!wide.containsMatchIn(whole)) {
+                        return Result.failure(
+                            IllegalArgumentException("Nothing in ${edit.name} matches that"),
+                        )
+                    }
+                    return Result.success(
+                        (head + wide.replace(whole, Regex.escapeReplacement(put)).split("\n") + tail)
+                            .joinToString("\n"),
+                    )
+                }
+                var changed = false
+                val rewritten = edit.lines.mapIndexed { index, line ->
+                    // 1-based, and only inside the range the model named.
+                    if (index + 1 < first || index + 1 > last) return@mapIndexed line
+                    val at = hit(line, find, deadline, "write") ?: return@mapIndexed line
+                    changed = true
+                    // **A pasted `2: milk` is a line, not text to write.** `read` answers a
+                    // whole-line pattern with `number: line`, so the obvious next move — paste that
+                    // into `write` — would have written the number into the file. It is stripped
+                    // **only when this edit replaces whole lines**, because that is exactly when
+                    // `read` put a number on the front.
+                    val wholeLine = at.first == 0 && at.last == line.length - 1
+                    val body = if (wholeLine) stripNumber(put) else put
+                    find.replace(line, Regex.escapeReplacement(body))
+                }
+                if (!changed) {
+                    return Result.failure(IllegalArgumentException("Nothing in ${edit.name} matches that"))
+                }
+                return Result.success(rewritten.joinToString("\n"))
+            }
+        }
+
+        /** The new file, or the reason there is none. */
+        fun newText(edit: Edit): Result<String>
+    }
+
+    /**
+     * **What a selector is selecting from**, so each shape does not read the same four things.
+     *
+     * [name] is the project-relative path, because every refusal names it and a selector has no
+     * business knowing where the project is.
+     */
+    private class Edit(
+        val file: File,
+        val name: String,
+        val before: String,
+        val lines: List<String>,
+    )
+
     private fun write(args: JSONObject, deadline: Deadline): String {
         // **No empty-path refusal of my own.** `resolveFile` already answers `""` and `"."` with the
         // project's own folder, which is the sentence every other command uses — and a second check
@@ -2569,149 +2761,24 @@ class AgentTools(
         val before = readWhole(file, deadline, "write")
             .getOrElse { return refusal(it.message ?: "${rel(file)} could not be read, so nothing was changed") }
         val lines = before.split("\n")
-        // **`grep` first, then the range, then the whole file — and the order is the logic.**
-        // `text` is present in all three shapes, so testing it first made every `grep` call take the
-        // whole-file branch and overwrite the file with the replacement word. The selector decides
-        // which shape this is; `text` only says what goes there.
-        val text = when {
-            hasOriginal -> {
-                // **The one place that says exactly this, or a refusal.** Not "the first match" —
-                // a model that quoted the wrong paragraph would silently rewrite a different part of
-                // the file, and the answer would say it worked. Not "every match" either: that is
-                // what `grep` is for, and the model chose this key to be precise.
-                val put = args.optString("text")
-                val places = before.split(original).size - 1
-                if (places == 0) {
-                    return refusal(
-                        "Nothing in ${rel(file)} says that, so there is nothing to replace. Read the " +
-                            "file first: `original` has to match the text exactly, including " +
-                            "indentation and line breaks.",
-                    )
-                }
-                if (places > 1) {
-                    return refusal(
-                        "That text appears ${places} times in ${rel(file)}, so replacing it would " +
-                            "change ${places} places and this call named one. Give more of the " +
-                            "surrounding text so it is unique, or use `grep` if every match should " +
-                            "change.",
-                    )
-                }
-                before.replace(original, put)
-            }
-            hasFind -> {
-                // **The match is the replacement's whole extent, and it is a pattern.** `before
-                // .replace(find, put)` took a literal, so the key was called `find` and behaved
-                // like one — a model that wrote a regular expression had it matched as characters.
-                //
-                // **The replacement is text, never a rendered hit.** The old `grep` in `read`
-                // answered `12: the line`, and a model that fed that answer back as `replace`
-                // wrote the line number into the file. Nothing here goes through a formatter: the
-                // argument is the text, and a nested `read` is that call's body.
-                val put = args.optString("text")
-                // **Per line, like every other command.** A pattern is a test of one line here, as
-                // it is in `read` and `search`; applying it to the whole file would make `^milk`
-                // match only at position 0, which is the bug that made the walk miss a file whose
-                // second line was `milk`. Splitting and rejoining is exact — the file's own
-                // newlines are the separators, and nothing is normalised.
-                //
-                // **The range narrows it, and only lines inside the range are rewritten.** The
-                // bounds are the file's own line numbers, so a model that read `read from 5 to 9`
-                // and then asked to replace inside that range is talking about the lines it saw.
-                val first = if (hasRange) {
-                    count(args, "from", 1)
-                        .getOrElse { return refusal(it.message ?: "that range cannot be used") }
-                        .coerceAtLeast(1)
-                } else {
-                    1
-                }
-                val last = if (hasRange) {
-                    val asked = count(args, "to", 0)
-                        .getOrElse { return refusal(it.message ?: "that range cannot be used") }
-                    when {
-                        asked > 0 && asked < first -> return refusal(
-                            "That range ends at line $asked, before it starts at line $first. " +
-                                "`from` is the first line and `to` is the last.",
-                        )
-                        asked <= 0 -> lines.size
-                        else -> asked.coerceAtMost(lines.size)
-                    }
-                } else {
-                    lines.size
-                }
-                // **A pasted `2: milk` is a line, not text to write.** `read` answers a
-                // whole-line pattern with `number: line`, so the obvious next move — paste that
-                // into `replace` — would have written the number into the file. It is stripped
-                // **only when this edit is replacing whole lines**, because that is exactly when
-                // `read` put a number on the front: a part-of-line pattern never produces one, so a
-                // body that happens to begin with digits is left exactly as it was written.
-                var changed = false
-                // **`multi: true` replaces across lines**, which is the only way to rewrite a
-                // function by its signature and its closing brace. `grep` is per line by default —
-                // cheap, and every hit keeps one line number — and this is the deliberate opt-in.
-                if (args.optBoolean("multi", false)) {
-                    val wide = Regex(
-                        find.pattern,
-                        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE) +
-                            (if (find.options.contains(RegexOption.IGNORE_CASE)) setOf(RegexOption.IGNORE_CASE) else emptySet()),
-                    )
-                    // **The range still bounds it**, because `grep` narrowed by `from`/`to` is one
-                    // selection with a bound — the operator's own rule, and it applies here too.
-                    val head = lines.take(first - 1)
-                    val middle = lines.subList(first - 1, last.coerceAtMost(lines.size))
-                    val tail = lines.drop(last.coerceAtMost(lines.size))
-                    val whole = middle.joinToString("\n")
-                    if (!wide.containsMatchIn(whole)) return refusal("Nothing in ${rel(file)} matches that")
-                    (head + wide.replace(whole, Regex.escapeReplacement(put)).split("\n") + tail)
-                        .joinToString("\n")
-                } else {
-                    val rewritten = lines.mapIndexed { index, line ->
-                        // 1-based, and only inside the range the model named.
-                        if (index + 1 < first || index + 1 > last) return@mapIndexed line
-                        val at = hit(line, find, deadline, "write") ?: return@mapIndexed line
-                        changed = true
-                        val wholeLine = at.first == 0 && at.last == line.length - 1
-                        val body = if (wholeLine) stripNumber(put) else put
-                        find.replace(line, Regex.escapeReplacement(body))
-                    }
-                    if (!changed) return refusal("Nothing in ${rel(file)} matches that")
-                    rewritten.joinToString("\n")
-                }
-            }
-            hasRange -> {
-                val from = count(args, "from", 1)
-                    .getOrElse { return refusal(it.message ?: "that range cannot be used") }
-                    .coerceAtLeast(1)
-                val asked = count(args, "to", 0)
-                    .getOrElse { return refusal(it.message ?: "that range cannot be used") }
-                if (asked > 0 && asked < from) {
-                    return refusal(
-                        "That range ends at line $asked, before it starts at line $from. " +
-                            "`from` is the first line and `to` is the last.",
-                    )
-                }
-                val to = if (asked <= 0) lines.size else asked.coerceAtMost(lines.size)
-                if (from > to) {
-                    return refusal("There is no line $from: the file has ${lines.size} lines")
-                }
-                val put = args.optString("text")
-                // **An empty replacement here means the lines are gone, not that one blank line
-                // stands in their place.** These are whole lines, so "replace them with nothing" is
-                // "there are none of them" — a person who selects three lines and deletes them
-                // expects three fewer lines, not three empty ones. `grep` is the different act: it
-                // replaces text *inside* lines, so an empty replacement there leaves the line with
-                // its match removed, which is also what a person means.
-                //
-                // Without this, a model had no way to delete a line at all: `put.split("\n")` on an
-                // empty string is one empty element, so the line became blank and the file grew a
-                // line nobody asked for.
-                val replacement = if (put.isEmpty()) emptyList() else put.split("\n")
-                (lines.take(from - 1) + replacement + lines.drop(to)).joinToString("\n")
-            }
+        // **The selector decides which shape this is; `text` only says what goes there.** `text` is
+        // present in every shape, so testing it first made every `grep` call take the whole-file
+        // branch and overwrite the file with the replacement word.
+        //
+        // The order is `original`, then `grep`, then a range, then the whole file — and the three
+        // pairwise refusals above are what make it an order rather than a set of competing claims.
+        val selector: Selector = when {
+            hasOriginal -> Selector.Literal(original, args.optString("text"))
+            // **`find` is non-null exactly when `hasFind`**, and the compiler cannot see through the
+            // derived flag — so the branch tests the value rather than the flag it came from.
+            find != null -> Selector.Matches(args, find, hasRange, deadline)
+            hasRange -> Selector.Lines(args)
             // **The whole file, and it may be a `read` call** — the paste that must not pass
-            // through the conversation. `Args` resolved it before this ran, which is why the paste
-            // never enters the conversation at all.
-            else -> args.optString("text")
+            // through the conversation. `Args` resolved it before this ran.
+            else -> Selector.Whole(args.optString("text"))
         }
+        val text = selector.newText(Edit(file, rel(file), before, lines))
+            .getOrElse { return refusal(it.message ?: "${rel(file)} could not be changed") }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
         // **Asked before the one write, because the write is atomic.** A `write` either lands whole
         // or not at all, so the question to ask is only whether there is still time to start it.
