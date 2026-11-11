@@ -294,16 +294,19 @@ if [ "$conclusion" != "success" ]; then
     done <<< "$failed_jobs"
 fi
 
-# A build that passed on main leaves its bundle on GitHub, but a bundle nobody
-# can hold is not a delivery. Bring it to the phone here, so that waiting on the
-# run is the only thing a person does: when this says success, the APK is
-# already in the Downloads folder.
+# **Which bundle this run has is a fact about the run, so it is asked.** This used to
+# compare the branch name, which worked while `development` existed. With one branch
+# the branch cannot tell the two cases apart, because both are `main`:
 #
-# **A run that published is fetched as the release; anything else by its run id.**
-# This used to ask the branch name, which worked while `development` existed and
-# would now be wrong for the one build that has no release: a dispatch with no
-# version. The question is whether the run published, and `--run` answers it for
-# any run — so the branch no longer has to be consulted at all.
+#   a push that publishes      uploads no `build-bundle`; the release *is* the delivery
+#   a dispatch with no version has no release, so its own artifact is the delivery
+#
+# So the artifacts are read, and the answer picks the mode. The first version of this
+# tried `--run` first and fell back on failure, which was wrong twice over: the `!`
+# applied to the `sed` at the end of the pipe rather than to the script, so the
+# fallback never fired; and the order was backwards, because a publishing run can
+# never have a `build-bundle` to find. Asking first costs one API call and cannot be
+# wrong about which of the two a run is.
 #
 # The renders of a real install arrive on a release minutes later, in a run
 # of their own; running `bundle` again afterwards grows the folder with them.
@@ -312,12 +315,10 @@ fi
       echo ""
       # The script says its own piece — what was delivered, or why there was
       # nothing to deliver — so nothing is added to it here.
-      #
-      # `--run` first, because it is the answer that always works: it names the
-      # run whose bundle this is. Only a run with no bundle at all (nothing in the
-      # app changed) falls through to the latest release, which is the only other
-      # thing there could be to hand over.
-      if ! bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /'; then
+      if gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[].name' 2>/dev/null | grep -qx "build-bundle"; then
+          bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /' || true
+      else
           bash "$HERE/fetch-bundle.sh" 2>&1 | sed 's/^/  /' || true
       fi
   fi
