@@ -178,7 +178,6 @@ internal fun whereOf(project: String?, branch: String?): String = when {
  * The screens do not own anything; every act goes through the view model, which
  * writes to disk and records what it did in the account's history.
  */
-@Composable
 /**
  * **Which screen is showing** — one value instead of eight flags and a precedence ladder.
  *
@@ -250,6 +249,7 @@ internal sealed interface Where {
     }
 }
 
+@Composable
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     // **The vault's door**, opened from settings. Its own flag rather than a Pending, because it is a
