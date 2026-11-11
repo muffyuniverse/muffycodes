@@ -248,6 +248,101 @@ class DiffLogTest {
         assertTrue("and says it stopped: $body", body.contains("raise `count`"))
     }
 
+    // ---- restore: one file, or the whole tree --------------------------------
+
+    @Test
+    fun `restore with no path puts the whole tree back, including removing what was not there`() {
+        // **The half a per-path restore cannot do.** "Put the project back" means files the revision
+        // did not have are **gone**, and a loop over the paths that existed then would leave them
+        // behind — a tree half from one version and half from another, which is worse than either.
+        write("milk.txt", "one\n")
+        write("kept.txt", "keep me\n")
+        val first = git.commit("shopping", "first")!!
+        write("milk.txt", "two\n")
+        write("added-later.txt", "not in first\n")
+        git.commit("shopping", "second")!!
+
+        val body = tool("""{"revision":"$first"}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        val root = ws.projectDir("shopping")
+        assertEquals("the old text is back", "one\n", File(root, "milk.txt").readText())
+        assertTrue("the file the version did not have is gone", !File(root, "added-later.txt").exists())
+        assertTrue("and the file it did have is still there", File(root, "kept.txt").exists())
+    }
+
+    @Test
+    fun `restore clears the stage by default, so the next push does not commit the whole tree`() {
+        // **Why this is not cosmetic.** `push` counts the index; an index full of "every file
+        // changed" would make the next push commit the entire tree as one version, with a message
+        // somebody wrote about something else.
+        write("a.txt", "one\n")
+        val first = git.commit("shopping", "first")!!
+        write("a.txt", "two\n")
+        git.commit("shopping", "second")!!
+
+        val body = tool("""{"revision":"$first"}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and says the stage was cleared: $body", body.contains("stage was cleared"))
+        assertEquals(
+            "and nothing is staged",
+            0,
+            git.changes("shopping").staged,
+        )
+    }
+
+    @Test
+    fun `keep leaves the stage, for a caller that wants to see what moved`() {
+        write("a.txt", "one\n")
+        val first = git.commit("shopping", "first")!!
+        write("a.txt", "two\n")
+        git.commit("shopping", "second")!!
+
+        val body = tool("""{"revision":"$first","keep":true}""")
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and says the stage was kept: $body", body.contains("stage was kept"))
+    }
+
+    @Test
+    fun `a whole-tree restore is refused over work that is in no version`() {
+        // **The one irreversible act this command could do.** A checkout destroys uncommitted work
+        // and nothing can bring it back — so the refusal comes before the checkout, not after, and
+        // `keep` does not override it: `keep` is about the stage, and the stage is not the work.
+        write("a.txt", "one\n")
+        val first = git.commit("shopping", "first")!!
+        write("a.txt", "unsaved\n")
+
+        val body = tool("""{"revision":"$first"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("saying why: $body", body.contains("in no version"))
+        assertEquals(
+            "and the work is still there",
+            "unsaved\n",
+            File(ws.projectDir("shopping"), "a.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `keep does not let a checkout destroy uncommitted work`() {
+        // **The flag governs a description, not the bytes.** This test exists because "keep" reads
+        // like "keep my work", and it does not mean that.
+        write("a.txt", "one\n")
+        val first = git.commit("shopping", "first")!!
+        write("a.txt", "unsaved\n")
+
+        val body = tool("""{"revision":"$first","keep":true}""")
+
+        assertTrue("still refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertEquals(
+            "and the work is still there",
+            "unsaved\n",
+            File(ws.projectDir("shopping"), "a.txt").readText(),
+        )
+    }
+
     @Test
     fun `log takes path and count, and nothing else`() {
         val spec = AgentTools.specs().first { it.name == "log" }

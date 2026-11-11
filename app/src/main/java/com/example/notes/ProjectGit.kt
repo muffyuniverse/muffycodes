@@ -847,6 +847,56 @@ class ProjectGit(
     }
 
     /** Puts an old version of a file back into the worktree. */
+    /**
+     * **Puts the whole project back to one revision**, refusing over work that is in no version.
+     *
+     * The refusal is the point. A whole-tree checkout **destroys** uncommitted changes — they are not
+     * in any version, so nothing can bring them back — and the app's rule everywhere else is that a
+     * loss needs an asking. `keep` governs the *index* (whether the fresh stage survives the
+     * checkout), not the person's unsaved bytes: a flag that let a checkout throw those away would be
+     * the one irreversible act in the tool list.
+     *
+     * **Uncommitted means unstaged and staged**, both. Staged work is in no version either — a save
+     * only stages here, and a version is made by a push.
+     */
+    fun restoreTree(
+        project: String,
+        revisionId: String,
+        keepStage: Boolean = false,
+        deadline: Deadline? = null,
+    ): Result<Unit> = RepoLocks.hold(repoDir(project), "restore") {
+        val repo = open(project) ?: return@hold Result.failure(
+            IllegalStateException("This project has no repository yet")
+        )
+        return@hold repo.use {
+            try {
+                // **Read before the checkout, never after.** Afterwards the count would be
+                // reporting the restore, which is always a whole tree.
+                val unsent = try {
+                    changes(project).total
+                } catch (t: Throwable) {
+                    0
+                }
+                if (unsent > 0) {
+                    return@hold Result.failure(
+                        IllegalStateException(
+                            "This project has $unsent change(s) that are in no version, and putting " +
+                                "the whole tree back would destroy them. `push` first, or name one " +
+                                "`path` to restore on its own.",
+                        ),
+                    )
+                }
+                if (deadline?.expired == true) throw StoppedException(Stopped.body("restore", deadline))
+                GitService.checkoutTree(it, revisionId, keepStage)
+                Result.success(Unit)
+            } catch (e: StoppedException) {
+                Result.failure(e)
+            } catch (e: Throwable) {
+                Result.failure(e)
+            }
+        }
+    }
+
     fun restore(
         project: String,
         path: String,

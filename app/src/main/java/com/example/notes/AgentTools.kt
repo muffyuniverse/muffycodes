@@ -563,7 +563,7 @@ class AgentTools(
             // according to \"into\" path, same as unix move does." `into` is the destination, name
             // and all, so there is one way to say where a file goes.
             "move" to setOf("path", "into", "copy"),
-            "restore" to setOf("path", "revision"),
+            "restore" to setOf("path", "revision", "keep"),
             "background" to setOf("tool", "args"),
             // **`from`/`to` stay**: they are lines of the page text the agent is about to read,
             // which is a real use rather than a paging cursor.
@@ -879,8 +879,24 @@ class AgentTools(
             ),
             spec(
                 "restore",
-                "Put an old version of a file back. It becomes a new version, nothing is lost.",
-                """{"path":"the file","revision":"the id history gave you"}""",
+                "Put an old version back — **of one file, or of the whole project.** With `path` " +
+                    "it puts that file back and nothing else moves. With **no `path`** it puts the " +
+                    "whole tree back to that version: every file becomes what it said then, and " +
+                    "files the version did not have are removed. " +
+                    "**`keep` decides whether the stage survives**, and it defaults to false: the " +
+                    "checkout has just rewritten every file, so an index describing those changes " +
+                    "describes the restore rather than anything you did. `keep: true` leaves it, for " +
+                    "when you want to look at what moved before making it a version. " +
+                    "**A whole-tree restore is refused when the project has changes that are in no " +
+                    "version**, because the checkout would destroy them and nothing could bring them " +
+                    "back — `keep` does not override that, because `keep` is about the stage and the " +
+                    "stage is not the work. `push` first, or restore one `path`. " +
+                    "The version becomes a new version; nothing is lost from the history.",
+                """{"path":"the file, or leave it out to put the whole project back","revision":"the id log gave you","keep":false}""",
+                // **`revision` is the one thing it cannot work without**, and it is the one thing
+                // the model cannot invent — it comes from `log`. `path` and `keep` are optional
+                // because "the whole project" is a real answer.
+                required = listOf("revision"),
             ),
             spec(
                 "background",
@@ -2953,12 +2969,48 @@ class AgentTools(
         }
     }
 
+    /**
+     * Puts a version back — **one path, or the whole tree.**
+     *
+     * The operator's decision (2026-11-10): *"restore without path — check out the chosen commit
+     * entirely (all files change to that state, stage cleared)"*, and *"add a flag to keep stage (by
+     * default discard)"*.
+     *
+     * **Two acts with one name, because they are one idea at two scopes.** A path is "put this file
+     * back"; no path is "put the project back". The difference that matters is that the second must
+     * also **remove** files the revision did not have, which a per-path restore cannot know about —
+     * so it is `checkoutTree` rather than a loop.
+     *
+     * **`keep` is about the index, not about the person's work.** The default discards the stage,
+     * which is the safe direction: the checkout has just rewritten every file, so an index describing
+     * those changes describes the restore. `keep: true` leaves it, for a caller that wants to see
+     * what moved before committing it.
+     *
+     * **Uncommitted work is refused, and `keep` does not override that.** `keep` governs a
+     * description of the tree; the tree's own unsaved bytes are not a description, and a checkout
+     * destroys them with nothing able to bring them back.
+     */
     private fun restore(args: JSONObject, deadline: Deadline): String {
-        val file = resolveFile(args.optString("path"))
-            .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         val revision = args.optString("revision").trim()
+        if (revision.length < 7) return refusal("Give the version id that `log` showed you")
+        val asked = args.optString("path").trim()
+        if (asked.isEmpty()) {
+            // **The whole tree.** `keep` is read here rather than passed on, because the decision it
+            // makes belongs to this command: "was the stage kept" is a fact about the checkout, not
+            // an argument to the repository layer.
+            val keep = args.optBoolean("keep", false)
+            val whole = repo.restoreTree(project, revision, keep, deadline)
+            return whole.fold(
+                onSuccess = {
+                    val stage = if (keep) "the stage was kept" else "the stage was cleared"
+                    success("put the whole project back to ${short(revision)} — $stage")
+                },
+                onFailure = { refusal(it.message ?: "it could not be restored") },
+            )
+        }
+        val file = resolveFile(asked)
+            .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         mayWrite(file)?.let { return refusal(it) }
-        if (revision.length < 7) return refusal("Give the version id that history showed you")
         // The lock is `mayWrite`'s now, so the second check that used to be here is gone - it was
         // asking the same question with a weaker answer (`isLocked` misses a person's lock).
         val restored = repo.restore(project, rel(file), revision, deadline)
@@ -3151,7 +3203,7 @@ class AgentTools(
             ""
         }
         return success(
-            "$head\n\n" + shown.joinToString("\n") + more + "\n\nThe whole page is at $saved.",
+            "$head\n\n" + shown.joinToString("\n") + more + "\n\nThe whole page is at:\n$saved",
         )
     }
 

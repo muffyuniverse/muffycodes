@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.eclipse.jgit.api.CreateBranchCommand
 import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.ListBranchCommand
 import org.eclipse.jgit.api.Status
 import org.eclipse.jgit.diff.DiffEntry
@@ -1807,6 +1808,51 @@ object GitService {
             }
         } finally {
             walk.close()
+        }
+    }
+
+    /**
+     * **Puts the whole working tree back to one revision.**
+     *
+     * The whole-project form of [restore], and the difference is not a loop over paths: a checkout
+     * has to **remove** what the revision did not have, and a per-path restore cannot know what that
+     * is. `CheckoutCommand` is the operation that does both, and it is the same one a person's own
+     * `git checkout <commit> -- .` runs.
+     *
+     * **`keepStage` decides whether the index survives.** It defaults to **false**, which is the safe
+     * direction: the checkout has just rewritten every file, so an index describing those changes
+     * describes the restore rather than anything a person did. Leaving it would make the next `push`
+     * commit the whole tree as one version with a message somebody wrote about something else.
+     *
+     * **The working tree is not backed up, and that is the caller's question to ask.** A checkout over
+     * uncommitted work destroys it; [ProjectGit.restoreTree] refuses in that case, and this function
+     * is the mechanism rather than the policy.
+     */
+    fun checkoutTree(repo: Repository, revisionId: String, keepStage: Boolean = false) {
+        // **A version that is not there is not HEAD.** The same rule `treeFor` states: a wrong id
+        // that fell back to the current tree would make a checkout answer "done" about a version
+        // that was never read.
+        val commit = repo.resolve(revisionId.trim())
+            ?: throw IllegalArgumentException("There is no version $revisionId in this project")
+        Git(repo).use { git ->
+            // **`setAllPaths` and `setStartPoint` together** are "make the tree look like that
+            // commit": jgit walks the difference and both writes and deletes.
+            val checkout = git.checkout()
+                .setStartPoint(commit)
+                .setAllPaths(true)
+                .setForced(true)
+            // **`setUpToDate` false would be a partial checkout**, which is the one thing this must
+            // not be — a tree half from one version and half from another is worse than either.
+            checkout.setUpToDate(true)
+            checkout.call()
+        }
+        if (!keepStage) {
+            // **`reset` and not `rm --cached`**: the index is set to match the tree that was just
+            // checked out, which is what "nothing is staged" means after a checkout. Doing nothing
+            // would leave the old index describing files that no longer exist.
+            Git(repo).use { git ->
+                git.reset().setRef(commit.name).setMode(ResetCommand.ResetType.MIXED).call()
+            }
         }
     }
 

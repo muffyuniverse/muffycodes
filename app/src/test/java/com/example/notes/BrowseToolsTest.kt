@@ -145,7 +145,9 @@ class BrowseToolsTest {
         val answer = tools(browser = five).run(call("browse", """{"url":"https://example.com/"}"""))
         assertTrue("it answers: $answer", answer.startsWith("0\n"))
         assertTrue("the text is quoted: $answer", answer.contains("\na\nb\nc\n"))
-        val where = answer.substringAfter("The whole page is at ").trim()
+        // **The path is on its own line**, so a reader — and this test — cannot mistake a full
+        // stop for part of the file name.
+        val where = answer.substringAfter("The whole page is at:\n").trim()
         assertTrue("and the file is named: $answer", where.startsWith("agent/browser/page-"))
         val file = File(ws.repoOf("shopping"), where)
         assertTrue("the file is there", file.isFile)
