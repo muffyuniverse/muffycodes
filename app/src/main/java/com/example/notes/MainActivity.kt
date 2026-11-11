@@ -179,6 +179,77 @@ internal fun whereOf(project: String?, branch: String?): String = when {
  * writes to disk and records what it did in the account's history.
  */
 @Composable
+/**
+ * **Which screen is showing** — one value instead of eight flags and a precedence ladder.
+ *
+ * The ladder used to be written **three times**: once in the render `when`, once in the trace's
+ * screen name, and once in the report's note. They already disagreed — the report's ladder had no
+ * `chat` arm, so a report opened from a conversation recorded `browser/…`, and the chat is exactly
+ * where a wrong answer is noticed.
+ *
+ * A precedence ladder written twice is a ladder that will disagree. This is the ladder, and the two
+ * readers derive from it.
+ *
+ * **`Settings`, `Secrets` and `Trace` nest rather than replace.** Opening the trace from settings
+ * leaves settings set, so back returns to it — that is the intended behaviour, and the order here is
+ * what expresses it.
+ */
+internal sealed interface Where {
+    /** The account's list — the main menu (§13c.2). */
+    data object Accounts : Where
+
+    /** A project's branches, before its files (§13d). */
+    data object Branches : Where
+
+    data class Chat(val project: String) : Where
+    data class History(val path: List<String>) : Where
+    data class Editor(val file: File) : Where
+    data object Browser : Where
+    data object Settings : Where
+    data object Secrets : Where
+    data object Trace : Where
+
+    companion object {
+        /**
+         * **The ladder, in one place.** The order is the order things cover each other: a window
+         * opened over settings sits above it, and a conversation sits above the folder it belongs to.
+         */
+        fun of(
+            trace: Boolean,
+            secrets: Boolean,
+            settings: Boolean,
+            history: List<String>?,
+            editing: File?,
+            chat: String?,
+            accounts: Boolean,
+            branches: Boolean,
+        ): Where = when {
+            trace -> Trace
+            secrets -> Secrets
+            settings -> Settings
+            history != null -> History(history)
+            editing != null -> Editor(editing)
+            chat != null -> Chat(chat)
+            accounts -> Accounts
+            branches -> Branches
+            else -> Browser
+        }
+    }
+
+    /** The word the trace uses for this screen, so two readers cannot name it two ways. */
+    fun name(): String = when (this) {
+        Accounts -> "accounts"
+        Branches -> "branches"
+        is Chat -> "chat/$project"
+        is History -> "history"
+        is Editor -> "editor"
+        Browser -> "browser"
+        Settings -> "settings"
+        Secrets -> "secrets"
+        Trace -> "trace"
+    }
+}
+
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     // **The vault's door**, opened from settings. Its own flag rather than a Pending, because it is a
@@ -272,6 +343,19 @@ private fun AppRoot(viewModel: AppViewModel) {
     val historyPath = viewModel.historyPath
     val chatProject = viewModel.chatProject
 
+    // **Which screen is showing, decided once.** The three readers below — the render, the trace's
+    // screen name and the report's note — all ask this, so they cannot name different screens.
+    val where = Where.of(
+        trace = showTrace,
+        secrets = showSecrets,
+        settings = showSettings,
+        history = historyPath,
+        editing = editing,
+        chat = chatProject,
+        accounts = viewModel.onAccountsScreen,
+        branches = viewModel.choosingBranchFor != null,
+    )
+
     // The picker is the system's, so the app never asks for storage permission: it
     // sees only what a person just pointed at, and only reads it.
     // **The picker's answer is the press's answer.** Upload hands the person to a
@@ -349,13 +433,14 @@ private fun AppRoot(viewModel: AppViewModel) {
         // record about the moment — but no snapshot: the log below it is the state.
         Trace.note(
             "report-opened",
-            (when {
-                showTrace -> "trace"
-                showSecrets -> "secrets"
-                showSettings -> "settings"
-                historyPath != null -> "history/${historyPath.last()}"
-                editing != null -> "editor/${editing.name}"
-                else -> "browser/" + (viewModel.path.ifEmpty { listOf("/") }.joinToString("/"))
+            (when (val here = where) {
+                // **The one place this used to say something else.** The ladder here had no `chat`
+                // arm, so a report opened from a conversation recorded `browser/…` — and the chat is
+                // exactly where a wrong answer is noticed.
+                is Where.History -> "history/${here.path.last()}"
+                is Where.Editor -> "editor/${here.file.name}"
+                Where.Browser -> "browser/" + (viewModel.path.ifEmpty { listOf("/") }.joinToString("/"))
+                else -> here.name()
             }) + " · " + (viewModel.activeLogin ?: "nobody") +
                 " · projects=" + (viewModel.projectNames.joinToString(",").ifEmpty { "none" }),
         )
@@ -374,18 +459,11 @@ private fun AppRoot(viewModel: AppViewModel) {
     // it — the file being opened was the one thing a reader most wanted a line about.
     // They are named here rather than read from `viewModel` because the editor is this
     // composable's screen the moment `editing` is set, whatever `pending` says.
-    LaunchedEffect(pending, showSettings, showTrace, editing, historyPath, chatProject) {
-        Trace.changed(
-            "screen " + when {
-                showTrace -> "trace"
-                showSecrets -> "secrets"
-                showSettings -> "settings"
-                historyPath != null -> "history"
-                editing != null -> "editor"
-                chatProject != null -> "chat/$chatProject"
-                else -> "browser"
-            } + " dialog " + pending.javaClass.simpleName,
-        )
+    // **Keyed on `where`, which is every one of those flags.** It used to key on six of the eight, so
+    // opening the vault or the accounts list changed the screen without the trace saying so — a
+    // `screen` line is only useful if it moves when the screen does.
+    LaunchedEffect(pending, where) {
+        Trace.changed("screen " + where.name() + " dialog " + pending.javaClass.simpleName)
     }
     BackHandler(enabled = !showSettings && historyPath != null) {
         viewModel.closeHistory()
@@ -454,10 +532,10 @@ private fun AppRoot(viewModel: AppViewModel) {
         onIgnore = { entry -> viewModel.ignoreInGit(entry.file) },
     )
 
-    when {
+    when (where) {
         // **Only offered where there is an account to read**, which is the same condition the
         // button is drawn under. `workspace` is non-null exactly when somebody is signed in.
-        showTrace -> ObservabilityScreen(
+        Where.Trace -> ObservabilityScreen(
             report = traceReport,
             onBack = { showTrace = false },
             onShare = {
@@ -473,12 +551,12 @@ private fun AppRoot(viewModel: AppViewModel) {
             },
         )
 
-        showSecrets -> SecretsScreen(
+        Where.Secrets -> SecretsScreen(
             viewModel = viewModel,
             onBack = { showSecrets = false },
         )
 
-        showSettings -> SettingsScreen(
+        Where.Settings -> SettingsScreen(
             viewModel = viewModel,
             batteryAsked = batteryAsked,
             onAskBattery = { openingBattery = tap("battery"); askBattery.launch(Battery.intent(context)) },
@@ -511,9 +589,11 @@ private fun AppRoot(viewModel: AppViewModel) {
         // bug: the editor stays open underneath while its file's history is being
         // looked at, so testing `editing != null` first kept drawing the editor and
         // the history only appeared after Done had closed it.
-        historyPath != null -> HistoryScreen(
+        is Where.History -> HistoryScreen(
             viewModel = viewModel,
-            title = historyPath.last(),
+            // **From `where`, not from `historyPath`.** A smart cast is what makes this compile at
+            // all, and it is also the point: the screen is drawn from the same value the trace named.
+            title = where.path.last(),
             onBack = { viewModel.closeHistory() },
             // Select puts the version back and returns to the file: one act, and
             // the person is looking at the result of it.
@@ -521,9 +601,9 @@ private fun AppRoot(viewModel: AppViewModel) {
             onReport = openReport,
         )
 
-        editing != null -> EditorScreen(
+        is Where.Editor -> EditorScreen(
             viewModel = viewModel,
-            file = editing,
+            file = where.file,
             // `closeEditor` records the tap itself; recording it here as well gave
             // one press two ids.
             onBack = { viewModel.closeEditor() },
@@ -538,7 +618,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         )
 
         // Before the browser: the conversation covers the folder it belongs to.
-        chatProject != null -> AgentChatScreen(
+        is Where.Chat -> AgentChatScreen(
             viewModel = viewModel,
             onBack = { viewModel.closeChat() },
             // The same act the browser offers, reaching the same window: a report is a report
@@ -549,7 +629,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         // **The main menu is the list of accounts** (§13c.2). It is a branch of its own rather than a
         // mode inside BrowserScreen, because the two show different things about different subjects —
         // and because the back gesture has to return here from a project screen.
-        viewModel.onAccountsScreen -> AccountsScreen(
+        Where.Accounts -> AccountsScreen(
             viewModel = viewModel,
             onEnter = { login -> viewModel.enterAccount(login) },
             // **The same sign-in the Settings block used**, so adding an account from the list and
@@ -562,7 +642,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         // **Tapping a project shows its branches first** (§13d). The operator's shape, and it is a
         // branch of its own rather than a mode inside BrowserScreen for the same reason the accounts
         // list is: a different subject, and a back gesture that has to return here.
-        viewModel.choosingBranchFor != null -> BranchesScreen(
+        Where.Branches -> BranchesScreen(
             project = viewModel.choosingBranchFor.orEmpty(),
             branches = viewModel.choosingBranches,
             unmerged = viewModel.choosingUnmerged,
@@ -583,7 +663,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             onBack = { viewModel.closeBranches() },
         )
 
-        else -> androidx.compose.foundation.layout.Box {
+        Where.Browser -> androidx.compose.foundation.layout.Box {
             BrowserScreen(
                 viewModel = viewModel,
                 username = viewModel.account?.login,

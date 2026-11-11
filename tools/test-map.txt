@@ -118,6 +118,7 @@ AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/
 AgentServiceTest app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
 NoticesTest app/src/main/java/com/example/notes/Notices.kt
 ChatNoticesTest app/src/main/java/com/example/notes/ChatNotices.kt
+WhereTest app/src/main/java/com/example/notes/MainActivity.kt
 SaidTest app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/example/notes/MainActivity.kt
 DeviceFlowTest app/src/main/java/com/example/notes/DeviceFlow.kt
 ProjectTreeTest app/src/main/java/com/example/notes/ProjectTree.kt
