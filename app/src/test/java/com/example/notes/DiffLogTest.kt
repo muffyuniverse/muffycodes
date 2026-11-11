@@ -49,6 +49,9 @@ class DiffLogTest {
     private fun logged(args: String): String =
         AgentTools(ws, "shopping", git, log).run(Call("c2", "log", args))
 
+    private fun restored(args: String): String =
+        AgentTools(ws, "shopping", git, log).run(Call("c3", "restore", args))
+
     private fun write(path: String, text: String) =
         ws.write(File(ws.projectDir("shopping"), path), text)
 
@@ -262,9 +265,9 @@ class DiffLogTest {
         write("added-later.txt", "not in first\n")
         git.commit("shopping", "second")!!
 
-        val body = tool("""{"revision":"$first"}""")
+        val body = restored("""{"revision":"$first"}""")
 
-        assertTrue("it worked, and said: " + body.replace("\n", " | "), body.startsWith(AgentLog.SUCCESS))
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
         val root = ws.projectDir("shopping")
         assertEquals("the old text is back", "one\n", File(root, "milk.txt").readText())
         assertTrue("the file the version did not have is gone", !File(root, "added-later.txt").exists())
@@ -281,7 +284,7 @@ class DiffLogTest {
         write("a.txt", "two\n")
         git.commit("shopping", "second")!!
 
-        val body = tool("""{"revision":"$first"}""")
+        val body = restored("""{"revision":"$first"}""")
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("and says the stage was cleared: $body", body.contains("stage was cleared"))
@@ -299,7 +302,7 @@ class DiffLogTest {
         write("a.txt", "two\n")
         git.commit("shopping", "second")!!
 
-        val body = tool("""{"revision":"$first","keep":true}""")
+        val body = restored("""{"revision":"$first","keep":true}""")
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("and says the stage was kept: $body", body.contains("stage was kept"))
@@ -314,7 +317,7 @@ class DiffLogTest {
         val first = git.commit("shopping", "first")!!
         write("a.txt", "unsaved\n")
 
-        val body = tool("""{"revision":"$first"}""")
+        val body = restored("""{"revision":"$first"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("saying why: $body", body.contains("in no version"))
@@ -333,7 +336,7 @@ class DiffLogTest {
         val first = git.commit("shopping", "first")!!
         write("a.txt", "unsaved\n")
 
-        val body = tool("""{"revision":"$first","keep":true}""")
+        val body = restored("""{"revision":"$first","keep":true}""")
 
         assertTrue("still refused: $body", body.startsWith(AgentLog.FAILURE))
         assertEquals(
