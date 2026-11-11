@@ -1452,32 +1452,20 @@ class AgentTools(
     }
 
     /**
-     * The one search: **where** (`path`), **what** (`grep`), **when**
-     * (`history`), **how deep** (`depth`), **how many** (`count`).
+     * The one search: **where** (`path`), **what** (`grep`), **when** (`history`), **how deep**
+     * (`depth`), **how many** (`count`).
      *
-     * ## Why three commands became one
-     *
-     * `tree`, `search` and `history` were the same walk with different filters bolted on. The
-     * operator drew the merged shape: *"scope (path of folder/file which branch to search), query
-     * (optional filecontent filter), regex/semantic (type of search - when there is query), history
-     * (optional flag to also search historic file versions), depth (how deeply search the branch),
-     * rows (how many results to show)"* — and answered the objections that made it one command
-     * rather than three:
-     *
-     * - **`tree`'s `name` folds into `path`**, because the basename is part of the path, so
-     *   `scope: "\\.md$"` is the name filter.
-     * - **A listing is not a degenerate search.** The filters are independent axes, and setting none
-     *   of them is setting none — unlike `grep`/`from`/`to`/`at`, which competed to say *where* and
-     *   refused each other. That distinction is why this is one command and that was three keys.
-     * - **`count` is the count** because the answer is `path` or `path@sha7`, and a content match
-     *   answers **one row per path**, so the count and the rows cannot disagree.
+     * **The filters are independent axes.** Setting none is a listing rather than a search with
+     * everything unset — unlike `grep`/`from`/`to`, which competed to say *where* and refused each
+     * other. `count` bounds paths in both modes, and a content match answers one row per path, so
+     * the count and the rows cannot disagree.
      *
      * ## The filters, and what each one is asked of
      *
      * - **`path`** is a case-insensitive pattern asked of the **account-relative path**, matched
      *   anywhere in it. So `wiki/` is the wiki of every project, `groceries/wiki/` is one,
      *   `milk.txt` is one file, and `\\.md$` is every markdown file. A folder is matched with its
-     *   trailing slash, so `scope: "src/"` lists the folder as well as its contents.
+     *   trailing slash, so `path: "src/"` lists the folder as well as its contents.
      * - **`grep`** is asked of each **line** of a text file, with the same [hit] `read` uses, so the
      *   two commands cannot disagree about whether a file matches.
      * - **`depth`** counts folder levels below the account. Eight by default: deep enough to reach
@@ -3234,8 +3222,9 @@ class AgentTools(
      * part that is the same whichever engine runs: which keys are allowed, what a wait means, how a
      * long page is narrowed, and that a result too big is filed rather than cut.
      *
-     * **`from`/`to` select lines of the answer**, the same range language `read` uses, so a page
-     * that arrived whole can be read a window at a time without a second call that re-fetches it.
+     * **The whole page is filed**, at `agent/browser/page-<ms>.txt`, and the answer quotes the first
+     * few lines. A window over it is `read`'s job — one range language, in the command that already
+     * has one.
      */
     private fun browse(args: JSONObject, deadline: Deadline): String {
         val url = args.optString("url").trim()
