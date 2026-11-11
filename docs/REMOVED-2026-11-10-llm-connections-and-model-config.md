@@ -96,7 +96,10 @@ follows.
   library is untouched.
 - **`ContextBudget` and the three numbers** — they live in the form's `target`/`forget`/`trim`, and the
   general settings are still their root.
-- **`Probe`** — the connection check still exists for git; only its model branch went.
+- **`Probe`** — **gone with this change.** It was the *model* connection check, and its only caller
+  was the model branch. The git check is `GitService.lsRemote` against the project's own address,
+  which is a different mechanism — a host is not a repository. It survived a release as dead code
+  while this line said it still existed.
 
 ## 4. What a person loses, stated plainly
 

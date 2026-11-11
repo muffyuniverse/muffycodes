@@ -32,7 +32,6 @@ StreamTest app/src/main/java/com/example/notes/Stream.kt
 PicturesInDoorTest app/src/main/java/com/example/notes/Door.kt
 ConnectionsTest app/src/main/java/com/example/notes/Connections.kt app/src/main/java/com/example/notes/CredentialStore.kt
 ConnectionDraftTest app/src/main/java/com/example/notes/ConnectionDraft.kt
-ProbeTest app/src/main/java/com/example/notes/Probe.kt
 ConnectionDraftTest app/src/main/java/com/example/notes/ConnectionDialogs.kt
 ShapeTest app/src/main/java/com/example/notes/Shape.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/ModelConfig.kt
 LookTest app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/ContextBudget.kt
