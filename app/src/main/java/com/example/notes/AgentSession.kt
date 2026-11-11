@@ -401,7 +401,17 @@ data class AgentSession(
      * that refused for ever would be retried every second for ever. Only a turn that *succeeds*
      * clears the ladder, which is what `waited` and `asked` do.
      */
-    fun polled(at: Long): AgentSession = copy(lastPollAt = at)
+    fun polled(at: Long): AgentSession = copy(
+        lastPollAt = at,
+        // **A gap restarts the wait.** The phone being off is not the person not coming back, and a
+        // session that spent three hours in a pocket must not be switched off the moment it wakes —
+        // the ceiling is measured from when somebody could have answered, and nobody could while the
+        // app was not running.
+        //
+        // `warmed` does *not* do this: a ping is a poll that succeeded while the app was running, and
+        // it is evidence the person is still being waited for.
+        warmFrom = if (warmFrom > 0) at else 0,
+    )
 
     /**
      * A ping was sent at [at].

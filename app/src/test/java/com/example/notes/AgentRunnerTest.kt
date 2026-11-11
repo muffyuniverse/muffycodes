@@ -185,7 +185,9 @@ class AgentRunnerTest {
         val after = runner.sessions().single()
         assertFalse("switched itself off", after.running)
         assertEquals("and says why", AgentSession.StopReason.WAITED_OUT, after.reason)
-        assertTrue("no request was spent on it", door.pings.isEmpty())
+        // **Pings were sent, and that is right**: the session was kept warm through the hour, which
+        // is a different setting from the ceiling and does not depend on it.
+        assertFalse("it was warmed while it waited", door.pings.isEmpty())
         // **Silent**, because the person set the number. A notification about a rule they chose is
         // the app arguing with them.
         assertTrue("and nobody was told", notices.isEmpty())

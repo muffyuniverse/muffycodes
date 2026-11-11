@@ -90,19 +90,26 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `a poll does not restart the wait`() {
-        // The bug this is here for: `lastPollAt` moves every interval, so a ceiling counted from it
-        // would never arrive — an agent polled every four minutes would wait for ever.
+    fun `a ping does not restart the wait, but a gap does`() {
+        // **Two different clocks, and the difference is what happened to the app.**
         //
-        // **The wait starts at a real time, not at zero.** `warmFrom` is a persisted field whose
-        // zero means "written before the keepalive existed", so a session concluded at `at = 0` is
-        // one the fallback reads as *unset* — a test that used zero would be testing the fallback
-        // rather than the rule.
+        // A ping is a poll that succeeded while the app was running: the person is still being
+        // waited for, so the wait goes on from when it began. A *gap* is the phone not running the
+        // app at all — nobody could have answered — so the wait restarts from the wake.
+        //
+        // A ceiling counted from `lastPollAt` would never arrive either way, because a poll moves
+        // that every interval.
         val began = 1_000_000L
         val hour = 60 * 60_000L
-        val s = session().concluded(at = began).polled(began + 30 * 60_000L)
+        val warmed = session().concluded(at = began).warmed(began + 30 * 60_000L)
 
-        assertTrue("half an hour of polls later, the hour still ends it", s.waitedOut(began + hour, hour))
+        assertTrue("a ping does not push the ceiling along", warmed.waitedOut(began + hour, hour))
+
+        val gap = session().concluded(at = began).polled(began + 3 * hour)
+        assertFalse(
+            "a gap restarts it: nobody could answer while the app was not running",
+            gap.waitedOut(began + 3 * hour + 30 * 60_000L, hour),
+        )
     }
 
     @Test
