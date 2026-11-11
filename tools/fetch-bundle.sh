@@ -10,7 +10,7 @@
 # Usage:
 #   bundle             the latest release, with everything on it right now
 #   bundle v44         the release named v44
-#   bundle --dev       the newest development build (the "install and look at" one)
+#   bundle --dev       the newest debug build (the "install and look at" one)
 #   bundle --run 123   the bundle one run made (ci uses this after a build)
 #
 # Where things land — one folder, emptied on every delivery, holding only the
@@ -137,17 +137,19 @@ case "$MODE" in
 
     dev|run)
         if [ "$MODE" = "dev" ]; then
-            # "The newest successful run" and "the newest run that has a bundle"
-            # are different questions, and they part company after any push that
-            # touched no code: that run is green, delivers nothing, and used to be
-            # the one chosen here — so `bundle --dev` said "this run made no
-            # bundle" while an installable build sat one run further back. The
-            # command exists to put a build on the phone, so it looks for the
-            # newest run that has one and only reports nothing when there is
-            # genuinely nothing.
+            # **The newest successful run that has a bundle, on any branch.** There is one branch
+            # now, and a debug build is a dispatch rather than a push — so asking for runs on
+            # `development` would find nothing, forever, while the build sat on `main`. The
+            # question this command exists to answer is "which run has an installable build", and
+            # the branch was never part of it.
+            #
+            # "The newest successful run" and "the newest run that has a bundle" are different
+            # questions, and they part company after any push that touched no code: that run is
+            # green, delivers nothing, and used to be the one chosen here — so `bundle --dev` said
+            # "this run made no bundle" while an installable build sat one run further back.
             RUN_ID=""
-            for candidate in $(gh run list --repo "$REPO" --branch development \
-                    --workflow build-and-release.yml --status success --limit 10 \
+            for candidate in $(gh run list --repo "$REPO" \
+                    --workflow build-and-release.yml --status success --limit 20 \
                     --json databaseId --jq '.[].databaseId' 2>/dev/null || true); do
                 if gh api "repos/$REPO/actions/runs/$candidate/artifacts" \
                         --jq '.artifacts[].name' 2>/dev/null | grep -qx "build-bundle"; then
@@ -156,7 +158,7 @@ case "$MODE" in
                 fi
             done
             if [ -z "$RUN_ID" ]; then
-                echo "no development run has produced a bundle yet" >&2
+                echo "no run has produced a debug bundle yet" >&2
                 exit 1
             fi
         fi
@@ -187,10 +189,10 @@ case "$MODE" in
         ;;
 esac
 
-# **One APK or the other, never both.** *"debug for dev, release for main"* — so a development
-# bundle carries `app-debug.apk` and nothing else, and the check is for an APK rather than for the
-# release one specifically. It used to demand `app-release.apk`, which would have made every
-# development delivery fail the moment the release stopped being built there.
+# **One APK or the other, never both.** A debug build carries `app-debug.apk` and nothing else, so
+# the check is for an APK rather than for the release one specifically. It used to demand
+# `app-release.apk`, which would have made every debug delivery fail the moment the release
+# stopped being built beside it.
 if [ ! -f "$TMP/app-release.apk" ] && [ ! -f "$TMP/app-debug.apk" ]; then
     echo "the bundle has no APK in it" >&2
     exit 1
@@ -202,7 +204,7 @@ fi
 # itself. A replaced release asset would otherwise be delivered to the phone
 # exactly as smoothly as the real one.
 #
-# Only `main` publishes, so a development build has no provenance to check.
+# Only a run that publishes has provenance to check, so a debug build has none.
 # Saying that plainly is better than implying it was either verified or broken.
 if [ "$MODE" = "release" ]; then
     if ! command -v gh >/dev/null 2>&1; then
@@ -255,7 +257,7 @@ fi
 if [ -f "$TMP/app-debug.apk" ]; then
   # A debug build signed with the release key, so it installs over the release APK on the same phone
   # without uninstalling — which is the whole point: live tracing without losing what is in the app.
-  # **`-dev` says what the build is, not that it is a spare.** On a development branch it is the
+  # **`-dev` says what the build is, not that it is a spare.** A debug-only dispatch has it as the
   # only APK, so the suffix is the label rather than a second choice beside a release — and it is the
   # one fact a person needs at the phone, because this is the build that writes a log.
   mv "$TMP/app-debug.apk" "$DEST/muffycodes-$LABEL-dev.apk"

@@ -132,6 +132,55 @@ def check_shell(where: str, line: int, shell: str) -> None:
 ENCRYPTS = re.compile(r"openssl\s+enc\b")
 
 
+# **The one branch this repository has.** The workflow is muffycodes' own CI, and since the
+# operator's ruling of 2026-11-07 (`docs/PLAN-universal-2026-11-06.md` §13b.1) it is `main` only —
+# `development` was collapsed into `main` and deleted on 2026-11-11.
+#
+# This is checked rather than remembered because the mistake has already happened twice, in both
+# directions: narrowing the trigger to `[main]` while `development` was still in use stopped every
+# run for three commits, and leaving a `development` special case behind after the branch was gone
+# is the same bug with the sign flipped — a step that can never run, or a branch that gets no CI.
+ONLY_BRANCH = "main"
+PUSH_BRANCHES = re.compile(r"^\s+branches:\s*\[(.*?)\]\s*$")
+
+def check_one_branch(where: str, lines: list[str]) -> None:
+    """The push trigger names one branch, and it is `main`.
+
+    **A trigger is the one thing in this file whose failure is silent.** A step with a broken `if:`
+    skips and says so; a trigger that names a branch nobody pushes to simply never starts, and the
+    absence of a run looks exactly like nothing having happened. That is why it is checked here.
+    """
+    for i, line in enumerate(lines):
+        match = PUSH_BRANCHES.match(line)
+        if not match:
+            continue
+        # Only the `push:` block's own `branches:` counts; `pull_request:` may name its own.
+        above = next((l.rstrip() for l in reversed(lines[:i]) if l.strip()), "")
+        if above.strip() == "pull_request:":
+            continue
+        named = [b.strip().strip("'\"") for b in match.group(1).split(",")]
+        named = [b for b in named if b]
+        if named != [ONLY_BRANCH]:
+            fail(
+                f"{where}:{i + 1}",
+                f"the push trigger names {named}, but this repository has one branch: "
+                f"[{ONLY_BRANCH!r}]. A branch that is not main is a pull request waiting to "
+                f"happen, and a branch listed here but never pushed to silently gets no CI.",
+            )
+
+    # A leftover branch comparison is the other half: it is a condition that is now always true or
+    # always false, which is how "no release APK was ever built on main" happened.
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        if re.search(r"ref_name\s*[!=]=\s*'development'|refs/heads/development", line):
+            fail(
+                f"{where}:{i + 1}",
+                "a condition still compares against `development`, which no longer exists; "
+                "it is now always true or always false",
+            )
+
+
 def check_no_sealing(where: str, job: str, body: list[str]) -> None:
     """A workflow must not encrypt its own output.
 
@@ -200,6 +249,8 @@ def check_one(workflow: Path) -> None:
             check_shell(f"{where} (job {name})", line, shell)
 
         check_no_sealing(f"{where}:{begin + 1}", name, lines[begin:end])
+
+    check_one_branch(where, lines)
 
 
 def main() -> int:

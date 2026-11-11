@@ -49,13 +49,13 @@ the phone's Downloads folder — the APK, the list of changes and the pictures:
 
 ```sh
 bundle             # the latest release, with everything on it now
-bundle --dev       # the newest development build
+bundle --dev       # the newest debug build
 ```
 
-`ci` runs it on its own when a build passes on `main` or `development`, so a
-successful run means the phone already has it. The renders of a real install
-land on a release minutes later, in a run of their own; running `bundle`
-afterwards grows the folder with them.
+`ci` runs it on its own when a build passes on `main`, so a successful run means
+the phone already has it. The renders of a real install land on a release minutes
+later, in a run of their own; running `bundle` afterwards grows the folder with
+them.
 
 ## The loop
 
@@ -66,6 +66,18 @@ afterwards grows the folder with them.
 4. Merge to `main` only when the tests pass. `main` publishes the signed APK.
 
 A pull request is the unit of verification. Nothing else is.
+
+**There is one branch: `main`.** A push to any other branch gets no CI at all —
+that is deliberate, because a branch that is not `main` is a pull request waiting
+to happen. `development` existed until 2026-11-11 and was collapsed into `main`
+and deleted; it pointed at the same commit, so nothing was merged and nothing was
+lost. The ruling is in `docs/PLAN-universal-2026-11-06.md` §13b.1.
+
+**The trace-writing debug build is asked for, not pushed.** With one branch there
+is no push that is not a release, so it is a `workflow_dispatch` that names no
+version — `dev_build` is ticked by default, and an empty version is what says "do
+not publish". Naming a version publishes; naming none builds a copy to install and
+look at. The two switches are independent.
 
 ## Who tests what
 

@@ -294,10 +294,16 @@ if [ "$conclusion" != "success" ]; then
     done <<< "$failed_jobs"
 fi
 
-# A build that passed on main or development leaves its bundle on GitHub,
-# but a bundle nobody can hold is not a delivery. Bring it to the phone here,
-# so that waiting on the run is the only thing a person does: when this says
-# success, the APK is already in the Downloads folder.
+# A build that passed on main leaves its bundle on GitHub, but a bundle nobody
+# can hold is not a delivery. Bring it to the phone here, so that waiting on the
+# run is the only thing a person does: when this says success, the APK is
+# already in the Downloads folder.
+#
+# **A run that published is fetched as the release; anything else by its run id.**
+# This used to ask the branch name, which worked while `development` existed and
+# would now be wrong for the one build that has no release: a dispatch with no
+# version. The question is whether the run published, and `--run` answers it for
+# any run — so the branch no longer has to be consulted at all.
 #
 # The renders of a real install arrive on a release minutes later, in a run
 # of their own; running `bundle` again afterwards grows the folder with them.
@@ -306,10 +312,13 @@ fi
       echo ""
       # The script says its own piece — what was delivered, or why there was
       # nothing to deliver — so nothing is added to it here.
-      if [ "$BRANCH" = "main" ]; then
+      #
+      # `--run` first, because it is the answer that always works: it names the
+      # run whose bundle this is. Only a run with no bundle at all (nothing in the
+      # app changed) falls through to the latest release, which is the only other
+      # thing there could be to hand over.
+      if ! bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /'; then
           bash "$HERE/fetch-bundle.sh" 2>&1 | sed 's/^/  /' || true
-      else
-          bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /' || true
       fi
   fi
 

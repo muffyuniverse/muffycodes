@@ -1,13 +1,18 @@
 name: Build and release
 
-# **Two branches HERE, and that is not the app's rule.**
+# **One branch: `main`.**
 #
-# The app's model for a *user's project* is one branch, `main` — the operator ended
-# the person/agent split: *"lets keep only main"*. **This file is not that.** It is
-# muffycodes' own CI, and muffycodes is developed on `development` and released
-# from `main`. Narrowing this trigger to `[main]` was a conflation of the two, and
-# it stopped every run for three commits before anyone noticed — which is exactly
-# the failure a CI file must not have.
+# This repository used to have two lanes — work on `development`, publish from
+# `main` — and it has been one branch since the operator's ruling of 2026-11-07:
+# *"lets keep only main"*, applied to this repository as well as to a user's
+# project (`docs/PLAN-universal-2026-11-06.md` §13b.1). `development` was collapsed
+# into `main` and deleted on 2026-11-11; it pointed at the same commit, so nothing
+# was merged and nothing was lost.
+#
+# **This trigger is now the whole of the rule.** A push to any branch other than
+# `main` gets no CI at all — deliberately, because a branch that is not `main` is
+# a pull request waiting to happen, and a pull request is where it is verified.
+# Work goes: branch → pull request → the tests → merge to `main` → publish.
 #
 # Two levels of cost, one for each thing a run is for:
 #
@@ -23,11 +28,13 @@ name: Build and release
 # A `workflow_dispatch` publishes too, if it names a version: the app's release
 # button uses it. Both actors can release, which is the operator's decision.
 #
-# `development` is the work branch: tests, build, and an installable APK as an
-# artifact. `main` publishes.
+# **A dispatch that names no version publishes nothing.** That is the way to get
+# the debug build, which writes the trace: it used to be made by every push to
+# `development`, and with one branch there is no push that is not a release.
+# Ticking `dev_build` and leaving the version empty produces the debug APK alone.
 on:
   push:
-    branches: [main, development]
+    branches: [main]
     # **A change that touches nothing the build reads costs a full pipeline.** Documentation,
     # and the note files that describe work rather than perform it, cannot break a compile or a
     # test — but they used to start the whole suite, which is the most expensive thing a run can
@@ -40,15 +47,19 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      # **Optional, because a dispatch is also how the debug build is asked for.** It was
+      # required, which made every dispatch a release — so with `development` gone there
+      # would have been no way to get a trace-writing build without publishing a version.
+      # Empty means "do not publish"; the `dev_build` switch is then the whole request.
       version_name:
-        description: "The version of the release (for example 1.4)"
-        required: true
+        description: "The version of the release (for example 1.4). Leave empty to build without publishing."
+        required: false
         type: string
       dev_build:
         description: "Also build a dev (debug) copy — live tracing on, same key, installs over the release"
         required: false
         type: boolean
-        default: false
+        default: true
       # **A shell on the runner, when a failure cannot be read from a log.** The tests are the
       # only compiler this project has, so "it fails on CI and not here" is the ordinary state
       # rather than an exotic one — and the difference between guessing from an artifact and
@@ -59,9 +70,10 @@ on:
         required: false
         type: boolean
         default: false
-      # **A dispatch still publishes if it names a version**, so a debug run from `development`
-      # should leave `version_name` empty unless publishing is what is wanted. Said here rather than
-      # discovered: the two switches are independent, and ticking one does not turn the other off.
+      # **A dispatch publishes if and only if it names a version.** The two switches are
+      # independent: ticking `dev_build` does not publish, and naming a version does not
+      # build a debug copy unless `dev_build` is ticked. That independence is what makes
+      # "give me a trace build" a request that costs no version number.
 
 # A second push makes the first run pointless, so the first one is stopped
 # immediately, on a branch and on main alike: a run that nobody will read is the
@@ -177,8 +189,8 @@ jobs:
           TOOLS_DIR: ${{ github.workspace }}/tools
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            # `development` and `main` are the tiers that hand something to a
-            # person, so they run everything.
+            # `main` is the tier that hands something to a person, so it runs
+            # everything.
             echo "This is a build, so every test runs."
             selection="$(bash "$TOOLS_DIR/changed-tests.sh" --all)"
           else
@@ -419,8 +431,8 @@ jobs:
           # never be overwritten once it exists. A bad entry under a key would
           # then be restored forever after, so raising the version is how the
           # cache is cleared when it is wrong.
-          # The event is part of the key, and it has to be. A build of main or
-          # development runs with `-Pmuffy.shots` and a pull request does not, so
+          # The event is part of the key, and it has to be. A build of main runs
+          # with `-Pmuffy.shots` and a pull request does not, so
           # the two make different configuration-cache entries for the same build
           # files. One key shared between them means whichever ran first owns the
           # entry, the other never restores a matching one, and — because cache
@@ -659,36 +671,43 @@ jobs:
   # Lint, in two depths.
   #
   # It was main-only, and on main it ran `lintVitalRelease` — the *fatal* subset
-  # that Android attaches to a release build, not the whole analysis. So the two
-  # halves of "cheap on development, deep on main" were both missing: development
-  # had no lint at all, and main was not running the deep one.
+  # that Android attaches to a release build, not the whole analysis. So "cheap on
+  # development, deep on main" was wrong in both halves: the branch that handed out
+  # builds had no lint at all, and main was not running the deep one.
   #
-  # Now every push that is not a pull request lints, and which analysis runs
-  # depends on where it is:
+  # **Lint is a release gate, so it runs when the run publishes.** That is the rule,
+  # and with one branch it is also the simple one:
   #
-  #   main             `lintRelease` — every check, on the variant that ships
-  #   development      nothing
-  #   a pull request   nothing
+  #   a push to main            `lintRelease` — every check, on the variant that ships
+  #   a dispatch naming a version  `lintRelease` — it publishes, so it is gated
+  #   a dispatch naming nothing    nothing — a debug build is not a release
+  #   a pull request            nothing
   #
-  # Development was given `lintDebug` on the theory that the test job's debug
-  # compile would be reused and the analysis would be nearly free. Measured:
-  # **111s**, longer than `lintRelease` on main at 98s. Gradle's cache entries
-  # are keyed per job here, so a job cannot restore another job's compile — it
-  # compiled debug itself and then analysed it. The theory was wrong and the
-  # branch that hands out builds to look at is the wrong place to spend two
-  # minutes proving something has never once failed.
+  # **Development used to run `lintDebug` and that was measured and rejected:**
+  # 111s, longer than `lintRelease` on main at 98s. Gradle's cache entries are keyed
+  # per job, so a job cannot restore another job's compile — it compiled debug itself
+  # and then analysed it. Two minutes proving something that had never once failed.
+  # A debug-only dispatch is the same kind of build and gets the same answer: nothing.
   #
-  # Lint analyses the whole tree by design, so it is a release gate: main, where
-  # the thing being produced is a version rather than something to glance at.
+  # Lint analyses the whole tree by design, so it is a release gate: main, where the
+  # thing being produced is a version rather than something to glance at.
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
     # Beside the tests rather than after them: a lint pass says nothing about
     # whether the tests will pass, so serialising them put both on the clock for
     # nothing.
+    #
+    # **`format()` is not decoration.** The question is "did this dispatch name a
+    # version", and `inputs.version_name != ''` answers it only if an omitted input is
+    # the empty string. `format('{0}', x)` renders both `null` and `''` as `''`, so the
+    # test is true for exactly one case — a version was actually typed — instead of
+    # depending on how an absent input happens to be represented. Getting it wrong would
+    # run `lintRelease` on a debug-only dispatch: a hundred seconds spent gating a build
+    # that publishes nothing.
     if: |
-      github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && format('{0}', inputs.version_name) != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -751,13 +770,17 @@ jobs:
       - name: Run the analysis
         if: steps.decision.outputs.changed == 'yes'
         run: |
-          # GITHUB_REF_NAME is the branch already; there is nothing to work out.
+          # **`lintRelease` is the only analysis this job ever runs now.** The job's own `if:`
+          # admits only a publishing run, and a publishing run is one that ships — so there is
+          # no second variant to choose between. The `else` is a stop rather than a fallback:
+          # it is the sentence a reader needs if the gate above is ever widened by mistake.
           if [ "${GITHUB_REF_NAME:-}" = "main" ]; then
             echo "On main: every check, on the variant that ships."
             ./gradlew --parallel --no-daemon --no-configuration-cache lintRelease
           else
-            echo "Not main: the same analyzer on debug, which the tests already compiled."
-            ./gradlew --parallel --no-daemon --no-configuration-cache lintDebug
+            echo "::error::Lint is a release gate and this run is not on main."
+            echo "If this run is meant to publish, the gate on this job is wrong."
+            exit 1
           fi
 
   # -------------------------------------------------------------------------
@@ -789,6 +812,10 @@ jobs:
       version_name: ${{ steps.version.outputs.name }}
       version_code: ${{ steps.version.outputs.code }}
       changed: ${{ steps.decision.outputs.changed }}
+      # **Whether this run is a release**, decided once in the version step. A dispatch that
+      # names no version is a debug build, and it must not publish — so every publish step
+      # reads this rather than asking whether the ref is main.
+      publishing: ${{ steps.version.outputs.publishing }}
 
     steps:
       - name: Check out the code
@@ -924,36 +951,48 @@ jobs:
           # bug being fixed.
           BRANCH: ${{ github.ref_name }}
         run: |
+          # **Is this run a release? One question, asked once, and every step below reads the
+          # answer.** It used to be `[ "$BRANCH" = "main" ]`, which was true for every push to
+          # main and for a dispatch — and a dispatch is now also how a debug build is asked for.
+          # Asking the branch alone would make a trace-only request try to publish a version.
+          #
+          # A dispatch publishes if and only if it names a version. A push to main always does.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -n "${CHOSEN_VERSION:-}" ]; then publishing=yes; else publishing=no; fi
+          elif [ "$EVENT_NAME" = "push" ] && [ "${BRANCH:-}" = "main" ]; then
+            publishing=yes
+          else
+            publishing=no
+          fi
+          echo "publishing=$publishing" >> "$GITHUB_OUTPUT"
+
           # The name is for people to read. A release made by hand may be named
           # anything at all, so it is taken as given and only checked for
           # characters that would be unsafe in a tag or a shell word.
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${CHOSEN_VERSION:-}" ]; then
-            version_name="$CHOSEN_VERSION"
-          elif [ "$EVENT_NAME" != "push" ] || [ "${BRANCH:-}" != "main" ]; then
+          if [ "$publishing" = "yes" ]; then
+            if [ -n "${CHOSEN_VERSION:-}" ]; then
+              version_name="$CHOSEN_VERSION"
+            else
+              # One more than the largest number ever released, so the numbers
+              # only ever go up even if a release was named out of order.
+              highest="$(gh release list --repo "$REPOSITORY" --limit 100 \
+                --json tagName \
+                --jq '[.[] | .tagName | sub("^v";"") | select(test("^[0-9]+$")) | tonumber] | max // 0')"
+              version_name="$(( ${highest:-0} + 1 ))"
+            fi
+          else
             # **A build that is not a release is named for the run, not for the last release.**
             #
-            # The name used to be "highest published release + 1", and nothing publishes from
-            # `development` — so every dev build was called `190`, the number the *next* release
-            # would take, and the phone could not tell one build from another. That is the
-            # operator's report: *"when I update the app its version doesnt change"*. Twelve builds
-            # in a row all said 190, which also made every trace row ambiguous.
-            #
-            # **This branch is the one dev builds actually take.** They arrive as `push` events on
-            # `development`, not as dispatches — `version_name` is a required input, so a dispatch
-            # always names itself and never reaches here. Getting this wrong once already: I first
-            # wrote the rule for `workflow_dispatch`, which no dev build ever is.
+            # The name used to be "highest published release + 1", and nothing publishes from a
+            # branch — so every dev build was called `190`, the number the *next* release would
+            # take, and the phone could not tell one build from another. That is the operator's
+            # report: *"when I update the app its version doesnt change"*. Twelve builds in a row
+            # all said 190, which also made every trace row ambiguous.
             #
             # A run number is unique, monotone and already known here. The release name keeps its
             # own rule, because a release is a thing with a number people quote; a dev build is a
             # thing with a *when*.
             version_name="${RUN_NUMBER}"
-          else
-            # One more than the largest number ever released, so the numbers
-            # only ever go up even if a release was named out of order.
-            highest="$(gh release list --repo "$REPOSITORY" --limit 100 \
-              --json tagName \
-              --jq '[.[] | .tagName | sub("^v";"") | select(test("^[0-9]+$")) | tonumber] | max // 0')"
-            version_name="$(( ${highest:-0} + 1 ))"
           fi
 
           case "$version_name" in
@@ -986,10 +1025,10 @@ jobs:
           # A run number is below the clock's value, so this cannot collide with a release code, and
           # `tools/version-code.sh` still guards the ceiling. The offset puts dev codes in their own
           # range so they can never sort above a release made later.
-          if [ "$EVENT_NAME" != "push" ] || [ "${BRANCH:-}" != "main" ]; then
-            version_code="$(( 1000000000 + RUN_NUMBER ))"
-          else
+          if [ "$publishing" = "yes" ]; then
             version_code="$(bash tools/version-code.sh)"
+          else
+            version_code="$(( 1000000000 + RUN_NUMBER ))"
           fi
           # The boundary lives in tools/version-code.sh, which has a self-test,
           # because the inline fallback it replaced was not monotonic: it produced
@@ -1000,6 +1039,11 @@ jobs:
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"
           echo "The version is ${version_name} (code ${version_code})."
+          if [ "$publishing" = "yes" ]; then
+            echo "This run publishes v${version_name}."
+          else
+            echo "This run publishes nothing; it builds a copy to install and look at."
+          fi
 
       # `-x lintVitalRelease` is not a check being dropped: Android attaches it
       # to `assembleRelease`, and it is the same analysis the test job already
@@ -1007,7 +1051,7 @@ jobs:
       # change nothing, because the release is not published unless that job
       # passed first.
       - name: Build the release
-        if: steps.decision.outputs.changed == 'yes'
+        if: steps.decision.outputs.changed == 'yes' && steps.version.outputs.publishing == 'yes'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -1015,31 +1059,23 @@ jobs:
           MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
-          # **The branch, declared again here because `env:` is per step.** It was set on the step
-          # that works out the version, and this step read `${BRANCH:-}` from a variable that did not
-          # exist in its own environment — so the test was always false, the else branch always ran,
-          # and no release APK was ever built on `main`. The step after it then failed looking for a
-          # file that had never been made, which read as a signing fault and was a missing `env:`.
-          BRANCH: ${{ github.ref_name }}
         run: |
           # --no-configuration-cache, deliberately: this invocation carries a
           # --profile writes a report of what each task took. It costs a moment and
           # it is the difference between knowing where a minute and a half goes and
           # guessing at it — which is how this job spent thirty seconds caching
           # things it could never read back.
-          # **A release is built only for `main`.** The operator's rule, in four words: *"debug for dev,
-          # release for main"*. Both used to be built on every development push — 2m41s and 2m14s of
-          # Gradle, back to back, in one job — so a change that only needed the debug copy paid for a
-          # release nobody installed. The release is also the thing that must be signed, attested and
-          # verified, and none of that has any meaning for a branch build.
-          if [ "${BRANCH:-}" = "main" ]; then
-            ./gradlew --parallel --no-daemon --no-configuration-cache --profile assembleRelease \
-              -x lintVitalRelease \
-              -Pmuffy.versionCode="$VERSION_CODE" \
-              -Pmuffy.versionName="$VERSION_NAME"
-          else
-            echo "Not a release branch, so no release APK is built."
-          fi
+          #
+          # **The step's own `if:` is the whole guard, and it had to move there.** It used to
+          # run unconditionally and test `${BRANCH:-}` inside the script, which is how a missing
+          # `env:` turned into "no release APK was ever built on main" — the else branch ran, the
+          # job reported success, and the failure surfaced two steps later as an apksigner error
+          # that read like a signing fault. A condition on the step cannot be silently false for
+          # the wrong reason: if this step is skipped, the log says so and says why.
+          ./gradlew --parallel --no-daemon --no-configuration-cache --profile assembleRelease \
+            -x lintVitalRelease \
+            -Pmuffy.versionCode="$VERSION_CODE" \
+            -Pmuffy.versionName="$VERSION_NAME"
       # **A dev copy, when asked for.** A debug build carries the live trace; the
       # release build never does. It is signed with the release key so it installs
       # *over* the release build on the same phone — no uninstall, so no notes lost —
@@ -1047,17 +1083,17 @@ jobs:
       # the shipping app and is attested, and this is neither. It travels in the run's
       # own artifact instead.
       - name: Build a dev copy
-        # **The only build a development push makes.** *"debug for dev, release for main"* — one APK
-        # per branch, not both.
+        # **A debug copy is made when it is asked for, and never as a side effect of publishing.**
+        # *"debug for dev, release for main"* — with one branch there is no dev push, so the
+        # switch is the request: tick `dev_build` and the trace-writing build is made, whether or
+        # not the run is also publishing.
         #
         # Before this, a push built *both*: 2m41s of `assembleDebug` and 2m14s of `assembleRelease`,
         # and the delivery then had to choose between two files. Worse, until recently the dev copy
         # was not built at all on a push — it only existed on a manual dispatch — so the release APK
         # was the only thing on offer, and the release APK keeps no trace. That is why a report
-        # arrived from a build that had never written a log.
-        if: >-
-          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
-          (github.event_name == 'push' && github.ref_name != 'main')
+        # arrived from a build that had never written a log. The answer is the switch, not a branch.
+        if: inputs.dev_build
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -1214,12 +1250,12 @@ jobs:
                         printf "::warning title=Shard balance::the deal is %ds apart. A time-aware split would recover it, and would reshuffle every shard whenever a class is added.\n", worst - min
                 }' || echo "shard timings unavailable; not a failure"
 
-      # **A release branch only**, because there is no release APK anywhere else — and the checks below
-      # are about the artifact that gets published, which a branch never does. Found by CI: the step
-      # ran on `development` and `apksigner` answered "could not read the APK's certificates", which is
-      # true and unhelpful.
+      # **A publishing run only**, because there is no release APK anywhere else — and the checks
+      # below are about the artifact that gets published, which a debug-only run never does. Found
+      # by CI: the step ran on a branch build and `apksigner` answered "could not read the APK's
+      # certificates", which is true and unhelpful.
       - name: Check the signature of the APK
-        if: steps.decision.outputs.changed == 'yes' && github.ref_name == 'main'
+        if: steps.decision.outputs.changed == 'yes' && steps.version.outputs.publishing == 'yes'
         env:
           EXPECTED_CERT: ${{ vars.EXPECTED_CERT }}
         run: |
@@ -1301,11 +1337,11 @@ jobs:
       # anybody reading a log.
       # The APK and the version go to the job that assembles the bundle. This job
       # does not wait for the tests: the bundle is assembled once both are done.
-      # **Only on a release branch**, because that is the only place a release APK exists now. The
-      # `if-no-files-found: error` is right and stays: on `main` a missing APK is a broken build, and
-      # saying so is the whole job of that line.
+      # **Only when this run is a release**, because that is the only time a release APK exists. The
+      # `if-no-files-found: error` is right and stays: on a release a missing APK is a broken build,
+      # and saying so is the whole job of that line.
       - name: Hand the APK onward
-        if: steps.decision.outputs.changed == 'yes' && github.ref_name == 'main'
+        if: steps.decision.outputs.changed == 'yes' && steps.version.outputs.publishing == 'yes'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-apk
@@ -1316,9 +1352,7 @@ jobs:
       # The dev copy rides in its own artifact, and only when one was built. It is never
       # part of the release: anything published is the shipping app and is attested.
       - name: Hand the dev copy onward
-        if: >-
-          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
-          (github.event_name == 'push' && github.ref_name != 'main')
+        if: inputs.dev_build
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dev-apk
@@ -1344,11 +1378,11 @@ jobs:
     needs: [test, build-release, lint]
     # The condition has to say everything now, because `!cancelled()` replaces the
     # implicit rule. A job whose `needs` include a *skipped* job is skipped too,
-    # and lint is skipped on development — so writing only "is this a build and
-    # did the app change" silently stopped development from ever handing over an
-    # APK the moment lint stopped running there. Every answer the implicit rule
-    # used to give is now written out: the suite passed, the build succeeded, and
-    # lint either passed or did not run.
+    # and lint is skipped on a pull request — so writing only "is this a build and
+    # did the app change" silently stopped a run from ever handing over an APK the
+    # moment lint stopped running there. Every answer the implicit rule used to
+    # give is now written out: the suite passed, the build succeeded, and lint
+    # either passed or did not run.
     if: |
       !cancelled()
       && github.event_name != 'pull_request'
@@ -1358,10 +1392,9 @@ jobs:
       && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Write is granted even on a development push, where nothing is published,
-    # because permissions cannot be conditional. What keeps a development push
-    # from releasing is the `if:` on the publish steps below, and the fact that
-    # they are the only thing here that writes.
+    # Write is granted even when nothing is published, because permissions cannot be
+    # conditional. What keeps a non-release run from publishing is the `if:` on the
+    # publish steps below, and the fact that they are the only thing here that writes.
     permissions:
       contents: write
       # The attestation signs the provenance of the APK, and signing is what needs
@@ -1381,10 +1414,10 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      # **A branch build has no release APK**, so this must not fail when there is none. The dev
-      # copy below is the whole delivery for a development push.
+      # **A debug-only run has no release APK**, so this must not fail when there is none. The dev
+      # copy below is the whole delivery for a dispatch that named no version.
       - name: Take the APK
-        if: github.ref_name == 'main'
+        if: needs.build-release.outputs.publishing == 'yes'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-apk
@@ -1420,9 +1453,9 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           mkdir -p bundle
-          # **Either APK, never a failure for the one this branch does not build.** `debug for dev,
-          # release for main` means a development bundle has no release APK, and an unconditional
-          # `cp` here would fail the delivery for being correct.
+          # **Either APK, never a failure for the one this run did not build.** A debug-only
+          # dispatch has no release APK, and an unconditional `cp` here would fail the delivery
+          # for being correct.
           if [ -f apk/app-release.apk ]; then
             cp apk/app-release.apk bundle/
           fi
@@ -1451,23 +1484,23 @@ jobs:
             --out bundle/scenarios/README.md
           ls -la bundle/
 
-      # Only a development push needs this artifact: main publishes a release,
-      # and the release is the delivery. Uploading it there as well would be nine
-      # megabytes of storage and a couple of seconds spent on a copy nobody opens.
+      # Only a run that publishes needs no artifact: the release is the delivery. Uploading it
+      # there as well would be nine megabytes of storage and a couple of seconds spent on a copy
+      # nobody opens.
       - name: Hand the bundle to the run, for a build with no release
-        if: github.ref != 'refs/heads/main'
+        if: needs.build-release.outputs.publishing != 'yes'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-bundle
           # **`bundle/**`, not a list of files.** The list named `app-release.apk`, which a
-          # development branch does not build — so the upload took the change list and the pictures
+          # debug-only run does not build — so the upload took the change list and the pictures
           # and left the APK behind, and the delivery then said "the bundle has no APK in it". The
           # list also missed `version`, which is what the APK is named from.
           #
           # `if-no-files-found: error` stays: it is the check that would have caught this, if the
           # path had been allowed to be wrong.
           path: bundle/**
-          # Seven days: this is the thing a development push is for, and a week
+          # Seven days: this is the thing a debug build is for, and a week
           # is long enough to install and look at it.
           retention-days: 7
           if-no-files-found: error
@@ -1478,18 +1511,20 @@ jobs:
       # called app-release.apk" and "the APK built from this commit". It is free
       # for a public repository.
       - name: Attest that this APK came from this commit
-        if: github.ref == 'refs/heads/main'
+        if: needs.build-release.outputs.publishing == 'yes'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: bundle/app-release.apk
 
       - name: Publish the release
-        # **The ref, and deliberately not the event.** With one branch this is the only thing
-        # between a run and a published version, and a draft of this change added
-        # `event_name == 'push'` on the theory that the two lanes were the guard. They were — but
-        # the operator wants the agent able to release, and `Release.start` publishes through
-        # `workflow_dispatch`. Adding the event would have broken the app's own release button.
-        if: github.ref == 'refs/heads/main'
+        # **`publishing`, not the ref, and deliberately not the event either.** The question is not
+        # "which branch is this" but "did this run ask to publish" — a dispatch on `main` that names
+        # no version is a debug build and must publish nothing, while a dispatch that names one must
+        # publish, because the operator wants the agent able to release and `Release.start` uses
+        # `workflow_dispatch`. Adding `event_name == 'push'` here would have broken the app's own
+        # release button; asking the ref alone would have made a trace-only request spend a version.
+        # `publishing` is the one value that answers the real question, and the version step sets it.
+        if: needs.build-release.outputs.publishing == 'yes'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
