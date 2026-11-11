@@ -267,14 +267,16 @@ class AgentRunnerTest {
     // ---- resume, which is seamless -----------------------------------------
 
     @Test
-    fun `a session the phone was not running simply goes on`() {
-        // **Nothing is written about the time the app was not running.** It used to write a `gap`
-        // row explaining an absence the person already knew about — they turned the phone off. The
-        // session is on disk, the tick reads it, and it carries on.
+    fun `a session the phone was not running writes no row about it`() {
+        // **The gap row is gone.** It said "the phone did not run the agent for 3 h 12 min" — an
+        // absence the person caused and already knows about — and it sat in the file the model later
+        // reads. Resume needs no note: the session is on disk and the tick reads it.
         //
-        // A force-stop, an OEM battery manager and a Doze window all look the same from inside, and
-        // none of them is the operator ending anything: "it must never stop until the operator
-        // removes it" is the stronger rule, and resuming is how it is kept.
+        // **The ceiling still applies to it**, because the ceiling is only a clock: three hours is
+        // past an hour, and it does not matter why the app was not running. That is the rule the
+        // operator asked for, and this test pins that the *row* is gone without pretending the
+        // *clock* is.
+        settings.waitFor(0)
         on("shopping", now = 1_000)
         val runner = runner()
 
@@ -283,14 +285,24 @@ class AgentRunnerTest {
 
         val log = AgentLog.open(File(ws.accountDir, "shopping"))
         assertTrue("no row about it", log.rows().none { it.name == "gap" })
-        assertEquals("still on", AgentSession.State.IDLE, runner.sessions().single().state)
-        // **The clock did not move, because nothing was sent.** A wake three hours later is past the
-        // keepalive's ceiling, so no ping goes out — and `lastPollAt` is when a request was made,
-        // not when the app looked at the clock. The session resumes from where it was.
+        assertEquals("and nothing was sent", 1_000L, runner.sessions().single().lastPollAt)
+    }
+
+    @Test
+    fun `a phone that was off for longer than the ceiling stops the agent`() {
+        // **The ceiling is a clock and nothing else.** It does not ask why the app was not running,
+        // because the answer never changes the arithmetic: the person set an hour, and the hour went.
+        settings.waitFor(60)
+        on("shopping", now = 1_000)
+        val runner = runner()
+
+        runner.tick(1_000 + 3 * 60 * 60_000L)
+        settle(runner)
+
         assertEquals(
-            "no request, so no new poll time",
-            1_000L,
-            runner.sessions().single().lastPollAt,
+            "an hour and three later, it is off",
+            AgentSession.StopReason.WAITED_OUT,
+            runner.sessions().single().reason,
         )
     }
 
