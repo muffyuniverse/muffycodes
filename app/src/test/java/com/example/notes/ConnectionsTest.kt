@@ -276,11 +276,12 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `a nearer scope is asked first, and only if it was granted`() {
-        // **The chain applies to a name as well as to a push.** A branch's own checkmarked token wins
-        // over the project's; a branch that has one *without* the checkmark does not shadow the
-        // project's, because a checkmark that is absent is not a refusal of everything wider — it is
-        // the absence of a grant for that row.
+    fun `a name is answered by the worktree's own row, and only when it was granted`() {
+        // **A name is answered by the worktree's own row, exactly as a push is.** Scopes are separate
+        // records — a branch's is written when the branch is made — so a branch with a checkmarked
+        // token spends its own, and a branch whose token is *not* checkmarked spends nothing. There is
+        // no chain for a name any more: withdrawing a grant means "this agent may not spend", and
+        // reading the project's instead would be the app deciding it knew better.
         val project = SecretScope.Project("acme")
         val branch = SecretScope.Branch("acme", "feature")
         val projectRow = project to ConnKind.GIT
@@ -305,6 +306,7 @@ class ConnectionsTest {
                 "git",
                 "gitlab.com",
                 grant + (branchRow to grant.getValue(branchRow).copy(nameable = false)),
+                branch = "feature",
             ),
         )
     }
