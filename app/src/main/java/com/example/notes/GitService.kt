@@ -1874,9 +1874,10 @@ object GitService {
         // in this jgit, and the index is the right source anyway: it is what "tracked" means here,
         // and an untracked file is one no version ever had.
         val tracked = mutableListOf<String>()
-        org.eclipse.jgit.dircache.DirCache.read(repo).use { cache ->
-            for (entry in cache) tracked.add(entry.pathString)
-        }
+        val cache = org.eclipse.jgit.dircache.DirCache.read(repo)
+        // **By index, not by iterator**, because `DirCache` implements `Iterable` twice and the
+        // compiler cannot choose — which is a fine thing for it to refuse to guess.
+        for (i in 0 until cache.entryCount) tracked.add(cache.getEntry(i).pathString)
         for (pathInTree in tracked) {
             if (pathInTree in wanted) continue
             val target = File(repo.workTree, pathInTree)
