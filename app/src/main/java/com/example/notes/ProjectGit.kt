@@ -870,29 +870,6 @@ class ProjectGit(
         )
         return@hold repo.use {
             try {
-                // **Read before the checkout, never after.** Afterwards the count would be
-                // reporting the restore, which is always a whole tree.
-                //
-                // **Unstaged, staged and untracked — and NOT `ahead`.** `ahead` counts commits the
-                // remote does not have, which is work that is very much in a version: a project with
-                // no remote at all is `ahead` by every commit it has, and refusing a restore there
-                // would refuse it always. The three that matter are the ones a checkout overwrites
-                // with nothing able to bring them back.
-                val unsent = try {
-                    val state = changes(project)
-                    state.staged + state.unstaged + state.untracked
-                } catch (t: Throwable) {
-                    0
-                }
-                if (unsent > 0) {
-                    return@hold Result.failure(
-                        IllegalStateException(
-                            "This project has $unsent change(s) that are in no version, and putting " +
-                                "the whole tree back would destroy them. `push` first, or name one " +
-                                "`path` to restore on its own.",
-                        ),
-                    )
-                }
                 if (deadline?.expired == true) throw StoppedException(Stopped.body("restore", deadline))
                 GitService.checkoutTree(it, revisionId, keepStage)
                 Result.success(Unit)
@@ -902,6 +879,24 @@ class ProjectGit(
                 Result.failure(e)
             }
         }
+    }
+
+    /**
+     * Whether a whole-tree restore would destroy work that is in no version.
+     *
+     * **A separate question from the act, and asked before the lock.** It has to be asked before
+     * anything is opened, because the answer decides whether the act happens at all — and asking it
+     * from inside `RepoLocks.hold` meant opening the repository twice to answer one question.
+     *
+     * **Unstaged, staged and untracked — and NOT `ahead`.** `ahead` counts commits the *remote* does
+     * not have, which is work that is very much in a version: a project with no remote is `ahead` by
+     * every commit it has, and refusing there would refuse always.
+     */
+    fun unversionedWork(project: String): Int = try {
+        val state = changes(project)
+        state.staged + state.unstaged + state.untracked
+    } catch (t: Throwable) {
+        0
     }
 
     fun restore(

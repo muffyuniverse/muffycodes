@@ -3074,6 +3074,14 @@ class AgentTools(
             // makes belongs to this command: "was the stage kept" is a fact about the checkout, not
             // an argument to the repository layer.
             val keep = args.optBoolean("keep", false)
+            val unsafe = repo.unversionedWork(project)
+            if (unsafe > 0) {
+                return refusal(
+                    "This project has $unsafe change(s) that are in no version, and putting the " +
+                        "whole tree back would destroy them. `push` first, or name one `path` to " +
+                        "restore on its own.",
+                )
+            }
             val whole = repo.restoreTree(project, revision, keep, deadline)
             return whole.fold(
                 onSuccess = {
