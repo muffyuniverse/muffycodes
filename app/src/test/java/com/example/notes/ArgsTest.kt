@@ -173,7 +173,7 @@ class ArgsTest {
     @Test
     fun `a source with two keys is refused, because no order is predictable`() {
         val failed = one(JSONObject().put("row", 1).put("file", "x")) as Args.Expanded.Failed
-        assertTrue(failed.why.contains("exactly one key"))
+        assertTrue(failed.why.contains("has one key"))
     }
 
     @Test

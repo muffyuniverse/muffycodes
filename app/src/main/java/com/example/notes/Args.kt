@@ -137,10 +137,16 @@ object Args {
         // resolved in some order: `{"row":7,"file":"x"}` has no meaning that a reader could predict.
         if (raw is JSONObject) {
             val keys = raw.keys().asSequence().toList()
-            if (keys.size != 1) {
+            // **`tool` is the one source that takes a second key**, because a call needs arguments
+            // as well as a name. The others are one key by definition — `{"row":7,"file":"x"}` has
+            // no meaning a reader could predict, and refusing it is better than picking one.
+            val allowed = if ("tool" in keys) setOf("tool", "args") else setOf(keys.firstOrNull().orEmpty())
+            val extra = keys.filterNot { it in allowed }
+            if (keys.isEmpty() || extra.isNotEmpty()) {
                 return Expanded.Failed(
-                    "A value that names a source has exactly one key — `row`, `file` or `tool` — " +
-                        "and this one has ${if (keys.isEmpty()) "none" else keys.joinToString(", ")}.",
+                    "A value that names a source has one key — `row`, `file` or `tool` (with " +
+                        "`args`) — and this one has " +
+                        (if (keys.isEmpty()) "none" else keys.joinToString(", ")) + ".",
                 )
             }
             return when (val key = keys.first()) {

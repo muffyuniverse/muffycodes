@@ -3117,7 +3117,13 @@ class AgentTest {
         // So the old test's subject is gone; what replaces it is the case a model will actually hit.
         val said = tools().run(Call("c-push", "push", "{}"))
 
-        assertTrue("it answers: $said", said.startsWith("0"))
+        // **The fixture has no remote, so this is a refusal — and an honest one.** What the test is
+        // really about is that a push with nothing to say and nothing staged does **not** refuse for
+        // the *message*: that would be a call that cannot succeed without inventing a reason for a
+        // version that is not being made. The refusal names the missing address instead.
+        assertTrue("refused: $said", said.startsWith(AgentLog.FAILURE))
+        assertTrue("about the address, not the message: $said", said.contains("address") || said.contains("remote"))
+        assertFalse("and not about a missing message: $said", said.contains("`message`"))
     }
 
     @Test
@@ -3131,16 +3137,20 @@ class AgentTest {
         // What survives is the branch rule, and it survives as **a sentence rather than a refusal**:
         // the work is pushed, and the answer says the tag did not go and why. Refusing the whole push
         // over a tag would be throwing away work for a marking, which is the wrong way round.
+        // **A real feature branch with a worktree**, because `push` sends the branch it stands in —
+        // a call with `branch = "feature"` and no such branch is a push that cannot work, and the
+        // test would be asserting a sentence about a failure it caused itself.
+        val tree = branchWithWorktree()
         val bare = File(File(account, "remote"), "shopping.git")
         org.eclipse.jgit.api.Git.init().setBare(true).setDirectory(bare).call().close()
         org.eclipse.jgit.api.Git.open(ws.repoOf("shopping")).use { git ->
             git.repository.config.setString("remote", "origin", "url", bare.absolutePath)
             git.repository.config.save()
         }
-        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "three litres")
+        File(tree, "milk.txt").writeText("three litres, on feature")
         git.stage("shopping")
 
-        val said = tools(branch = "feature").run(
+        val said = AgentTools(ws, "shopping", git, log, branch = "feature").run(
             Call("c-push", "push", JSONObject("""{"message":"Add milk","tag":"1.4.0"}""").toString()),
         )
 
