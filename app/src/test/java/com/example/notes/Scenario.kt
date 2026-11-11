@@ -205,13 +205,13 @@ open class MemoryCredentials : Credentials {
      * chain the phone no longer walks is the worst kind of fake: every test about a scoped credential
      * would have passed here and pushed as the project on a phone.
      */
-    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
-        if (hostOfAddress(host).isEmpty()) return null
-        val scope = scopeOfPlace(project, branch)
-        val row = connection(scope, ConnKind.GIT) ?: return null
-        if (!hostCovers(hostOfAddress(row.address), hostOfAddress(host))) return null
-        return row.takeIf { it.secret.isNotBlank() }
-    }
+    /**
+     * **The same resolver the app uses**, so a fake cannot answer a question the phone answers
+     * differently. A branch with no token of its own follows its project's; the fake returning the raw
+     * row would have made every test about following pass here and push as nobody on a phone.
+     */
+    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? =
+        resolvedConnection(project, branch, host) { connection(it, ConnKind.GIT) }
 
     override fun spendable(name: String, host: String, project: String?, branch: String?): String? {
         val kind = kindFor(name) ?: return null

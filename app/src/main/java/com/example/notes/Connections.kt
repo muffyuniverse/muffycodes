@@ -130,17 +130,84 @@ fun namedConnection(
      * the one that knows how to ask; this function is the one that decides whether the answer counts.
      */
     at: (SecretScope, ConnKind) -> Connection?,
+): Connection? =
+    resolvedConnection(project, branch, host) { at(it, kind) }?.takeIf { it.nameable }
+
+/**
+ * **The credential a worktree holds for [host]** — its own, or the one it follows.
+ *
+ * **Scopes are separate records and a branch contributes one field.** A branch is a worktree of the
+ * same repository, so its remote, its host and the name a token is presented as are the project's; the
+ * only thing it can meaningfully say differently is *which token*. A branch's row is therefore a token
+ * and a checkmark, and everything else is read from the scope above it.
+ *
+ * **Nothing at this scope means follow, not nothing.** A branch with no token of its own spends the
+ * project's, and a project with no row spends the account's — so one credential set once applies
+ * everywhere, and an override is a deliberate act rather than a copy that freezes.
+ *
+ * **The host is checked wherever the address actually is.** A branch's token is only usable for the
+ * host its own row was entered for; a row with no address of its own is a token for whatever host the
+ * row above it names, which is what makes "just the token" possible without losing the binding.
+ */
+fun resolvedConnection(
+    project: String?,
+    branch: String?,
+    host: String,
+    at: (SecretScope) -> Connection?,
 ): Connection? {
-    // **The worktree's own row, never a wider one.** Scopes are separate records — a branch's is
-    // written when the branch is made — so walking upward would answer the project's credential for a
-    // branch that has its own, and `{{secret:git}}` would then spend a token a push does not use. One
-    // rule for both readers is what keeps the expansion and the push describing the same identity.
-    val scope = scopeOfPlace(project, branch)
-    val row = at(scope, kind) ?: return null
-    if (!row.nameable) return null
-    if (!hostCovers(hostOfAddress(row.address), host)) return null
-    return row
+    val asked = hostOfAddress(host)
+    if (asked.isEmpty()) return null
+    val own = scopeOfPlace(project, branch)
+    // A row is usable for this host when it has a token and its address covers the host — and a row
+    // with no address at all is usable only where it is the one that supplies the address.
+    val tokenFor = { row: Connection?, mustNameHost: Boolean ->
+        row?.takeIf {
+            it.secret.isNotBlank() &&
+                if (it.address.isBlank()) !mustNameHost else hostCovers(hostOfAddress(it.address), asked)
+        }
+    }
+    val above = parentChain(project, branch)
+        .firstNotNullOfOrNull { tokenFor(at(it), mustNameHost = true) }
+
+    if (own !is SecretScope.Branch) {
+        // The wider scopes are whole credentials, so their own row is the answer when it is usable.
+        return tokenFor(at(own), mustNameHost = true) ?: above
+    }
+
+    // **A branch may answer with a token and nothing else**, which is the whole point of the scope.
+    // Everything except the token comes from the row above, and a branch whose token stands alone
+    // still borrows the host the question named — the remote is what says which server it is for.
+    val mine = at(own)
+    val token = tokenFor(mine, mustNameHost = false)?.secret
+    return when {
+        // A token of its own: the branch's checkmark decides, and the rest is the project's.
+        token != null -> Connection(
+            address = above?.address?.ifBlank { asked } ?: asked,
+            secret = token,
+            user = above?.user.orEmpty(),
+            nameable = mine?.nameable == true,
+        )
+        // No token of its own: the branch follows, grant and all.
+        above != null -> Connection(
+            address = above.address.ifBlank { asked },
+            secret = above.secret,
+            user = above.user,
+            nameable = above.nameable,
+        )
+        // Nothing anywhere, which is a project with no credential at all.
+        else -> null
+    }
 }
+
+/**
+ * The scopes above [project] and [branch] — **what a scope follows when it says nothing**.
+ *
+ * A branch follows its project; a project follows the account; the account follows nothing. Derived
+ * from [connectionScopes] rather than written a second time, because a chain written twice is a chain
+ * that will disagree.
+ */
+private fun parentChain(project: String?, branch: String?): List<SecretScope> =
+    connectionScopes(project, branch).dropWhile { it != scopeOfPlace(project, branch) }.drop(1)
 
 /**
  * **Which kind a name is**, or null when it is not one this vault answers to.
@@ -189,21 +256,20 @@ fun placeOf(scope: SecretScope): Pair<String?, String?> = when (scope) {
 }
 
 /**
- * The scopes a question about [project] and [branch] may be answered at — **narrowest first**.
+ * The scopes a **credential** may be answered at, narrowest first.
  *
  * A branch only exists inside a project, so a branch with no project is not a place a value can live
  * and is skipped rather than invented.
  *
- * **For filling a window in, not for reading a credential.** Scopes are separate records written when
- * each one is made, so what a push sends is the worktree's own row and nothing here. This walk is what
- * a new branch's popover shows prefilled — the values the person is about to copy — which is a display
- * question and the only one it answers.
+ * **`General` is deliberately absent, and it is not an omission.** A general scope means "every
+ * project, every account" — right for a shared service key like npm's, and wrong for a credential that
+ * can push: it would be a token with no owner, usable by a project nobody chose it for. A git
+ * credential belongs to an identity, so the widest place it can live is the account.
  */
 fun connectionScopes(project: String?, branch: String?): List<SecretScope> = buildList {
     if (project != null && branch != null) add(SecretScope.Branch(project, branch))
     if (project != null) add(SecretScope.Project(project))
     add(SecretScope.Account)
-    add(SecretScope.General)
 }
 
 /**

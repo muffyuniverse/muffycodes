@@ -58,7 +58,6 @@ sealed interface SecretScope {
  * secret_<login>_<name>                        SecretScope.Account
  * secret_<login>_project_<p>/<name>            SecretScope.Project(p)
  * secret_<login>_branch_<p>/<b>/<name>         SecretScope.Branch(p, b)
- * conn_general_<kind>                          SecretScope.General
  * conn_<login>_project_<p>/<kind>[_choice]     SecretScope.Project(p)
  * conn_<login>_branch_<p>/<b>/<kind>[_choice]  SecretScope.Branch(p, b)
  * ```
@@ -80,7 +79,9 @@ fun keyScope(key: String, login: String?): SecretScope? {
     }
 
     if (key.startsWith("secret_general_")) return SecretScope.General
-    if (key.startsWith("conn_general_")) return SecretScope.General
+    // **A `conn_general_` row is not a scope any more.** Credentials belong to an identity, so
+    // `connPrefix` refuses `General`; a row left by a build that stored one is answered null here, and
+    // null is what makes the two sweeps treat it as nobody's — which is what it is.
     if (login == null) return null
     return when {
         key.startsWith("secret_${login}_project_") ->
@@ -259,15 +260,15 @@ interface Credentials {
     fun forgetConnection(scope: SecretScope, kind: ConnKind) {}
 
     /**
-     * **The credential a worktree holds for [host]** — its own row, and nothing else.
+     * **The credential a worktree holds for [host]** — its own, or the one it follows.
      *
-     * **No fallback, because the scopes are separate records.** A branch's row is written when the
-     * branch is made, by the same window that names it, so a branch without one does not exist. The
-     * walk this used to be (branch, then project, then account) was a read of records nothing ever
-     * wrote in that order: a branch would have silently pushed as the project, and a project as the
-     * account, which is the one thing a per-branch token exists to prevent.
+     * **A scope that says nothing follows the scope above it.** The four scopes are separate records,
+     * and a branch's record holds only what a branch can meaningfully differ in — its token and the
+     * checkmark. Its remote, host and token username are the project's, so it reads them there rather
+     * than storing a second copy that would freeze the day it was made.
      *
-     * [branch] null or `main` is the project's own row, because a project's folder *is* main's tree.
+     * [branch] null or `main` is the project's own scope, because a project's folder *is* main's tree.
+     * See [resolvedConnection] for the walk and the host rule.
      *
      * **A default that answers null**, so a store with no vault — every fake in the suite — keeps
      * working and cannot silently send an unscoped key.
@@ -679,17 +680,11 @@ class CredentialStore(context: Context) : Credentials {
         )
     }
 
-    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? {
-        val asked = hostOfAddress(host)
-        if (asked.isEmpty()) return null
-        val scope = scopeOfPlace(project, branch) ?: return null
-        val row = connection(scope, ConnKind.GIT) ?: return null
-        // **The row must be for the host being asked.** A branch whose credential is for another
-        // host has no credential for this one, and sending it would be the leak the host binding
-        // exists to stop — so the answer is null rather than the nearest row.
-        if (!hostCovers(hostOfAddress(row.address), asked)) return null
-        return row.takeIf { it.secret.isNotBlank() }
-    }
+    override fun gitConnectionFor(project: String?, branch: String?, host: String): Connection? =
+        // **The same resolver the expander uses**, so a push and a `{{secret:git}}` cannot describe
+        // two identities. A branch with no token of its own follows its project's, which is what
+        // makes "set it once" work; a branch with one overrides it.
+        resolvedConnection(project, branch, host) { connection(it, ConnKind.GIT) }
 
     override fun setConnection(scope: SecretScope, kind: ConnKind, connection: Connection) {
         val key = connKey(activeLogin, scope, kind) ?: return
@@ -963,7 +958,9 @@ class CredentialStore(context: Context) : Credentials {
             java.net.URLEncoder.encode(branch, "UTF-8") + "/"
 
     /**
-     * `conn_<login>_project_<p>/<kind>` and `conn_<login>_branch_<p>/<b>/<kind>` — and `conn_general_<kind>`.
+     * `conn_<login>_account_<kind>`, `conn_<login>_project_<p>/<kind>` and
+     * `conn_<login>_branch_<p>/<b>/<kind>`. **No general form**, because a credential is spent as
+     * somebody.
      *
      * **The same shape as the secret keys, and for the same reason**: every part is percent-encoded
      * and the separator is a slash, so a project called `a/b` is one part and no two rows can share a
@@ -981,9 +978,13 @@ class CredentialStore(context: Context) : Credentials {
         // chain asks for a row at each scope in turn and the account's records are what answers when
         // this scope has none.
         SecretScope.Account -> login?.let { "conn_${it}_account_" }
-        SecretScope.General -> "conn_general_"
-        // **No login, no row.** Every scope but general belongs to an identity, and a key written
-        // with the word "null" in it would be a row nobody could ever read again.
+        // **No general row, and it is a refusal rather than an omission.** A credential is spent *as*
+        // somebody, so it belongs to an identity; "every project, every account" is a token with no
+        // owner, usable by a project nobody chose it for. Secrets keep a general scope — a shared npm
+        // key is a real thing — and credentials do not.
+        SecretScope.General -> null
+        // **No login, no row.** Every scope a credential may live at belongs to an identity, and a key
+        // written with the word "null" in it would be a row nobody could ever read again.
         is SecretScope.Project -> login?.let {
             "conn_${it}_project_" + java.net.URLEncoder.encode(scope.name, "UTF-8") + "/"
         }

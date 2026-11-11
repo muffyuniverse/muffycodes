@@ -30,18 +30,17 @@ class ConnectionsTest {
         // A branch only exists inside a project, so a branch with no project is not a place a value
         // can live - it is skipped rather than invented.
         assertEquals(
-            "branch, project, account, general",
+            "branch, project, account — and no general, because a credential is spent as somebody",
             listOf(
                 SecretScope.Branch("acme", "feature"),
                 SecretScope.Project("acme"),
                 SecretScope.Account,
-                SecretScope.General,
             ),
             connectionScopes("acme", "feature"),
         )
         assertEquals(
             "no branch without a project",
-            listOf(SecretScope.Account, SecretScope.General),
+            listOf(SecretScope.Account),
             connectionScopes(null, null),
         )
     }
@@ -106,9 +105,11 @@ class ConnectionsTest {
             SecretScope.General,
             keyScope("secret_general_stripe", login),
         )
-        assertEquals(
-            "a general connection",
-            SecretScope.General,
+        // **A credential has no general scope.** It is spent *as* somebody, so "every project, every
+        // account" would be a token with no owner. A row a build left behind is nobody's, and the
+        // sweeps that delete a project or an account are right to treat it as nobody's.
+        assertNull(
+            "a general connection is not a scope any more",
             keyScope("conn_general_llm", login),
         )
         assertEquals(
@@ -182,9 +183,10 @@ class ConnectionsTest {
             SecretScope.Branch("my project", "a/b"),
             keyScope("secret_dev_branch_my%20project/a%2Fb/token", "dev"),
         )
-        assertTrue(
-            "and the general scope needs no login at all",
-            keyScope("conn_general_embedding", null) == SecretScope.General,
+        assertEquals(
+            "and a general *secret* still needs no login at all",
+            SecretScope.General,
+            keyScope("secret_general_embedding", null),
         )
     }
 
@@ -276,67 +278,76 @@ class ConnectionsTest {
     }
 
     @Test
-    fun `a name is answered by the worktree's own row, and only when it was granted`() {
-        // **A name is answered by the worktree's own row, exactly as a push is.** Scopes are separate
-        // records — a branch's is written when the branch is made — so a branch with a checkmarked
-        // token spends its own, and a branch whose token is *not* checkmarked spends nothing. There is
-        // no chain for a name any more: withdrawing a grant means "this agent may not spend", and
-        // reading the project's instead would be the app deciding it knew better.
-        val project = SecretScope.Project("acme")
-        val branch = SecretScope.Branch("acme", "feature")
-        val projectRow = project to ConnKind.GIT
-        val branchRow = branch to ConnKind.GIT
-        val grant = mapOf<Pair<SecretScope, ConnKind>, Connection>(
-            projectRow to Connection("gitlab.com", "glpat-project", nameable = true),
-            branchRow to Connection("gitlab.com", "glpat-branch", nameable = true),
+    fun `a branch with no token of its own follows its project's`() {
+        // **The fusion the operator chose**: separate records, and a scope that says nothing reads the
+        // one above it. A branch contributes only what a branch can meaningfully differ in — its token
+        // and its checkmark — so everything else is the project's, and one credential set once applies
+        // to every branch until a branch overrides it.
+        val project = SecretScope.Project("acme") to ConnKind.GIT
+        val feature = SecretScope.Branch("acme", "feature") to ConnKind.GIT
+        val rows = mapOf(
+            project to Connection("gitlab.com", "glpat-project", user = "oauth2", nameable = true),
+            feature to Connection("", "glpat-feature", nameable = true),
         )
 
-        assertEquals(
-            "the branch's",
-            "glpat-branch",
-            named("git", "gitlab.com", grant, branch = "feature")?.secret,
-        )
-        // **A branch with no grant is not answered by the project's row.** Scopes are separate records
-        // — a branch's is written when the branch is made — so falling back would spend a token a push
-        // does not use, and `{{secret:git}}` would then describe a different identity than the push.
-        // Withdrawing the grant means "this agent may not spend", not "use the wider one".
-        assertNull(
-            "a branch without the checkmark is not given the project's token",
-            named(
-                "git",
-                "gitlab.com",
-                grant + (branchRow to grant.getValue(branchRow).copy(nameable = false)),
-                branch = "feature",
-            ),
-        )
+        val followed = named("git", "gitlab.com", mapOf(project to rows.getValue(project)))
+        assertEquals("the project's token", "glpat-project", followed?.secret)
+        assertEquals("and its username, which a branch does not store", "oauth2", followed?.user)
+        assertEquals("and its host", "gitlab.com", followed?.address)
+        assertEquals("and its grant", true, followed?.nameable)
+
+        val own = named("git", "gitlab.com", rows)
+        assertEquals("a branch with a token of its own spends it", "glpat-feature", own?.secret)
+        assertEquals("but still presents the project's username", "oauth2", own?.user)
+        assertEquals("and is bound to the project's host", "gitlab.com", own?.address)
     }
 
     @Test
-    fun `a branch is answered by its own row and never by the project's`() {
-        // **The rule the whole per-branch credential exists for**: two branches of one project may be
-        // allowed different powers, and a branch that has no token of its own must not silently push
-        // as the project. `main` is the project's own tree, so it is the one branch that reads the
-        // project's row.
+    fun `a branch's own token is still bound to the host it was entered for`() {
+        // **The host rule survives the fusion.** A branch stores no address, so the address comes from
+        // the row above — which means a branch token is for the project's host and no other. Sending it
+        // elsewhere is the one mistake this app cannot undo.
         val rows = mapOf<Pair<SecretScope, ConnKind>, Connection>(
             (SecretScope.Project("acme") to ConnKind.GIT) to
                 Connection("gitlab.com", "glpat-project", nameable = true),
             (SecretScope.Branch("acme", "feature") to ConnKind.GIT) to
-                Connection("gitlab.com", "glpat-feature", nameable = true),
+                Connection("", "glpat-feature", nameable = true),
         )
 
         assertEquals(
-            "feature pushes as itself",
+            "for gitlab.com it is the branch's",
             "glpat-feature",
             named("git", "gitlab.com", rows, branch = "feature")?.secret,
         )
-        assertEquals(
-            "main is the project's tree",
-            "glpat-project",
-            named("git", "gitlab.com", rows, branch = AgentSession.MAIN)?.secret,
+        assertNull(
+            "for another host there is nothing, because the row above names gitlab.com",
+            named("git", "github.com", rows, branch = "feature"),
+        )
+    }
+
+    @Test
+    fun `a branch with no token anywhere is nobody's, and a branch that withdraws the grant spends nothing`() {
+        // Two different absences, and the app must not confuse them: **no token at all** is a project
+        // with no credential, and **a token whose checkmark is off** is a credential the person has
+        // decided the agent may not spend. Neither is answered by reaching further up.
+        val project = SecretScope.Project("acme") to ConnKind.GIT
+        val feature = SecretScope.Branch("acme", "feature") to ConnKind.GIT
+
+        assertNull(
+            "no credential anywhere",
+            named("git", "gitlab.com", emptyMap(), branch = "feature"),
         )
         assertNull(
-            "a third branch has no credential, and is not lent one",
-            named("git", "gitlab.com", rows, branch = "another"),
+            "a branch token with the checkmark off",
+            named(
+                "git",
+                "gitlab.com",
+                mapOf(
+                    project to Connection("gitlab.com", "glpat-project", nameable = true),
+                    feature to Connection("", "glpat-feature", nameable = false),
+                ),
+                branch = "feature",
+            ),
         )
     }
 }

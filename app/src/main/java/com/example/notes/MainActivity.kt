@@ -990,6 +990,10 @@ private fun Dialogs(
                 branch = pending.branch,
             ),
             where = whereOf(pending.project, pending.branch),
+            // **A branch's window is a token and a checkmark.** Its host, its remote and the name a
+            // token is presented as are the project's, so those fields would be values that cannot
+            // take effect — and the project's own window, reached from its row, is where they are set.
+            tokenOnly = pending.branch != AgentSession.MAIN,
             onDismiss = dismiss,
             onSave = { draft ->
                 Trace.tap("confirm git connection", whereOf(pending.project, pending.branch))

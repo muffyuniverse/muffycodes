@@ -47,9 +47,21 @@ fun GitConnectionDialog(
     onSave: (ConnectionDraft) -> Unit,
     onForget: () -> Unit,
     onCheck: (ConnectionDraft, (String) -> Unit) -> Unit,
+    /**
+     * **True when this window is a branch's**, which stores a token and a checkmark and nothing else.
+     *
+     * A branch is a worktree of the same repository: its remote, its host and the name a token is
+     * presented as are the project's, so offering those fields would invite a person to set values
+     * that cannot take effect. The fields are not disabled — they are not drawn.
+     */
+    tokenOnly: Boolean = false,
 ) {
     var address by remember { mutableStateOf(inForce.address) }
-    var secret by remember { mutableStateOf("") }
+    // **Prefilled, because a person changing only the token must be able to see which one is in
+    // force.** The operator's rule: *"by default the field is prefilled with the value from the higher
+    // scope."* A window opened on a branch with no token of its own shows the project's, and saving it
+    // unchanged writes nothing — the branch keeps following.
+    var secret by remember { mutableStateOf(inForce.secret) }
     var user by remember { mutableStateOf(inForce.user) }
     var nameable by remember { mutableStateOf(inForce.nameable) }
     var checking by remember { mutableStateOf(false) }
@@ -62,28 +74,32 @@ fun GitConnectionDialog(
         user = user,
         nameable = nameable,
     )
-    val problem = draft.problemSaid()
+    // **A blank token is a real answer on a branch**: it means "follow the project's", which is the
+    // state a branch is born in. Everywhere else a credential with no token is not a credential.
+    val problem = if (tokenOnly && secret.isBlank()) null else draft.problemSaid()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("The git credential — $where") },
         text = {
             Column {
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = {
-                        address = it
-                        checkSaid = null
-                    },
-                    label = { Text("Host") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next,
-                    ),
-                    supportingText = { Text("The host the token is for, like gitlab.com. The project's own address stays the remote's.") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (!tokenOnly) {
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = {
+                            address = it
+                            checkSaid = null
+                        },
+                        label = { Text("Host") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Uri,
+                            imeAction = ImeAction.Next,
+                        ),
+                        supportingText = { Text("The host the token is for, like gitlab.com. The project's own address stays the remote's.") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 OutlinedTextField(
                     value = secret,
                     onValueChange = {
@@ -97,18 +113,28 @@ fun GitConnectionDialog(
                         keyboardType = KeyboardType.Password,
                         imeAction = ImeAction.Next,
                     ),
-                    supportingText = { Text("Never shown again, never written into a file, and never sent anywhere but this host.") },
+                    supportingText = {
+                        Text(
+                            if (tokenOnly) {
+                                "This branch's own token. Clear it and the branch follows the project's."
+                            } else {
+                                "Never written into a file, and never sent anywhere but this host."
+                            },
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = user,
-                    onValueChange = { user = it },
-                    label = { Text("Name commits are made as") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    supportingText = { Text("What the host wants beside the token: oauth2 on GitLab, blank on GitHub.") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (!tokenOnly) {
+                    OutlinedTextField(
+                        value = user,
+                        onValueChange = { user = it },
+                        label = { Text("Name commits are made as") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        supportingText = { Text("What the host wants beside the token: oauth2 on GitLab, blank on GitHub.") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 // **The grant, per kind.** A person may let the agent ask a model server what models
                 // exist without letting it push as them, which is why this checkmark is separate from
                 // the model window's — and why neither defaults to on.

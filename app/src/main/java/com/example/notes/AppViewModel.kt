@@ -1119,21 +1119,26 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * **The credential in force for a scope** — its own row, or the nearest wider one, for *display*.
+     * **The credential in force for a scope** — what a window opens showing, and what a push sends,
+     * answered by the same rule.
      *
-     * **This is a prefill walk and not a read rule.** What a push sends is the branch's own row and
-     * nothing else ([Credentials.gitConnectionFor]); this exists so a window opens on the values a
-     * person is about to copy, and so "same as the project" is one press rather than a paste.
-     *
-     * Widest last: branch → project → account → general. `main` is the project, so a branch made from
-     * `main` is filled from the project's row, which is exactly the parent it was cut from.
+     * **It is not a separate walk any more.** A window that showed one thing and a push that sent
+     * another was a real defect: the window walked upward and the push did not, so a branch was told
+     * it had a credential and then had none. [Credentials.gitConnectionFor] answers both questions,
+     * which is why this delegates rather than reading rows itself.
      */
     private fun inForce(scope: SecretScope, kind: ConnKind): com.example.notes.Connection? {
         val (project, branch) = placeOf(scope)
-        for (one in connectionScopes(project, branch)) {
-            credentials.connection(one, kind)?.takeIf { it.secret.isNotBlank() }?.let { return it }
+        return if (kind == ConnKind.GIT) {
+            // **The host the question is about**, which for a project is its remote's and for an
+            // account is the host it signed in to. A blank one means there is no destination, and the
+            // resolver answers null rather than the nearest row.
+            val at = project?.let { host(it, branch.orEmpty()) }
+                ?: activeLogin?.let { accounts.account(it)?.host }.orEmpty()
+            credentials.gitConnectionFor(project, branch, at)
+        } else {
+            credentials.connection(scope, kind)
         }
-        return null
     }
 
     /**
@@ -1170,19 +1175,36 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        // **Only what changed is written.** The window opened on the values in force, so saving it
-        // unchanged must write nothing — otherwise every field it showed would be pinned at this scope
-        // and stop following the parent. See [ConnectionDraft.changesAgainst].
         val (project, branch) = placeOf(scope)
         val inForce = connectionShown(scope, draft.kind, project, branch)
-        val changed = draft.changesAgainst(inForce)
-        // **An empty row removes the row**, which is what "inherit" means; the explicit act of removal
-        // is still "Forget", and the two arrive at the same place on purpose.
-        credentials.setConnection(scope, draft.kind, changed.connection() ?: Connection())
+        // **A branch stores a token and nothing else**, because nothing else about it can differ: the
+        // remote, the host and the token's username are the project's. So a branch window that changed
+        // neither the token nor the checkmark is a branch that follows, and writing a row for it would
+        // freeze the project's token onto one branch for no reason.
+        val stored = if (scope is SecretScope.Branch) {
+            if (draft.secret == inForce.secret && draft.nameable == inForce.nameable) {
+                Connection()
+            } else {
+                Connection(
+                    // No address: a branch's token is for whatever host the row above it names, and
+                    // `resolvedConnection` is what reads it. Storing one would be a second copy of the
+                    // project's host, which is the drift this whole shape avoids.
+                    address = "",
+                    secret = draft.secret,
+                    nameable = draft.nameable,
+                )
+            }
+        } else {
+            // **Only what changed is written** for a scope that *is* a whole credential, so saving a
+            // window unchanged leaves it following its parent rather than pinning today's values.
+            draft.changesAgainst(inForce).connection() ?: Connection()
+        }
+        credentials.setConnection(scope, draft.kind, stored)
         Trace.note("connection-saved", "${draft.kind.name.lowercase()} at ${scopeLabel(scope)}")
         connectionSaved++
         onDone(true)
     }
+
 
     /** Forgets a scope's connection — **both halves**, because a model with no address is meaningless. */
     fun forgetConnection(scope: SecretScope, kind: ConnKind) {
@@ -5506,15 +5528,25 @@ class AppViewModel @JvmOverloads constructor(
                     project = project,
                     branch = from,
                 )
-                // **Written as given, not compared against the branch's own row.** A new branch has
-                // no row, and comparing against the *inherited* value would find them equal and write
-                // nothing — which is the one outcome that must not happen here: the branch would then
-                // have no credential of its own and no way to push. A window that typed nothing still
-                // writes nothing, because `connection()` is null for a blank address.
+                // **A branch that changed nothing writes nothing, and follows its parent.** That is
+                // the fusion the operator chose: separate records, and a scope that says nothing
+                // reads the one above it. A branch that typed its own token stores the token alone —
+                // its host and username are the project's, so a copy of them would be a second record
+                // of one fact, freezing the day the branch was made.
+                val above = connectionShown(
+                    scope = scopeOfPlace(project, made),
+                    kind = ConnKind.GIT,
+                    project = project,
+                    branch = made,
+                )
                 credentials.setConnection(
                     scopeOfPlace(project, made),
                     ConnKind.GIT,
-                    row.connection() ?: Connection(),
+                    if (row.secret == above.secret && row.nameable == above.nameable) {
+                        Connection()
+                    } else {
+                        Connection(address = "", secret = row.secret, nameable = row.nameable)
+                    },
                 )
                 when {
                     kept == null -> "Made $made from $from."

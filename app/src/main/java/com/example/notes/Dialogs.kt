@@ -146,9 +146,7 @@ fun NewBranchDialog(
     onConfirm: (name: String, from: String, credential: ConnectionDraft) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf(credential.address) }
     var secret by remember { mutableStateOf(credential.secret) }
-    var user by remember { mutableStateOf(credential.user) }
     var nameable by remember { mutableStateOf(credential.nameable) }
     // **`main` unless the list says otherwise**, per the operator. The list is `main` first, so this is
     // also the first chip — a window whose default is the first thing on it needs no explaining.
@@ -195,25 +193,15 @@ fun NewBranchDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-                // **The branch's own credential, set by the act that makes the branch.** Nothing else
-                // in the app creates a branch, so nothing else could set one — which is what makes
-                // "every branch has its own row" true rather than hoped for.
+                // **A branch's credential is a token and a checkmark, because nothing else about a
+                // branch can differ.** Its remote, its host and the name a token is presented as are
+                // the project's; the only thing a branch can meaningfully say is *which token*. So
+                // this is the whole of it, and an untouched window writes nothing and follows the
+                // parent — which is what makes "set it once" work.
                 Text(
-                    "Its git credential",
+                    "Its git token",
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-                )
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = { address = it },
-                    label = { Text("Host") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = ImeAction.Next,
-                    ),
-                    supportingText = { Text("Filled in from $from. Change it for a host of its own.") },
-                    modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = secret,
@@ -223,26 +211,15 @@ fun NewBranchDialog(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Next,
+                        imeAction = ImeAction.Done,
                     ),
                     supportingText = {
                         Text(
-                            if (secret.isBlank()) {
-                                "Filled in from $from, so this branch can push straight away."
-                            } else {
-                                "Never shown again, and sent only to this host."
-                            },
+                            "Filled in from $from. Leave it as it is and this branch follows $from's " +
+                                "token — change that one and this one changes too. Type your own to " +
+                                "give this branch a token of its own.",
                         )
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = user,
-                    onValueChange = { user = it },
-                    label = { Text("Name commits are made as") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    supportingText = { Text("What the host wants beside the token: oauth2 on GitLab, blank on GitHub.") },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -263,9 +240,9 @@ fun NewBranchDialog(
                         from,
                         ConnectionDraft(
                             kind = ConnKind.GIT,
-                            address = address,
+                            address = credential.address,
                             secret = secret,
-                            user = user,
+                            user = credential.user,
                             nameable = nameable,
                         ),
                     )
