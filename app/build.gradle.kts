@@ -378,7 +378,7 @@ dependencies {
     // no device, no graphics processor, and no picture to look at. It is what
     // makes testing the user interface take seconds instead of minutes.
     testImplementation("org.robolectric:robolectric:4.17")
-    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.78.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.77.0")
     testImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation(composeBom)
